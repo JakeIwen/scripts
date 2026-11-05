@@ -6,8 +6,10 @@ On-demand v2 adds a native append-only receiver and a Tailscale-only `rest:` tar
 see [NAS setup and remote operation](OFFSITE_NAS.md). No automatic schedule,
 retention/prune, or automatic retry is installed. The actual loaner is the **5 TB
 FORT-MPLS-5TB**, priority 10; the later 14 TB drive uses priority 20. Capacity figures
-are nominal, not a fit guarantee. Do not deploy while a local seed is running.
-The preparation examples below are for a new drive, not the already-seeded loaner.
+are nominal, not a fit guarantee. A running seed executes from its own frozen code
+snapshot, so the backup cohort may be deployed forward during it; see
+[deploying during a run](#deploying-during-a-run) for the limits. The preparation
+examples below are for a new drive, not the already-seeded loaner.
 
 ## Install
 
@@ -72,7 +74,8 @@ Before preparing a new label, deploy its explicit entries in disk policy
 labels, and `backup_locks.py`'s disk registry. Regenerate the shell registry and
 tmpfiles configuration with `python3 -m pi.generate_backup_lock_registry`, then
 use the owning deployment paths. These are safety prerequisites, not auto-discovery:
-without them the label is refused or the ignition drain cannot claim its disk.
+without them the label is refused or the ignition drain cannot claim its disk
+(`test_backup_lock_registry.py` fails while the disk policy and lock registry disagree).
 `FORT-MPLS-5TB` already has these entries; a future 14 TB label does not yet.
 
 It creates one GPT Linux partition and ext4 with zero reserved percentage,
@@ -112,11 +115,12 @@ and Borg passphrase independently too; restic encryption does not replace them.
 
 ## Run detached, with journal logging
 
-A full seed may take 10–20 hours. The exclusive legacy backup lock excludes all
-other backup/clone/cloud/maintenance jobs for the entire run. There is no new
-lock name or automatic priority preemption. If busy, retry after the current job
-finishes; do not delete lock files. Ignition-on refuses new work and interrupts
-a running job through the existing disk-abort path.
+A full seed may take days (the 14 TB drive about a week). The run holds only the
+narrow locks of the resources it touches ([Locks](#locks)): nightly Borg, the EXFAT
+snapshot and hotspare clones keep running, while iCloud uploads wait. A busy lock
+refuses the command with its cause; retry after that job finishes and never delete
+lock files. Ignition-on refuses new work and interrupts a running job through the
+existing disk-abort path, which also unmounts and spins down the offsite drive.
 
 For Time Machine, on the Mac first disable new scheduled backups:
 
@@ -186,9 +190,10 @@ fields from `remote-check.json` and `remote-restore-test.json`.
 The root-private `/var/lib/vanpi-offsite/history.json` retains each label/source's
 `latest` terminal outcome and `last_ok` (null until success). Entries include the
 source outcome, `finished` epoch and `target_kind` (`local` or `remote`), preserving
-previous sources across separate units and previous drive labels. Updates use the
-existing exclusive job lock and durable atomic writer. An unreadable or malformed
-history is left untouched; status records `history_error`, and backups continue.
+previous sources across separate units and previous drive labels. Updates happen
+under the run's exclusive `job-offsite` lock with the durable atomic writer. An
+unreadable or malformed history is left untouched; status records `history_error`,
+and backups continue.
 The dashboard command reports that read error rather than pretending history is empty.
 
 `rates <source>` accepts `exfat512`, `movingparts`, `borg` or `time-machine` and
@@ -207,7 +212,7 @@ never stop a backup. A killed process cannot publish a terminal history entry.
 | `time-machine` | `/mnt/mbp2tbkup/m4mac0.sparsebundle` | Compression off; owned nonempty Samba drain blocks new connections, zero handles required before closing idle trees; gate/handles/mount monitored; source inventory rechecked at end; transient `lock` excluded. |
 | `exfat512` | `/mnt/EXFAT512` | Excludes `van-tv/` like the existing EXFAT snapshot, plus `System Volume Information/` and all `vanpi-network/`. |
 | `movingparts` | `/mnt/movingparts/Jake`, `music`, `guitar_tab_archive` | One snapshot containing those three directories, not the movie/torrent tree. |
-| `borg` | `BORG_REPO` from `backup_conf.sh` (currently `/mnt/bigboi/borg/vanpi-encrypted`) | Global maintenance lock keeps cooperating Borg jobs out; mounts bigboi through the exact-label helper and releases a mount it created. |
+| `borg` | `BORG_REPO` from `backup_conf.sh` (currently `/mnt/bigboi/borg/vanpi-encrypted`) | Holds `data-borg-repo` exclusively, so Borg jobs never write it mid-copy; a busy repository moves this source to the end of the run ([Locks](#locks)). Mounts bigboi through the exact-label helper and releases a mount it created. |
 
 **Diagnostic recorder history under `vanpi-network/` is deliberately omitted in
 v1**: it includes a live SQLite database. No live database/WAL copy and no online
@@ -225,13 +230,139 @@ without completion evidence are **not recovery points**. No automatic retention 
 No restic cache fills the Pi rootfs; in-memory index cost still depends on repo size.
 
 All source mounts are verified against the exact expected label/source, including
-nested source paths. A mount created by this run is released through the existing
-backup disk helper. Pre-existing source mounts stay mounted. A target mounted by
-the backup run is unmounted at exit; on SIGTERM even a pre-existing verified offsite
-target is unmounted. Offsite drives are manually mounted, like bigboi, and
+nested source paths. A source mount created by this run is released at the end of
+that source's phase (if the run is stopping, at its end instead), and only when no
+other job holds the disk. Pre-existing source
+mounts stay mounted. A target mounted by the backup run is released at exit; on
+SIGTERM even a pre-existing verified offsite target is released. Offsite drives are manually mounted, like bigboi, and
 explicitly included in HDD ignition unmount/spindown policy and the disk lock
 registry. `FORT-MPLS-5TB` is already configured this way. Unplug only after a
 verified ordinary unmount; never rely on the absence of an active backup alone.
+
+## Locks
+
+The run conflicts only with jobs that touch the same resources. The registry,
+conflict matrix and drain behavior are in [backup concurrency](CONCURRENCY.md).
+
+| Command | Whole command | Per source phase |
+| --- | --- | --- |
+| `backup` (local target) | `job-offsite` exclusive (fd 10, PID record); iCloud slot; target disk shared | source disk shared; `data-borg-repo` exclusive for `borg` |
+| `backup --remote` | `job-offsite`; iCloud slot | same as local |
+| `check` (local) | `job-offsite`; iCloud slot; target disk shared | none |
+| `check --remote`, `receipts` | `job-offsite`; iCloud slot | none |
+| `restore-test` | `job-offsite`; iCloud slot; the disk under `--target`, shared | none |
+| `prepare-disk` | the exclusive legacy lock (also `job-offsite`), as before | none |
+
+- `offsite_backup.sh` takes `job-offsite`, then the legacy lock shared only while it
+  takes the [code snapshot](#code-snapshot): a restore, hotspare initialization,
+  `prepare-disk` or deployment fence refuses a new run, but none is blocked by a
+  running one. The worker then takes the slot and disks itself, always in that
+  order, non-blocking except the Borg wait, on existing registry inodes only.
+- Disks are locked before mounting, and the ignition flag is rechecked after the
+  lock and before the mount, as Borg and EXFAT do. An exclusively held disk lock
+  (a drain or maintenance) fails that source, or the whole run for the target.
+- Borg: if `data-borg-repo` is busy, the `borg` source moves to the end of the
+  run, then waits up to 3 hours, checking TERM and ignition every second. Still
+  busy, only `borg` fails, with that cause, and the run result is failed. That
+  wait holds no `disk-bigboi` lock, only the job, target and slot locks, so a
+  finishing nightly Borg can still unmount bigboi and a bigboi drain during the
+  wait leaves the run alone. With the repository held, the run takes bigboi
+  shared without waiting (a drain holding it fails `borg` with that cause),
+  rechecks ignition and mounts it if needed. An unmount of bigboi during the
+  active `borg` phase still stops the run, as it stops Borg itself.
+- Children inherit every held descriptor, so an orphaned restic still holds the
+  disk and the emergency drain finds it. Release is by close, never unlock. The
+  mount helper's `release` is the exception: it inherits only `job-offsite`, so a
+  stalled unmount holds no other disk.
+- Ending a phase, the worker closes its disk descriptor, then the mount helper
+  unmounts what this run mounted only if it can take the disk lock exclusively.
+  Helper exit 3 (flock reported another holder: left mounted) and exit 4 (already
+  unmounted, e.g. by a drain) are recorded in the status's `cleanup_notes`, not
+  errors; any other failure, a flock error included, is a `cleanup_errors` entry
+  that fails the run.
+- A stopping run (TERM, ignition) holds no disk, data or slot lock while
+  anything is released: a phase that ends with a stop leaves its release to the
+  end of the run, and a stop that arrives while a release runs closes the run's
+  remaining descriptors at once. At the end, every disk, data and slot
+  descriptor closes first; only then do the deferred source releases, the target
+  release and the ntfy run. The ordinary drain waits only 60 s for the target, an
+  unmount can stall, and ntfy can block without an uplink. `job-offsite` (fd 10)
+  stays held until exit.
+- A stop is final once seen, even an ignition flag that clears again: the run's
+  disk, data and slot descriptors may already be closed, so it starts no further
+  source. A stop
+  seen only during the last source's release still ends the run `interrupted`
+  (exit 143), and the target is released as for any stop.
+- `restore-test` locks the disk whose mounted filesystem (`findmnt -T`) holds
+  `--target`; any target that is neither on such a disk nor on the root
+  filesystem is refused, and so is a root-filesystem target inside `/mnt`: it
+  sits in an unmounted disk's mount point, which that disk would cover (unlocked)
+  once mounted.
+- Ignition with `umount_disks.sh --spindown` drains every attached HDD, the offsite
+  drive included, so it stops the run, then unmounts and spins the drive down. A
+  remote run reading only the `EXFAT512` flash drive is not drained by spindown;
+  its own guard (every 5 seconds) stops it on ignition.
+
+Policy constants in `offsite_config.py`, each a one-line change:
+
+- `HOLD_CLOUD_SLOT = True`: every command but `prepare-disk` keeps iCloud uploads
+  out, as the old exclusive lock did. Releasing it for local seeds would let
+  iCloud run during a week-long seed; that scheduling choice is deferred.
+- `EXCLUDED_LOCAL_JOBS = ()`: the out-of-memory fallback. Setting it to
+  `('borg', 'exfat')` makes a run also hold those job locks, so nightly Borg and
+  the EXFAT snapshot cannot overlap it (they find their job lock busy and exit
+  as for an already-running job), and a run refuses to start while either runs.
+- `BORG_WAIT_SECONDS`: the Borg-phase wait budget (3 hours).
+
+## Code snapshot
+
+Each mutating run except `prepare-disk` executes from a private copy of its own
+code, so installers can publish new code during a days-long seed. While holding
+`job-offsite` and the legacy lock shared, the launcher runs `offsite_snapshot.py
+create`, which:
+
+1. deletes every directory under `/var/lib/vanpi-offsite/code/` (the exclusive
+   `job-offsite` proves no other run is live), walking by descriptor, never
+   following a symlink, never crossing a mount or filesystem;
+2. copies `FROZEN_IMPLEMENTATION` from `offsite_config.py` (every module and
+   helper the run imports, runs or sources) into `code/<run id>/`, laid out like
+   `/home/pi/scripts/`, root-owned, directories 0700, files 0700 or 0600;
+3. copies `/usr/local/bin/restic` to `bin/restic` after matching the binary
+   SHA-256 pinned in `install_restic.sh` (the pin's one declaration), since each
+   source starts a new restic;
+4. re-hashes every live source and refuses if any changed during the copy;
+5. writes `manifest.json` (file and restic hashes, run id, time; the deployed
+   revision is null, since the cohort records none yet) and prints the root.
+
+The launcher then closes the legacy lock and execs the snapshot's
+`offsite_backup.py`; the worker refuses to run from anywhere else. The run deletes
+its snapshot as its last step; a snapshot left by a killed run goes at the next
+start. `test_offsite_snapshot_closure.py` rescans the sources and fails when the
+declared closure misses a file or frozen code names a live scripts path. Live
+data (secrets, state, hooks, `/etc`) and live boundaries (the metering `admit`
+CLI, which imports the current package release by design) are declared
+separately and never copied.
+
+`status`, `dashboard` and `rates` run live code without locks. They must read
+what an older running snapshot writes, and a rollback's older readers what a newer
+one writes. So `status.json`, `history.json`, `rates/*.bin`, `repos.json` and the
+evidence files are additive-only: new fields are optional and readers ignore
+unknown ones. `test_offsite_state_compat.py` checks both directions against v2
+(`5ed7311`).
+
+### Deploying during a run
+
+- Broad sync (`pi/sync_scripts.sh`) stays unfenced. The snapshot narrows its
+  window to the seconds of the copy, and the re-hash catches most overlaps, but a
+  sync spanning the copy can still leave a mixed snapshot, as it can for any job
+  starting mid-sync.
+- The installers' registry check protects forward deploys only: a targeted
+  installer runs its own staged code. Never deploy or roll back the backup cohort
+  to a revision without granular offsite locks while `job-offsite` is held; stop
+  the run first.
+- With pre-granular drain code installed, the emergency ignition path still frees
+  the drive (it kills holders of the disk lock file), but the normal path refuses
+  to unmount it.
 
 ## Check and hand over
 
@@ -246,8 +377,8 @@ sudo /home/pi/scripts/backup/offsite_backup.sh check \
 
 `1/10` through `10/10` cover every pack once across ten checks; `5%` is a random
 sample, not full coverage. A long check can use the same transient-unit prefix as
-backup, replacing its subcommand and options. Check also takes the exclusive lock,
-verifies registration/repository ID and uses no cache. It never initializes a repo.
+backup, replacing its subcommand and options. Check holds `job-offsite`, the target
+disk and the iCloud slot, verifies registration/repository ID and uses no cache. It never initializes a repo.
 Perform a small restore test to a separate destination before relying on the drive.
 
 Before unplugging, verify the mount and unmount it if still mounted:

@@ -81,7 +81,7 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(self.check().returncode, 143)
 
     def test_running_guard_refuses_config_or_registration_loss(self):
-        repo = RemoteRepository(self.f.cfg, Commands(self.f.cfg), self.f.label)
+        repo = RemoteRepository(self.f.cfg, Commands(self.f.cfg, self.f.locks()), self.f.label)
         with patch.dict(os.environ, self.f.env):
             repo.network_guard()
             original = self.f.remote_config.read_bytes()

@@ -77,6 +77,11 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(queued['resume_pending'])
         self.assertEqual(queued['message'], 'Waiting for local backup')
 
+    def test_queued_resume_names_an_offsite_run_holding_the_upload_slot(self):
+        with mock.patch.object(status.backup_locks, 'active_jobs', return_value={'offsite': 4321}):
+            message = status.queued_backup_message(lock_file=Path('/nonexistent/legacy.lock'))
+        self.assertEqual(message, 'Resume queued: waiting for offsite drive backup to finish. Checks every minute.')
+
     def test_indefinite_pause_has_no_retry_deadline_or_stall_warning(self):
         result = status.apply_manual_control({**self.build(), 'stalled': True}, 'indefinite', now=10**12)
         self.assertEqual(result['phase'], 'paused')

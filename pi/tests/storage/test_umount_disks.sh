@@ -230,6 +230,7 @@ if [[ -x /usr/bin/flock && -x /usr/sbin/hd-idle && -d /proc/self/fd ]]; then
   trap fence_cleanup EXIT
 
   export VANPI_BACKUP_LOCK_DIR="$lock_root/registry"
+  export VANPI_BACKUP_DEPLOY_STATE_DIR="$lock_root/deploy-state"
   export VANPI_BACKUP_JOB_LOCK="$lock_root/legacy.lock"
   export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un)
   export VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)

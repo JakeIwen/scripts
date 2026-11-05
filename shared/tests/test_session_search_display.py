@@ -160,11 +160,13 @@ class SessionSearchDisplayTests(unittest.TestCase):
             chunks = []
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline:
-                ready, _, _ = select.select([master], [], [], 0.1)
+                ready, _, _ = select.select([master], [], [], 0.3)
                 if ready:
                     chunks.append(os.read(master, 8192))
-                    if b"resume wide" in b"".join(chunks):
-                        break
+                elif b"resume wide" in b"".join(chunks):
+                    # A Linux pty can hand one frame over in pieces, so stop
+                    # only once output after the resume line has gone quiet.
+                    break
             preview = b"".join(chunks).decode(errors="replace").replace("\r", "")
             frame = preview.rsplit("\x1b[J", 1)[-1]
             self.assertNotIn("\x07", frame)

@@ -134,10 +134,11 @@ class PolicyctlTests(unittest.TestCase):
             f"  printf '%s\\n' {shlex.quote('24 1 179:2 / / rw,relatime - ext4 /dev/mmcblk0p2 rw')} > {shlex.quote(str(self.mountinfo))}\n",
             encoding="utf-8",
         )
-        request_command.chmod(0o700)
         environment = {
             **self.environment,
-            "VANPI_POLICY_REQUEST_COMMAND": str(request_command),
+            # Through bash, not as a fresh executable: macOS's first-run check of a
+            # new one (seconds under suite load) would count against the 2 s timeout.
+            "VANPI_POLICY_REQUEST_COMMAND": f"/bin/bash {shlex.quote(str(request_command))}",
             "VANPI_POLICY_RECONCILE_TIMEOUT_SECONDS": "2",
         }
 

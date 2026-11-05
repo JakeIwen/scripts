@@ -1,75 +1,15 @@
 """Public deployment contracts against fixture Git repos and real Linux files."""
-import hashlib
+import fcntl
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
-HELPER = Path(__file__).resolve().parents[2] / 'backup_local_deploy.sh'
-POLICIES_WITH_HASHES = {'revision', 'conf', 'cloud', 'status'}
-
-
-def digest(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-class DeploymentTestCase(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.env = dict(os.environ)
-        for key in tuple(self.env):
-            if key.startswith(('VANPI_BACKUP_', 'VANPI_TM_PREVIOUS_', 'LOCAL_BACKUP_')) or key in {
-                    'BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS'}:
-                self.env.pop(key, None)
-
-
-    def shell(self, code, *args, timeout=30):
-        return subprocess.run(['/bin/bash', '-c', 'set -euo pipefail; source "$1"; shift; ' + code,
-                               'test', str(HELPER), *map(str, args)], env=self.env,
-                              capture_output=True, text=True, timeout=timeout)
-
-
-    def plan(self, profile='tm'):
-        result = self.shell('local_backup_plan "$1"', profile)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return [row.split('|') for row in result.stdout.splitlines()]
-
-
-    def fixture_git(self, missing=()):
-        repo = self.root / 'repo'
-        repo.mkdir()
-        sources = {row[0] for profile in ('pi', 'tm') for row in self.plan(profile)}
-        for name in sources - set(missing):
-            path = repo / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f'first {name}\n')
-        subprocess.run(['git', 'init', '-q', str(repo)], check=True)
-        self.git_commit(repo, 'first')
-        first = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
-        for name in sources:
-            path = repo / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f'second {name}\n')
-        self.git_commit(repo, 'second')
-        return repo, first
-
-
-    def git_commit(self, repo, message):
-        subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
-        subprocess.run(['git', '-C', str(repo), '-c', 'core.hooksPath=/dev/null',
-                        '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
-                        'commit', '-qm', message], check=True)
-
-
-    def predecessors(self, repo, profile='tm'):
-        result = self.shell('local_backup_previous_hashes "$1" "$2"', repo, profile)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return dict(item.split(':') for item in result.stdout.rstrip(',').split(','))
+from pi.tests.backup.deploy_fixtures import (DeploymentFixture, DeploymentTestCase, HELPER,
+                                             POLICIES_WITH_HASHES, REGISTRY_SOURCE, digest)
 
 
 class DeploymentPlanTests(DeploymentTestCase):
@@ -90,10 +30,19 @@ class DeploymentPlanTests(DeploymentTestCase):
                     ('offsite_samba.py', 'offsite_run.py'),
                     ('offsite_prepare.py', 'offsite_backup.py'),
                     ('offsite_run.py', 'offsite_backup.py'),
+                    ('offsite_repository.py', 'offsite_snapshot.py'),
+                    ('offsite_snapshot.py', 'offsite_locks.py'),
+                    ('offsite_locks.py', 'offsite_backup.py'),
+                    ('offsite_snapshot.py', 'offsite_backup.sh'),
                     ('offsite_mounts.sh', 'offsite_backup.sh'),
                     ('offsite_backup.py', 'offsite_backup.sh')]:
                 names = [Path(name).name for name in sources]
                 self.assertLess(names.index(dependency), names.index(consumer))
+            # Keep runtime dependencies early; initial-rollout safety is proved
+            # through the independent bootstrap, not this structural assertion.
+            names = [Path(name).name for name in sources]
+            self.assertEqual(names[:3], ['backup_deploy_state.sh', 'backup_deploy_trigger.sh', 'backup_window.sh'])
+            self.assertIn('backup_deploy_recovery.sh', names)
             for source in sources:
                 self.assertTrue((HELPER.parent.parent / source).is_file(), source)
             for name in ('mount_disks.sh', 'umount_disks.sh', 'internet_switches.sh'):
@@ -142,134 +91,6 @@ class DeploymentPlanTests(DeploymentTestCase):
 
 
 
-# The shim delegates actual filesystem commands. Failures can occur before or
-# after rename, or on restoration; a fresh fd proves cleanup still owns the fence.
-SUDO_SHIM = r'''#!/bin/bash
-set -eu
-command=$1
-shift
-last=${!#}
-if [[ "$command" == /usr/bin/mv ]]; then
-  source_path=${@: -2:1}
-  if [[ "$source_path" == *.deploy.* || "$source_path" == *.rollback.* ]]; then
-    exec 7<"$VANPI_BACKUP_JOB_LOCK"
-    if /usr/bin/flock -n 7; then echo 'mutation without fence' >&2; exit 97; fi
-    exec 7<&-
-  fi
-  if [[ "$source_path" == *.deploy.* ]]; then
-    count=0; [[ ! -e "$TEST_ROOT/count" ]] || read -r count < "$TEST_ROOT/count"
-    count=$((count+1)); echo "$count" > "$TEST_ROOT/count"
-    if (( count == 1 )); then
-      [[ $(wc -l < "$TEST_ROOT/stage/previous/manifest") == "$TEST_EXPECT_RECORDS" ]] || exit 95
-      while IFS='|' read -r src dest old old_owner old_mode new owner mode action temp; do
-        [[ "$action" == keep || -f "$temp" ]] || exit 96
-      done < "$TEST_ROOT/stage/previous/manifest"
-    fi
-    if [[ "$count" == "${TEST_FAIL_STEP:-0}" && "${TEST_FAIL_WHEN:-after}" == before ]]; then
-      : > "$TEST_ROOT/failed"; exit 41
-    fi
-    "$command" "$@"
-    echo "publish:$last" >> "$TEST_ROOT/events"
-    if [[ "$count" == "${TEST_FAIL_STEP:-0}" ]]; then
-      : > "$TEST_ROOT/failed"
-      if [[ "${TEST_FAIL_WHEN:-after}" == signal ]]; then kill -TERM "$PPID"; fi
-      exit 42
-    fi
-    exit 0
-  elif [[ "$source_path" == *.rollback.* ]]; then
-    echo "rollback:$last" >> "$TEST_ROOT/events"
-    if [[ -n "${TEST_ROLLBACK_SIGNAL:-}" && ! -e "$TEST_ROOT/cleanup-signal" ]]; then
-      : > "$TEST_ROOT/cleanup-signal"
-      kill -"$TEST_ROLLBACK_SIGNAL" "$PPID"
-      /bin/sleep 0.05
-    fi
-    [[ "${TEST_FAIL_ROLLBACK:-0}" != 1 ]] || exit 43
-  fi
-fi
-exec "$command" "$@"
-'''
-
-SYSTEMCTL_SHIM = r'''#!/bin/bash
-set -eu
-if [[ "$1" == show ]]; then
-  case "$2" in *.timer) echo active ;; *) echo inactive ;; esac
-  exit 0
-fi
-echo "systemctl:$*" >> "$TEST_ROOT/events"
-if [[ "$1" == daemon-reload && "${TEST_FAIL_RELOAD:-0}" == 1 && -e "$TEST_ROOT/failed" ]]; then exit 44; fi
-exit 0
-'''
-
-
-class DeploymentFixture(DeploymentTestCase):
-    def fixture(self, profile='tm'):
-        root = Path(tempfile.mkdtemp(dir=self.root))
-        stage, live = root / 'stage', root / 'live'
-        stage.mkdir(); live.mkdir()
-        records = self.plan(profile)
-        previous, snapshots = {}, {}
-        for source, destination, policy, _owner, mode, _first in records:
-            staged, deployed = stage / source, live / destination.lstrip('/')
-            staged.parent.mkdir(parents=True, exist_ok=True)
-            deployed.parent.mkdir(parents=True, exist_ok=True)
-            old, new = f'old {source}\n'.encode(), f'new {source}\n'.encode()
-            if policy in ('preserve', 'defaults'):
-                old, new = b'{"setting": 1}\n', b'{"setting": 0, "new_default": 2}\n'
-            staged.write_bytes(new); deployed.write_bytes(old)
-            deployed.chmod(0o770 if mode == 'preserve' else int(mode, 8))
-            previous[source] = digest(old) if policy in POLICIES_WITH_HASHES else 'managed'
-            snapshots[destination] = (old, deployed.stat().st_mode & 0o7777)
-        owner = subprocess.check_output(['/usr/bin/id', '-un'], text=True).strip()
-        group = subprocess.check_output(['/usr/bin/id', '-gn'], text=True).strip()
-        for name, content in [('sudo', SUDO_SHIM), ('systemctl', SYSTEMCTL_SHIM)]:
-            path = root / name
-            path.write_text(content); path.chmod(0o700)
-        lock = root / 'legacy'
-        lock.touch(); lock.chmod(0o660)
-        self.env.update(TEST_ROOT=str(root), TEST_EXPECT_RECORDS=str(len(records)), LOCAL_BACKUP_ROOT=str(live),
-                        LOCAL_BACKUP_SUDO=str(root / 'sudo'), LOCAL_BACKUP_SYSTEMCTL=str(root / 'systemctl'),
-                        LOCAL_BACKUP_PI_OWNER=f'{owner}:{group}', LOCAL_BACKUP_ROOT_OWNER=f'{owner}:{group}',
-                        VANPI_BACKUP_JOB_LOCK=str(lock), VANPI_BACKUP_JOB_LOCK_OWNER=owner,
-                        VANPI_BACKUP_JOB_LOCK_GROUP=group, VANPI_BACKUP_JOB_LOCK_MODE='660')
-        return root, stage, live, records, previous, snapshots
-
-
-    @staticmethod
-    def hashes(previous):
-        return ','.join(f'{name}:{value}' for name, value in previous.items())
-
-
-    def preflight(self, fixture):
-        _root, stage, _live, _records, previous, _snapshots = fixture
-        shutil.rmtree(stage / 'transaction', ignore_errors=True)
-        return self.shell('local_backup_preflight "$1" tm "$2"', stage, self.hashes(previous))
-
-
-    def apply(self, fixture, profile='tm', tail='local_backup_commit'):
-        _root, stage, _live, _records, previous, _snapshots = fixture
-        return self.shell('local_backup_begin "$1" "$2" "$3"; local_backup_publish; ' + tail,
-                          stage, profile, self.hashes(previous), timeout=180)
-
-
-    def assert_restored(self, fixture):
-        root, stage, live, records, _previous, snapshots = fixture
-        self.assertEqual(len((stage / 'previous/manifest').read_text().splitlines()), len(records))
-        for destination, original in snapshots.items():
-            path = live / destination.lstrip('/')
-            if original is None:
-                self.assertFalse(path.exists(), destination)
-            else:
-                self.assertEqual((path.read_bytes(), path.stat().st_mode & 0o7777), original, destination)
-                saved = stage / 'previous/tree' / destination.lstrip('/')
-                self.assertEqual((saved.read_bytes(), saved.stat().st_mode & 0o7777), original, destination)
-        self.assertFalse(list(live.rglob('*.deploy.*')))
-        self.assertFalse(list(live.rglob('*.rollback.*')))
-        events = (root / 'events').read_text()
-        if 'publish:' in events:
-            self.assertLess(events.index('systemctl:daemon-reload'), events.index('systemctl:start '))
-        self.assertEqual(events.count('systemctl:start '), 4)
-
-
 @unittest.skipUnless(sys.platform.startswith('linux'), 'transaction requires Linux flock and coreutils')
 class DeploymentPreflightTests(DeploymentFixture):
     def test_every_reviewed_file_rejects_drift_before_live_mutation(self):
@@ -285,7 +106,7 @@ class DeploymentPreflightTests(DeploymentFixture):
                 self.assertNotEqual(self.preflight(fixture).returncode, 0)
                 path.write_bytes(snapshots[destination][0])
         self.assertFalse((root / 'events').exists())
-        self.assertFalse((stage / 'previous').exists())
+        self.assertFalse((self.state_dir(fixture) / 'pending').exists())
 
 
     def test_absent_predecessor_accepts_missing_or_exact_staged_only(self):
@@ -320,11 +141,14 @@ class DeploymentPreflightTests(DeploymentFixture):
             root, stage, live, records, _previous, snapshots = fixture
             result = self.apply(fixture, profile)
             self.assertEqual(result.returncode, 0, result.stderr)
-            manifest = (stage / 'previous/manifest').read_text().splitlines()
+            transaction = self.transaction(fixture)
+            manifest = (transaction / 'previous/manifest').read_text().splitlines()
             self.assertEqual(len(manifest), len(records))
-            self.assertEqual((stage / 'previous').stat().st_mode & 0o777, 0o700)
+            for private in (transaction, transaction / 'previous'):
+                self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+            self.assertFalse((self.state_dir(fixture) / 'pending').exists())
             for source, destination, policy, *_ in records:
-                saved = stage / 'previous/tree' / destination.lstrip('/')
+                saved = transaction / 'previous/tree' / destination.lstrip('/')
                 self.assertEqual((saved.read_bytes(), saved.stat().st_mode & 0o7777), snapshots[destination])
                 actual = (live / destination.lstrip('/')).read_bytes()
                 if policy == 'preserve':
@@ -391,6 +215,8 @@ class DeploymentRollbackTests(DeploymentFixture):
         self.assertEqual(result.returncode, 70, result.stderr)
         self.assertTrue((fixture[0] / 'cleanup-signal').is_file())
         self.assertNotIn('systemctl:start ', (fixture[0] / 'events').read_text())
+        # Jobs keep refusing until automatic recovery finishes the restore.
+        self.assertTrue((self.state_dir(fixture) / 'pending').is_file())
 
 
     def test_incomplete_restore_or_reload_never_restarts_timers(self):
@@ -401,6 +227,7 @@ class DeploymentRollbackTests(DeploymentFixture):
             result = self.apply(fixture)
             self.assertEqual(result.returncode, 70, result.stderr)
             self.assertNotIn('systemctl:start ', (fixture[0] / 'events').read_text())
+            self.assertTrue((self.state_dir(fixture) / 'pending').is_file())
             self.env.pop(failure)
 
 
@@ -432,6 +259,83 @@ class DeploymentRollbackTests(DeploymentFixture):
         result = self.apply(fixture, tail='local_backup_commit; exit 45')
         self.assertEqual(result.returncode, 45)
         self.assertNotIn('rollback:', (fixture[0] / 'events').read_text())
+
+
+@unittest.skipUnless(sys.platform.startswith('linux') and Path('/proc/locks').is_file(),
+                     'the registry guard reads Linux /proc/locks')
+class RegistryShrinkGuardTests(DeploymentFixture):
+    def hold(self, name, exclusive=True):
+        fd = os.open(Path(self.env['VANPI_BACKUP_LOCK_DIR']) / f'{name}.lock', os.O_RDONLY)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+
+    @staticmethod
+    def stage_registry(stage, edit):
+        path = stage / REGISTRY_SOURCE
+        text = path.read_text()
+        changed = edit(text)
+        assert changed != text
+        path.write_text(changed)
+
+    def assert_refused_before_mutation(self, fixture, result, message):
+        root, stage, live, _records, _previous, snapshots = fixture
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(message, result.stderr)
+        events = (root / 'events').read_text() if (root / 'events').exists() else ''
+        self.assertNotIn('publish:', events)
+        self.assertNotIn('systemctl:stop', events)
+        self.assertFalse((self.state_dir(fixture) / 'pending').exists())
+        for destination, (old, _mode) in snapshots.items():
+            self.assertEqual((live / destination.lstrip('/')).read_bytes(), old, destination)
+
+    def test_refuses_a_staged_registry_without_any_held_lock_class(self):
+        cases = [('job-offsite', True, lambda text: text.replace(' offsite)', ')')),
+                 ('disk-FORT-MPLS-5TB', False, lambda text: text.replace(' FORT-MPLS-5TB', '')),
+                 ('data-borg-repo', True, lambda text: text.replace('(borg-repo)', '()')),
+                 ('cloud-upload', True, lambda text: re.sub(r'(?m)^BACKUP_CLOUD_SLOT=.*$', 'BACKUP_CLOUD_SLOT=', text))]
+        for name, exclusive, edit in cases:
+            with self.subTest(lock=name):
+                fixture = self.fixture()
+                self.stage_registry(fixture[1], edit)
+                self.hold(name, exclusive)
+                result = self.apply(fixture)
+                self.assert_refused_before_mutation(fixture, result, f'without {name} while it is held')
+
+    def test_publishes_during_a_run_that_holds_only_resource_locks(self):
+        # An offsite run's locks, but not the legacy lock the fence takes.
+        fixture = self.fixture()
+        for name, exclusive in (('job-offsite', True), ('disk-FORT-MPLS-5TB', False), ('cloud-upload', True)):
+            self.hold(name, exclusive)
+        # Holders are found without opening lock files: none is readable now.
+        for path in Path(self.env['VANPI_BACKUP_LOCK_DIR']).iterdir():
+            path.chmod(0)
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unheld_entries_may_go_and_unsafe_inputs_fail_closed(self):
+        fixture = self.fixture()
+        self.stage_registry(fixture[1], lambda text: text.replace(' offsite)', ')'))
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for change, message in (('proc', 'Cannot read'), ('registry', 'Cannot read the staged lock registry'),
+                                ('symlink', 'Backup lock directory is unsafe')):
+            with self.subTest(change=change):
+                fixture = self.fixture()
+                if change == 'proc':
+                    self.env['LOCAL_BACKUP_PROC_LOCKS'] = str(self.root / 'missing-locks')
+                elif change == 'registry':
+                    (fixture[1] / REGISTRY_SOURCE).write_text('exit 1\n')
+                else:
+                    registry = Path(self.env['VANPI_BACKUP_LOCK_DIR'])
+                    registry.rename(registry.with_name('saved-registry'))
+                    registry.symlink_to(registry.with_name('saved-registry'))
+                result = self.apply(fixture)
+                self.env.pop('LOCAL_BACKUP_PROC_LOCKS', None)
+                self.assert_refused_before_mutation(fixture, result, message)
+        fixture = self.fixture()
+        shutil.rmtree(self.env['VANPI_BACKUP_LOCK_DIR'])
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

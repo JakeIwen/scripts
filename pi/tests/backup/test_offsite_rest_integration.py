@@ -18,9 +18,29 @@ import urllib.request
 
 from offsite_config import INCOMPLETE_TAG, RECEIPT_TAG
 from pi.tests.backup.offsite_remote_fixtures import RemoteFixture, SECRET
+from pi.tests.backup.offsite_state_writes import assert_stdin_consumed
 
 RESTIC = os.environ.get('OFFSITE_RESTIC')
 SERVER = os.environ.get('OFFSITE_REST_SERVER')
+
+
+class AdmissionFixtureTests(unittest.TestCase):
+    def test_partition_double_waits_for_input(self):
+        fixture = RemoteFixture()
+        self.addCleanup(fixture.close)
+        assert_stdin_consumed(fixture, 'sfdisk')
+
+    def test_metered_double_requires_complete_json_evidence(self):
+        fixture = RemoteFixture()
+        self.addCleanup(fixture.close)
+        for evidence, valid in (('', False), ('{', False), ('{}', True)):
+            with self.subTest(evidence=evidence):
+                result = subprocess.run([str(fixture.bin / 'metered'), 'admit', 'pi.offsite_backup'],
+                                        input=evidence, env=fixture.env, capture_output=True,
+                                        text=True, timeout=5)
+                self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
+                if valid:
+                    self.assertIs(json.loads(result.stdout)['allowed'], True)
 
 
 @unittest.skipUnless(RESTIC and SERVER, 'opt-in acceptance: set isolated pinned OFFSITE_RESTIC and OFFSITE_REST_SERVER binaries')

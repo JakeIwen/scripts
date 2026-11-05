@@ -39,7 +39,9 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi/scripts/vanpi-metered` | Pi shell, authenticated Mac SSH sync and cloud admission | `pi/apps/metered/` plus `shared/metered/` in the immutable package release |
 | `pi.apps.metered` | `vanpi-metered.service`, independently of the dashboard | `pi/apps/metered/`; unit/package owned by `pi/deploy_python.py` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
+| `pi/sync_scripts.sh` | Mac non-backup broad sync | `pi/backup_sync_client.py`, `pi/scripts/update_services.sh`, `pi/scripts/backup/backup_deploy_sync.py` |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
+| `/usr/local/lib/vanpi-backup-deploy/recover` | independent root cron `/etc/cron.d/vanpi-backup-deploy` | `pi/backup_deploy_bootstrap.py` and `pi/scripts/backup/backup_bootstrap_*.py`; outside cohort rollback |
 | `pi/scripts/smart_watch.sh` | `vanpi-smart-watch.timer`; alerts on the `NTFY_WARNING_URL` topic | the script; see `pi/docs/monitoring/SMART.md` |
 | `pi/scripts/alias_media.sh` | Pi `am`/`an` functions and qBittorrent's completion command (`alias_media.sh new`) | thin wrapper; `pi/apps/media_organizer/alias_main.py` in the package release |
 | `python3 -P -m pi.apps.media_organizer mirror-sync` | `pi/scripts/backup/pi_backup.sh`, as `pi`, right before the media rsync | `pi/apps/media_organizer/mirror_sync.py` in the package release |
@@ -188,6 +190,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   network changes); flags set without its record are native and left alone. `mac_panel/metered_adapter.py` and
   `static/section_metered.mjs` expose the CLI without bypassing request guards.
   Install/test commands and lease limitations: `pi/docs/networking/METERED_CONNECTIONS.md`.
+- `macbook/linux_test_lane/`: the opt-in Linux test lane (Python 3.9+, CLI
+  `macbook/linux_test_lane/linux-test-lane`), a Lima `vz` Debian 12 arm64 VM
+  on the Mac that runs the Linux/Pi tests off the Pi. `pins.env` is the one
+  record of the image (dated URL + digest), Pi-matching tool versions and VM
+  size; `provision.sh` runs as root in the VM and refuses drift from those
+  versions (restic comes from `pi/scripts/backup/install_restic.sh`, rest-server
+  from `synology/offsite/binaries.py`, reusing their verified release pins);
+  `requirements.txt` mirrors `.local/test-venv`. `lima.py` renders the template
+  and wraps `limactl`; `sync.py` copies exactly the files `run_tests.py`
+  discovers, plus Git state (a worktree's own HEAD/index), through a read-only
+  mount of the main checkout onto VM-local `/home/pi/linux-test-lane/checkout`,
+  keeping the VM's own venv and `.git/run_tests/` cache. Usage under
+  [Repository test suite](#repository-test-suite).
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` function;
   it saves clipboard PNGs into the Pi `agent-shared` folder under
@@ -356,6 +371,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
+- Custom Mac keyboard mappings: BTT shortcuts and `repair_key_sequences.py`,
+  plus `macbook/launchagents/com.jacobr.dictation-key-f13.plist`, are
+  documented in `~/dev/visual-guides/static/reference/keyboard-shortcuts.json`.
+  The Keyboard Shortcuts guide and shell `keys` command share that catalog.
+  When changing these mappings, update it in the same task, preserve scope,
+  conditions and enabled state, and check `keys --all` plus `npm test` in
+  Visual Guides. Keep private expansion text and executable payloads out
+  of the public catalog; its verification date records an inventory check,
+  not proof that the shortcut was exercised live.
 - `shared/`: code imported or deployed on more than one host.
 - `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper that
   types `continue` (with backoff) after an interactive Codex turn fails with
@@ -765,9 +789,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   repository, and the cloud workers hold the exclusive `cloud-upload` slot for
   their whole run (taken by the shell wrapper before `exec`, so a busy slot exits
   before any attempt is recorded). Migrated jobs hold the legacy
-  `/run/lock/vanpi_backup.lock` shared on fd 9; `restore_from_borg.sh`,
-  `new_hotspare.sh` and the deployment fences keep `acquire_job_lock` exclusive,
-  so legacy consumers exclude and are excluded by every job. Never create lock
+  `/run/lock/vanpi_backup.lock` shared on fd 9. `restore_from_borg.sh`,
+  `new_hotspare.sh` and offsite `prepare-disk` take it exclusively through
+  `acquire_job_lock`, which also takes `job-offsite`, so they exclude and are
+  excluded by every job, an offsite run included. The deploy fence
+  (`local_backup_begin` in `pi/backup_local_deploy.sh`) opens the existing inode
+  and takes it exclusively, non-blocking, on fd 9 itself, never through
+  `acquire_job_lock`: it refuses while any migrated job runs and no offsite run
+  can start while it is held, but without `job-offsite` it publishes beside a
+  running offsite run (see `offsite_backup.sh` below). Never create lock
   files at runtime, never probe with path-form `flock`, and never drain a disk
   that the caller is not about to unmount or spin down: `umount_disks.sh` passes
   the labels it unmounts (with `--spindown`, every attached HDD, since a job
@@ -786,7 +816,52 @@ compare it with this checkout. Deployed files may differ from the repository.
   ownership, mode and first-install plan; `backup_deploy_transaction.sh` stages
   the full cohort and private previous tree before publishing, then restores and
   verifies attempted replacements under the fence on failure. Incomplete
-  restoration or unit reload leaves timers stopped. `VANPI_BACKUP_PREVIOUS_REVISION` names
+  restoration or unit reload leaves timers stopped. The transaction is journaled
+  in `/var/lib/vanpi-backup-deploy/` (`/tmp` is emptied at boot):
+  `backup_deploy_state.sh` owns the marker vocabulary and admission guard;
+  shell admissions recheck under their acquired legacy hold, and Python cloud
+  admission rechecks after descriptor validation. Direct `clone_to_sd.sh` joins
+  admission or verifies and preserves an inherited shared/exclusive legacy hold.
+  `backup_deploy_trigger.sh` dispatches the transaction's own journaled recoverer.
+  `backup_deploy_recovery.sh` restores preparing/publishing transactions but only
+  finalizes a committed transaction (cleanup and recorded timers, never rollback).
+  Contents and affected directories are flushed before commit/clear; pending stays
+  until timer restoration succeeds. EXIT rereads and validates the privileged
+  transaction marker, so deferred TERM after the commit rename cannot choose
+  rollback from stale shell state; ambiguity leaves files and timers untouched.
+  The independent bootstrap dispatcher, the
+  hourly window and subsequent installers retry recovery. The installer records
+  its PID so drains TERM first; the emergency grace remains unchanged.
+  `pi/backup_deploy_bootstrap.py` stages and explicitly applies/verifies/releases
+  one-time maintenance. `backup_bootstrap_plan.py` owns minimal edits and hashes
+  for the actual reviewed predecessor; `backup_bootstrap_host.py` owns durable
+  cron/service launch holds and the independent dispatcher; `backup_bootstrap_files.py`
+  owns no-follow reads and durable files for that separately installed runtime
+  (it intentionally has no shared/python import root). Staging supports Python
+  3.9+; host execution requires Linux/Python 3.11+. All live/staged predecessors
+  must retain guards. Broad sync deploys only non-backup destinations, excluded
+  from the canonical union of both plan profiles; its receiver independently
+  refuses backup-owned payload/cleanup overlap before writes and preserves existing
+  parent-directory metadata. `pi/backup_sync_client.py` (Python 3.9+) uploads the
+  inspection closure and holds the validated legacy inode shared through all sync
+  phases; `backup_deploy_sync.py` (scope CLI 3.9+, host runtime Linux/3.11+) owns
+  canonical exclusions, scope validation and privileged readiness using the existing
+  bootstrap inspector/fence. The receiver retains its own shared hold, with no sudo
+  descriptor-preservation requirement. Only inspection code uploads before readiness;
+  maintenance/pending/incomplete/unsafe state refuses unrelated work. Healthy released
+  and genuinely unbootstrapped hosts remain supported (an existing legacy lock is
+  required). `connectivity_status.py` still deploys through this non-backup sync.
+  Older publishers and unguarded rollback remain unsupported; bootstrap cannot
+  revoke already-running old shells.
+  Read-only preflight precedes holds and repeats under the fence. `abandon`
+  archives only provably unpublished attempts after restoring/flushing crontabs;
+  published attempts retain maintenance until same-bundle rerun/release. Cron
+  holds/restores flush `/var/spool/cron/crontabs` before admission reopens.
+  Exact admission snippets constrain upgrades; see the documented maintenance
+  upgrade limit rather than removing readiness records. Time Machine `--check`
+  checks installed bootstrap readiness and staged guards without recovery.
+  Commands and operator boundary: `pi/docs/backup/DEPLOY_BOOTSTRAP.md`.
+  `VANPI_BACKUP_PREVIOUS_REVISION` names
   the previously deployed commit when installing a newly committed change.
   `VANPI_BACKUP_PREVIOUS_CONF_SHA256` accepts an explicitly reviewed config hash
   when unrelated deployed settings differ from that commit. Previous-tree absence
@@ -1063,6 +1138,7 @@ Claude mod tests. Missing interpreters/dependencies
 are errors; executable availability is checked before suite commands start.
 Tests needing specific OS features or hardware must state their skip reason.
 Shell tests run under macOS `/bin/bash` 3.2, where `set -e` ignores a failing `[[ ]]` or `(( ))`, so assertions must fail explicitly (`[[ ... ]] || fail ...`).
+macOS checks each newly written executable on its first run (about 70 ms, more under suite load). Fixtures that start many command doubles hard-link one copy per process (`command_double` in `pi/tests/backup/offsite_fixtures.py`) or run scripts through their interpreter, and never start a freshly written executable inside a short timeout.
 Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
 Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
 `.local/test-venv/bin/python`).
@@ -1085,8 +1161,9 @@ extend that registry instead of adding per-test `sys.path` patches.
   metadata for tracked/unignored inputs (never trusting Git's stat cache),
   symlink targets, submodule contents, `.local/test-venv`, the active venv,
   and `node_modules` beside package manifests. It also covers the
-  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH` and
-  `BTT_LIVE_TESTS`. `.claude/worktrees/` belongs to other runners
+  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH`,
+  `BTT_LIVE_TESTS`, `OFFSITE_RESTIC` and `OFFSITE_REST_SERVER` (including their
+  resolved executable bytes). `.claude/worktrees/` belongs to other runners
   and is excluded from both discovery and fingerprints.
   A pass within 6 hours prints `PASS: all N suite commands completed
   (cached: ...)` and exits 0; `--force` reruns and revokes the earlier pass
@@ -1102,6 +1179,62 @@ extend that registry instead of adding per-test `sys.path` patches.
   `passes.json`, `lock`): untracked and shared by all worktrees. Corrupt
   JSON is discarded; writes replace files atomically. The runner's CLI
   regression tests are `tests/test_run_tests.py`.
+- Selection: `--path PREFIX` (repeatable) runs only tests under those
+  repository paths and `--exclude-path PREFIX` drops some; both match whole
+  path components, a prefix that matches no repository path is an error, and
+  output lines name the selection. A selected pass has its own cache key, so it
+  never certifies the whole suite (whose key is unchanged).
+
+### Linux test lane
+
+Mac skips are not Linux passes: Linux-only cases (fdinfo/flock lock evidence,
+Bash 4+ backup shell, real Borg/rclone, user namespaces, GNU tools) run in a
+Debian bookworm VM on the Mac (`macbook/linux_test_lane/`), never on the Pi.
+It is opt-in: plain `run_tests.py` never starts it and no deployer calls it.
+Setup is `brew install lima`; from the checkout root:
+
+- `macbook/linux_test_lane/linux-test-lane up` creates, starts and provisions
+  the VM (8 CPUs, 8 GiB, 40 GiB) when needed; reprovisions when
+  `provision.sh`, `pins.env`, `requirements.txt` or either upstream binary
+  installer changes.
+- `... test` runs `up`, syncs this working tree (tracked plus unignored files,
+  deletions included) and runs the VM's `run_tests.py --path pi --path shared
+  --path synology --path tests --path macbook/tests/test_linux_test_lane.py
+  --exclude-path shared/claude-mods`, ending
+  with the runner's PASS/FAILED line and exit status; the VM keeps its own pass
+  cache. Every invocation checks required tools and their pinned versions,
+  including both offsite binaries, even with a current provisioning stamp;
+  missing/drifted tools fail before cache lookup. To restore the checked-in
+  pins, run `macbook/linux_test_lane/linux-test-lane up --repair`: it retains
+  the destination guard, reinstalls distro packages, reruns the pinned
+  installers and recreates the test venv, then verifies everything before
+  writing the stamp. Plain `up` with a current stamp only verifies; it does
+  not repair. Change `pins.env` only for a deliberate runtime upgrade, never
+  to hide a missing tool. Source and Git copies use rsync checksums,
+  not size/mtime guesses. Before provisioning (including a stale/missing stamp)
+  and each rsync the guest rejects redirected, symlinked or non-owned
+  checkout/`.git` ancestors outside its fixed lane root.
+  `--path`/`--exclude-path` replace that selection; `--force`, `-j`
+  and `--timeout` pass through. shared/claude-mods is left out because its
+  suites run through the Mac's `claude plugin test` and its codexclean build
+  needs Node >= 22.13; the Pi only receives built copies.
+- `status`, `shell` (a shell in the VM checkout), `stop` (it otherwise stays
+  running) and `destroy` (deletes the VM and disk, for a clean start).
+
+Lane tests always set `OFFSITE_RESTIC` and `OFFSITE_REST_SERVER` to
+`/home/pi/linux-test-lane/venv/bin/offsite-restic` and `offsite-rest-server`.
+The first is a symlink to the VM's verified restic 0.19.1; the second is the
+archive-verified rest-server 0.14.0, installed only in the test venv. Receiver
+and REST acceptance tests therefore execute rather than skip. Host overrides
+are not forwarded: these values are fixed by the tracked lane code, and the
+runner fingerprints both environment values and resolved binaries (also through
+its active venv), following symlinks.
+Provisioning also installs rsyslog for the separate privileged spool check.
+
+Lane commands serialize on `~/.local/state/linux-test-lane/lock`, since every
+worktree shares the VM's one checkout. The VM user is `pi` (uid 1000) with
+passwordless sudo, like the Pi; tests still run unprivileged, so root-only
+cases (`test_time_machine_runtime`, the rsyslog spool test) skip there too.
 
 ## Deployment commits
 
@@ -1181,9 +1314,22 @@ The active design is represented by:
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/backup/offsite_backup.sh`: encrypted restic offsite drives, seeded
-  locally then served by a friend's Synology over Tailscale. It holds the exclusive
-  legacy lock like `restore_from_borg.sh`; `offsite_config.py` owns sources, excludes
-  and canonical marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+).
+  locally then served by a friend's Synology over Tailscale. `prepare-disk` holds the
+  exclusive legacy lock like `restore_from_borg.sh`; the other mutating commands hold
+  `job-offsite` (fd 10, PID record), hold the legacy lock shared only while
+  `offsite_snapshot.py` copies their code, then exec that frozen copy, so the cohort
+  installers, nightly Borg and EXFAT run beside a days-long seed. `acquire_job_lock`
+  also takes `job-offsite`; the deploy fence does not, and its registry guard
+  (`local_backup_registry_guard`) refuses to unregister a held lock. `offsite_snapshot.py`
+  creates, verifies and deletes that per-run copy under `/var/lib/vanpi-offsite/code/`
+  (descriptor-relative deletion that never follows links or crosses mounts);
+  `offsite_locks.py` proves the launcher's hold and owns the run's cloud-slot, disk
+  and `data-borg-repo` descriptors (non-blocking but for the bounded Borg wait,
+  released by close). `offsite_config.py` owns sources, excludes, lock policy
+  constants, the frozen closure / live data / live boundary sets
+  (`test_offsite_snapshot_closure.py` rescans them) and canonical
+  marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+). Persisted
+  state is additive-only (`test_offsite_state_compat.py` checks v2 both ways).
   `offsite_repository.py` verifies local mounts/IDs; `offsite_prepare.py` guards
   erasure; `offsite_samba.py` owns the Time Machine capture gate; `offsite_run.py`
   writes status/processed-versus-packed byte metrics; `offsite_mounts.sh` reuses
@@ -1223,16 +1369,20 @@ capacity limits, labels, and deployed versions before changing clone behavior.
 
 ## Backup concurrency rollback
 
-Both installers print a private `<stage>/previous` directory. Older flat
-`previous/` directories retain their saved install/mv recovery procedure.
-`previous/tree/`
+Both installers journal each transaction in the root-only
+`/var/lib/vanpi-backup-deploy/<id>/` and print its `previous` directory on
+commit; the newest five are kept. Older `<stage>/previous` directories (in
+`/tmp`, gone after a reboot) and flat `previous/` directories retain their
+saved recovery procedures. `previous/tree/`
 mirrors absolute destinations (for example `tree/home/pi/scripts/backup/` and
 `tree/etc/systemd/system/`). `previous/manifest` has one pipe-delimited record
 per plan entry: source, destination, old SHA-256 or `absent`, old owner:group,
 old mode, staged SHA-256, staged owner:group, staged mode, replace/keep action,
-and temporary path. All originals and replacements are prepared before the
-first publication. `transaction/published` records attempted destinations;
-`transaction/active-timers` records which timers were active before the fence.
+and temporary path (suffixed with the installer's PID). All originals and
+replacements are prepared, and the manifest made durable, before the first
+publication. `active-timers` records which timers were active before the fence,
+`recovery/` holds the recoverer with every library it sources, and the stage's
+`transaction/published` lists attempted destinations.
 
 Ordinary failures automatically restore attempted replacements in reverse
 order while fd 9 still holds the exclusive legacy fence. Cleanup ignores repeated
@@ -1240,24 +1390,43 @@ INT/TERM/HUP until it ends, so a second stop cannot cut rollback short. It check
 both content and owner/mode, removes only verified newly introduced files,
 and reloads restored systemd units before restarting any prior active timer.
 An incomplete restore/reload prints `ROLLBACK INCOMPLETE`, exits nonzero and
-leaves timers stopped. The rollback directory is retained. Activation actions
+leaves timers stopped. The rollback directory is retained. From before the first
+live change through commit/restoration **and timer finalization**, pending names
+its transaction and admission refuses. The independent bootstrap dispatcher at
+`/usr/local/lib/vanpi-backup-deploy/recover` survives every cohort rollback and
+runs hourly; the window and next installer also retry. Preparing/publishing
+transactions restore the guarded predecessor and reload units; committed records
+verify the new cohort and finish cleanup/timers without reverting it. Both paths
+flush affected files/directories before clearing pending. A failed attempt retains
+pending and warns daily; some timers may already have restarted, but their jobs
+still refuse. To retry after repairing a reported conflict, run
+`sudo /bin/bash /usr/local/lib/vanpi-backup-deploy/recover`.
+Never delete `pending` by hand: jobs would then run a mixed cohort. Activation actions
 (including Time Machine capture requests) occur only after the cohort commits;
 their failure reports a committed cohort with incomplete activation.
 
-For a later manual rollback, first pause both cloud jobs with the existing
+Prefer a guard-aware targeted installer for a later intentional rollback. The
+manual tree procedure below is not journaled and needs separately arranged
+durable launch holds plus the operator maintenance boundary until verification;
+it is not covered by automatic recovery. First pause both cloud jobs with the existing
 controls, preserve independent holds and let local jobs finish. Inspect the
 saved manifest, private tree and current hashes before writing. Use the staged
 `pi/backup_local_deploy.sh` contract, not a newer installed helper, and source
-the staged `pi/scripts/backup/backup_locks.sh`. Validate and open the existing
+the staged `pi/scripts/backup/backup_locks.sh`; once the stage is gone, source
+the transaction's `recovery/` copies of `backup_deploy_transaction.sh` and
+`backup_locks.sh` instead. Validate and open the existing
 legacy inode with `backup_lock_open`, acquire its exclusive
-flock and stop the four cloud timers. Set `LOCAL_BACKUP_STAGE` to the saved
-stage, initialize `LOCAL_BACKUP_TEMPORARIES=()`, and load the reviewed manifest
-records into `LOCAL_BACKUP_PUBLISHED`. `local_backup_rollback` restores those
+flock and stop the four cloud timers. Set `LOCAL_BACKUP_TXN` to the saved
+transaction directory and `LOCAL_BACKUP_TEMP_ID` to your shell's PID, initialize
+`LOCAL_BACKUP_TEMPORARIES=()`, and load the reviewed manifest records into
+`LOCAL_BACKUP_PUBLISHED`. `local_backup_rollback` restores those
 records and reloads units; `local_backup_cleanup_temporaries` removes its
 staging files. Do not restart timers or release the fence before restoration
 is verified. Restore only the previously active timers, then resume the
-selected cloud job through its control entry point. There is no separate
-standalone rollback executable.
+selected cloud job through its control entry point. Never restore a predecessor
+without the bootstrap admission guards or remove the independent dispatcher,
+cron entry or readiness record. The journaled recoverer finalizes committed
+records but never intentionally rolls back a committed cohort.
 
 Never remove or replace `/run/lock` inodes during recovery. The tmpfiles
 configuration is in the cohort; created registry inodes remain in place.

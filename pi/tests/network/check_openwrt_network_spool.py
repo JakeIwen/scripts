@@ -91,13 +91,18 @@ def isolated_rotation_helper(source, spool_dir):
 
 
 def has_tail(path, marker):
-    try:
-        with path.open("rb") as stream:
-            stream.seek(0, os.SEEK_END)
-            stream.seek(max(0, stream.tell() - 4096))
-            return marker in stream.read(4096)
-    except FileNotFoundError:
-        return False
+    # omfile can rotate immediately after writing a batch containing the final
+    # marker. No further message means no reopened active file, not lost data.
+    for candidate in (path, path.with_name(path.name + '.1')):
+        try:
+            with candidate.open("rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, stream.tell() - 4096))
+                if marker in stream.read(4096):
+                    return True
+        except FileNotFoundError:
+            pass
+    return False
 
 
 def load_repair_installer(path=None):
@@ -222,7 +227,7 @@ def check(config_path, rotation_path, *, spool_mode=0o2750, expect_readable=True
                 deadline = time.monotonic() + 30
                 while not all(has_tail(spool_dir / name, marker) for name in ("network.jsonl", "dendelion.log")):
                     if time.monotonic() >= deadline:
-                        raise AssertionError("Isolated receiver did not drain the final marker to both active streams")
+                        raise AssertionError("Isolated receiver did not drain the final marker to both streams")
                     time.sleep(0.05)
         finally:
             daemon.terminate()
@@ -234,8 +239,8 @@ def check(config_path, rotation_path, *, spool_mode=0o2750, expect_readable=True
                            bytes=sum(path.stat().st_size for path in files),
                            stdout=daemon_stdout.decode("utf-8", "replace")[-2000:],
                            stderr=daemon_stderr.decode("utf-8", "replace")[-2000:])
-        assert len(files) == 4, diagnostics
-        assert len(legacy_files) == 4, diagnostics
+        for name, retained in (("network.jsonl", files), ("dendelion.log", legacy_files)):
+            assert {path.name for path in retained} - {name} == {f"{name}.{i}" for i in range(1, 4)}, diagnostics
         all_rows = [json.loads(line) for path in files for line in path.read_text().splitlines()]
         assert all("ordinary-browsing" not in row["message"] for row in all_rows)
         total = sum(path.stat().st_size for path in files)

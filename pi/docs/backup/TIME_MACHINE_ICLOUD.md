@@ -284,11 +284,14 @@ process evidence, Python resource-lock inheritance/enumeration and deployment
 preflight smokes require Linux, as does the OpenWrt schedule suite. The iCloud
 worker's Borg round-trip and real-rclone cases also skip on the Mac; download
 integration needs rclone too. A Mac suite pass does **not** cover these cases.
-They remain in the repository's whole suite, but there is currently **no
-provisioned Linux test lane**, so this deployer no longer ensures they run.
-The planned Linux lane must cover them; the four targeted commands above are
-not a replacement for those broader Linux regressions.
-
+They run in the optional Mac-hosted Lima Linux lane with
+`macbook/linux_test_lane/linux-test-lane test` (see
+[Linux test lane](../../../AGENTS.md#linux-test-lane)). That lane supplies the
+Linux tools and runs the broader Pi/shared suites; its ordinary unprivileged
+run still skips root-only runtime/spool checks, which need a separate privileged
+run. Neither plain `run_tests.py` nor this deployer starts the lane automatically,
+so a deployment pass alone does **not** certify those broader Linux regressions.
+The four targeted commands above are not a replacement for that coverage.
 
 One-time Mac installation (run from Jacob's normal Terminal, with sudo):
 

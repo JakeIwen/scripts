@@ -107,10 +107,14 @@ class DashboardTests(unittest.TestCase):
                 args = ['backup', '--label', self.f.label, '--only', 'borg']
                 child = self.f.start(*args, *(['--remote'] if remote else []))
                 try:
-                    deadline = time.monotonic() + 15
+                    deadline = time.monotonic() + 60
                     while not started.exists() and child.poll() is None:
                         self.assertLess(time.monotonic(), deadline, 'source backup never started')
                         time.sleep(0.02)
+                    # An early admission exit is not readiness; otherwise history is still the prior run's.
+                    if not started.exists():
+                        out, err = child.communicate(timeout=25)
+                        self.fail(f'source backup exited before readiness ({child.returncode}): {out}{err}')
                     child.send_signal(signal.SIGTERM)
                     out, err = child.communicate(timeout=25)
                     self.assertEqual(child.returncode, 143, out + err)

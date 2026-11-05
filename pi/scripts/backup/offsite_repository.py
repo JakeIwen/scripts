@@ -9,9 +9,10 @@ import selectors
 import signal
 import stat
 import subprocess
+import sys
 import time
 
-import backup_locks
+from backup_locks import LockClass
 from offsite_config import GUARD_SECONDS, LABEL_PATTERN, MARKER, REPO_ID_PATTERN
 from offsite_config import REPO_PATH, SCHEMA, STOP_SECONDS, RepositoryRecords, validate_marker
 from time_machine_store import atomic_json
@@ -21,10 +22,16 @@ class Interrupted(RuntimeError):
     pass
 
 
+# offsite_mounts.sh release exit codes (OFFSITE.md "Locks").
+RELEASED, RELEASE_BUSY, ALREADY_UNMOUNTED = 0, 3, 4
+
+
 class Commands:
-    def __init__(self, cfg):
-        self.cfg = cfg
-        self.cancelled = None
+    def __init__(self, cfg, locks):
+        # locks: the admitted offsite_locks.OffsiteLocks whose descriptors children inherit.
+        self.cfg, self.locks = cfg, locks
+        self.cancelled = None  # the signal's name, once TERM/INT arrives
+        self.stopped = None  # the latched stop cause; see stop_cause()
 
     @contextmanager
     def signals(self):
@@ -37,18 +44,41 @@ class Commands:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
 
-    def allowed(self):
-        if self.cancelled:
-            raise Interrupted(f'Stopped by {self.cancelled}; rerun when parked to resume')
-        if self.cfg.ignition.exists() or self.cfg.ignition.is_symlink():
-            raise Interrupted('Ignition is on; rerun when parked to resume')
+    def stop_cause(self):
+        """Why the run must stop (TERM/INT or the ignition flag), or None; once seen, for good."""
+        # Latched: on_stop may already have closed the run's holds, so an
+        # ignition flag that clears again must not let later work run without them.
+        if self.stopped is None:
+            if self.cancelled:
+                self.stopped = f'Stopped by {self.cancelled}; rerun when parked to resume'
+            elif self.cfg.ignition.exists() or self.cfg.ignition.is_symlink():
+                self.stopped = 'Ignition is on; rerun when parked to resume'
+        return self.stopped
 
-    def run(self, name, *args, timeout=60, input_text=None, line=None,
-            guard=None, cleanup=False, rest_auth=None):
+    def allowed(self):
+        cause = self.stop_cause()
+        if cause:
+            raise Interrupted(cause)
+
+    def run(self, name, *args, **kwargs):
+        """Run one fixed command and return its output; any nonzero exit raises."""
+        return self.execute(name, *args, accept=(0,), **kwargs)[1]
+
+    def status(self, name, *args, accept, **kwargs):
+        """Return the exit code of a command whose accepted nonzero codes carry meaning."""
+        return self.execute(name, *args, accept=accept, **kwargs)[0]
+
+    def execute(self, name, *args, accept, timeout=60, input_text=None, line=None,
+                guard=None, cleanup=False, rest_auth=None, holds=True, on_stop=None):
+        """holds=False passes only the job descriptor; on_stop runs once if a
+        stop arrives while a cleanup command (which ignores stops) still runs."""
         if not cleanup:
             self.allowed()
         argv = [self.cfg.commands[name], *map(str, args)]
-        environment = {**os.environ, 'LC_ALL': 'C'}
+        # Every held job/disk/data/slot descriptor is inherited (holds=False:
+        # only the job's), so an orphaned child (restic above all) keeps the
+        # run's holds visible to the drain.
+        environment = self.locks.child_environment({**os.environ, 'LC_ALL': 'C'}, resources=holds)
         if name == 'restic':
             environment = {key: value for key, value in environment.items() if not key.startswith('RESTIC_')}
             environment['RESTIC_PROGRESS_FPS'] = '0.2'
@@ -65,19 +95,19 @@ class Commands:
             line = lambda text: original_line(safe_line(text))
         with subprocess.Popen(argv, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
-                              pass_fds=(self.cfg.lock_fd,), start_new_session=True) as child:
+                              pass_fds=self.locks.fds(resources=holds), start_new_session=True) as child:
             try:
                 if input_text is not None:
                     child.stdin.write(input_text.encode())
                     child.stdin.close()
-                output = safe_line(self._read(child, timeout, line, guard, cleanup))
+                output = safe_line(self._read(child, timeout, line, guard, cleanup, on_stop))
                 try:
                     rc = child.wait(timeout=STOP_SECONDS)
                 except subprocess.TimeoutExpired as exc:
                     raise RuntimeError(f'{name} closed output but failed to exit') from exc
-                if rc:
+                if rc not in accept:
                     raise RuntimeError(f'{name} exited {rc}: {output[-3000:].strip()}')
-                return output
+                return rc, output
             finally:
                 if child.poll() is None:
                     os.killpg(child.pid, signal.SIGTERM)
@@ -87,7 +117,7 @@ class Commands:
                         os.killpg(child.pid, signal.SIGKILL)
                         child.wait()
 
-    def _read(self, child, timeout, line, guard, cleanup):
+    def _read(self, child, timeout, line, guard, cleanup, on_stop):
         started = time.monotonic()
         next_guard = started
         buffer, output = b'', ''
@@ -97,6 +127,9 @@ class Commands:
                 now = time.monotonic()
                 if not cleanup:
                     self.allowed()
+                elif on_stop is not None and self.stop_cause():
+                    on_stop()
+                    on_stop = None
                 if timeout is not None and now - started > timeout:
                     raise RuntimeError('command timed out')
                 if guard and now >= next_guard:
@@ -126,13 +159,6 @@ class Commands:
                 line(text)
             output += text
         return output
-
-
-def admit(cfg):
-    if os.geteuid() != cfg.owner:
-        raise RuntimeError('Run offsite_backup.sh as root')
-    backup_locks.validate_lock_file(backup_locks.legacy_lock())
-    backup_locks.require_held(cfg.lock_fd, backup_locks.legacy_lock())
 
 
 def private_directory(path, owner):
@@ -236,9 +262,28 @@ class LocalRepository:
         self.exact_mount(label)
         return not existing
 
+    def hold_target(self):
+        """Shared target-disk lock, taken before mounting; the ignition drain waits on it."""
+        self.commands.locks.take(LockClass.DISK, self.label, exclusive=False)
+
+    def release(self, label):
+        """Unmount a disk this run mounted unless another job still holds it.
+
+        The run's own descriptor must already be closed. Returns a note for the
+        two expected non-errors; anything else raises as a cleanup error.
+        The helper inherits only the job descriptor, and a stop arriving while it
+        runs closes every resource descriptor at once: a stalled unmount must not
+        keep the run's other disks (the target above all) past a drain's wait.
+        """
+        rc = self.commands.status('mounts', 'release', label, cleanup=True, holds=False,
+                                  on_stop=self.commands.locks.close_resources,
+                                  accept=(RELEASED, RELEASE_BUSY, ALREADY_UNMOUNTED))
+        return {RELEASED: None, RELEASE_BUSY: f'{label}: left mounted; another job holds its disk lock',
+                ALREADY_UNMOUNTED: f'{label}: already unmounted (by a drain or another job)'}[rc]
+
     def unmount(self):
-        self.exact_mount(cleanup=True)
-        self.commands.run('umount', '--', self.mount, cleanup=True)
+        self.commands.locks.close(LockClass.DISK, self.label)
+        return self.release(self.label)
 
     def restic(self, *args, **kwargs):
         return self.commands.run('restic', '--repo', self.path, '--password-file',
@@ -246,7 +291,9 @@ class LocalRepository:
 
     def check(self, subset=None):
         owned, verified = [], False
+        self.hold_target()
         try:
+            self.commands.allowed()
             self.mount_source(self.label, on_mount=owned.append)
             self.verify()
             verified = True
@@ -254,7 +301,10 @@ class LocalRepository:
             return self.restic('check', *options, timeout=None, guard=self.exact_mount)
         finally:
             if owned or (verified and self.commands.cancelled):
-                self.unmount()
+                note = self.unmount()
+                if note:
+                    print(note, file=sys.stderr, flush=True)
+            self.commands.locks.close(LockClass.DISK, self.label)
 
     def verify(self):
         self.exact_mount()

@@ -128,6 +128,13 @@ cat > "$findmnt_command" <<EOF
 printf '%s\\n' '$source_mnt'
 EOF
 chmod +x "$findmnt_command"
+# main reads the requested HDD policy ("disks torrents starlink"); allow HDDs.
+policyctl="$test_root/policyctl"
+cat > "$policyctl" <<'EOF'
+#!/bin/bash
+[[ "$*" == read ]] && printf '%s\n' '1 0 0'
+EOF
+chmod +x "$policyctl"
 main || fail "snapshot main entry point failed"
 mapfile -t main_snapshots < <(list_completed_snapshots)
 [[ ${#main_snapshots[@]} == 1 ]] || fail "snapshot main did not publish one completed tree"
@@ -168,7 +175,11 @@ done
 # and must pass --force to both jobs for a dashboard/manual run.
 window_root="$test_root/window"
 mkdir "$window_root"
-cp "$window_script" "$window_root/backup_window.sh"
+# The runner first recovers any interrupted deployment; none is recorded here.
+for name in backup_window.sh backup_deploy_trigger.sh backup_deploy_state.sh; do
+  cp "${window_script%/*}/$name" "$window_root/$name"
+done
+export VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state"
 cat > "$window_root/pi_backup.sh" <<'EOF'
 #!/bin/bash
 printf 'pi:%s\n' "$*" >> "$TEST_WINDOW_CALLS"

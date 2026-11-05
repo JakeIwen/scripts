@@ -188,7 +188,8 @@ def pause_deadline(directory):
 
 def queued_backup_message(lock_file=Path('/run/lock/vanpi_backup.lock'), process_root=Path('/proc')):
     jobs = backup_locks.active_jobs(process_root)
-    for kind in ('pi-cloud', 'time-machine'):
+    # Every offsite command but prepare-disk holds the upload slot too (offsite_config.HOLD_CLOUD_SLOT).
+    for kind in ('pi-cloud', 'time-machine', 'offsite'):
         if kind in jobs:
             return (f'Resume queued: waiting for {backup_locks.JOB_LABELS[kind]} to finish. '
                     'Checks every minute.')

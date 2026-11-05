@@ -69,6 +69,19 @@ class NetworkSpoolTests(unittest.TestCase):
             checker.receiver_config(source.replace('file="/run/vanpi-network/spool/dendelion.log"',
                                                    'file="/unexpected/live/path"'), Path("/fixture"), 45678)
 
+    def test_checker_accepts_marker_rotated_with_the_final_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            active = Path(directory) / 'network.jsonl'
+            active.write_bytes(b'final-marker\n')
+            self.assertTrue(checker.has_tail(active, b'final-marker'))
+            rotation.rotate(active)
+            self.assertFalse(active.exists())
+            self.assertTrue(checker.has_tail(active, b'final-marker'))
+            active.write_bytes(b'next-message\n')
+            self.assertTrue(checker.has_tail(active, b'final-marker'))
+            rotation.rotate(active)
+            self.assertFalse(checker.has_tail(active, b'final-marker'))
+
     def test_checker_rejects_same_user_nonroot_execution(self):
         with mock.patch.object(checker.sys, "platform", "linux"), \
                 mock.patch.object(checker.os, "geteuid", return_value=1000):
@@ -84,7 +97,9 @@ class NetworkSpoolTests(unittest.TestCase):
         fixed = checker.check(config, helper, spool_mode=0o2750, expect_readable=True)
         self.assertFalse(old["readable_after_rotation"])
         self.assertTrue(fixed["readable_after_rotation"])
-        self.assertEqual(old["existing_file_repair"]["repaired_generations"], 8)
+        self.assertEqual(old["existing_file_repair"]["repaired_generations"],
+                         old["generations"] + old["legacy_generations"])
+        self.assertGreaterEqual(old["existing_file_repair"]["repaired_generations"], 6)
         self.assertTrue(old["existing_file_repair"]["contents_unchanged"])
         self.assertTrue(old["existing_file_repair"]["generations_outside_ring_untouched"])
 

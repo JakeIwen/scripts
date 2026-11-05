@@ -51,16 +51,91 @@ GUARD_SECONDS = 5
 STOP_SECONDS = 15
 # Restic patterns are absolute, unlike rsync's source-root-anchored patterns.
 EXFAT_EXCLUDES = ('van-tv', 'System Volume Information', 'vanpi-network')
-COMMANDS = {
-    'restic': '/usr/local/bin/restic', 'lsblk': '/usr/bin/lsblk',
-    'findmnt': '/usr/bin/findmnt', 'wipefs': '/usr/sbin/wipefs',
-    'sfdisk': '/usr/sbin/sfdisk', 'mkfs': '/usr/sbin/mkfs.ext4',
-    'tune2fs': '/usr/sbin/tune2fs', 'udevadm': '/usr/bin/udevadm',
-    'sync': '/usr/bin/sync', 'umount': '/usr/bin/umount', 'smbstatus': '/usr/bin/smbstatus',
-    'samba': '/home/pi/scripts/samba_share_control.sh',
-    'mounts': '/home/pi/scripts/backup/offsite_mounts.sh',
-    'notify': '/home/pi/scripts/ntfy_send.sh',
+
+# Lock policy (pi/docs/backup/CONCURRENCY.md, OFFSITE.md "Locks").
+JOB_KIND = 'offsite'
+# Jacob, Nov 3: every command but prepare-disk keeps iCloud uploads out, as the
+# old exclusive legacy lock did. Releasing it for local seeds is a deferred choice.
+HOLD_CLOUD_SLOT = True
+# OOM fallback, off by default: job kinds a run also holds exclusively so they
+# cannot overlap it, e.g. ('borg', 'exfat') if nightly Borg plus a seed exhausts RAM.
+EXCLUDED_LOCAL_JOBS: tuple[str, ...] = ()
+BORG_SOURCE = 'borg'
+BORG_REPOSITORY_LOCK = 'borg-repo'
+# A busy Borg repository defers the borg source to the end of the run, then waits.
+BORG_WAIT_SECONDS = 3 * 60 * 60
+
+# Frozen code snapshot (offsite_snapshot.py). The launcher copies the run's code
+# closure into <state>/code/<run id>/ and execs the copy, so installers may
+# publish new code during a days-long seed.
+LIVE_ROOT = Path('/home/pi/scripts')
+CODE_DIRECTORY = 'code'
+RUN_ID_PATTERN = r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}'
+MANIFEST = 'manifest.json'
+SNAPSHOT_RESTIC = 'bin/restic'
+# The restic pin (version, binary SHA-256, install target) is declared once, in
+# this installer; the snapshot reads it from the live tree.
+RESTIC_INSTALLER = 'backup/install_restic.sh'
+METERED_CLI = 'vanpi-metered'
+# Every file the run imports, runs or sources, relative to the scripts root.
+# test_offsite_snapshot_closure.py rescans the sources and fails on any miss.
+FROZEN_IMPLEMENTATION = (
+    'backup/abort_backup.sh', 'backup/backup_admission.py', 'backup/backup_conf.sh',
+    'backup/backup_deploy_state.sh',
+    'backup/backup_lifecycle.sh', 'backup/backup_lock_io.sh', 'backup/backup_lock_registry.sh',
+    'backup/backup_locks.py', 'backup/backup_locks.sh', 'backup/backup_priority.py',
+    'backup/backup_priority_control.py', 'backup/backup_setting_fields.py', 'backup/backup_settings.py',
+    'backup/backup_settings_control.py', 'backup/cloud_backup_control.py',
+    'backup/cloud_backup_requests.py', 'backup/hotspare_rotation.py', 'backup/icloud_progress.py',
+    'backup/icloud_status.py', 'backup/icloud_uplink.py', 'backup/mac_capture_control.py',
+    'backup/offsite_backup.py', 'backup/offsite_config.py', 'backup/offsite_dashboard.py',
+    'backup/offsite_locks.py', 'backup/offsite_mounts.sh', 'backup/offsite_prepare.py',
+    'backup/offsite_receipts.py', 'backup/offsite_remote.py', 'backup/offsite_repository.py',
+    'backup/offsite_run.py', 'backup/offsite_samba.py', 'backup/offsite_snapshot.py',
+    'backup/protected_json.py', 'backup/stale_mount_recovery.sh', 'backup/time_machine_store.py',
+    'backup/upload_speed_log.py', 'connectivity_status.py', 'disk_policy.sh', 'fix_hfs_fs.sh',
+    'mount_disks.sh', 'ntfy_send.sh', 'samba_share_control.sh',
+)
+# Live scripts-tree paths that frozen code names on purpose and that stay live.
+LIVE_BOUNDARIES = {
+    METERED_CLI: 'fresh metering admission CLI; it imports the current package release by design',
+    'backup/pi_backup.sh': 'identity abort_backup.sh --user matches in a live command line; never run',
+    'backup/exfat_snapshot.sh': 'identity abort_backup.sh --user matches in a live command line; never run',
+    'backup/icloud_backup.sh': 'display text: the iCloud login hint a person runs',
 }
+# State, secrets, hooks and inputs frozen code reads or writes by absolute path; never copied.
+LIVE_DATA = (
+    '/home/pi/secrets/', '/home/pi/hooks/', '/home/pi/backups/', '/home/pi/.ssh/',
+    # Borg exclusion patterns and inputs named by backup_conf.sh.
+    '/home/pi/.codex', '/home/pi/build/', '/home/pi/dev/obd-things/tmp', '/home/pi/rsync-exclude-media.txt',
+    '/etc/', '/var/lib/', '/run/', '/root/', '/mnt/',
+)
+INSTALLED_RESTIC = '/usr/local/bin/restic'
+
+
+def command_paths(code_root=None):
+    """Fixed child commands; helpers and restic come from the run's snapshot when it has one."""
+    root = LIVE_ROOT if code_root is None else Path(code_root)
+    return {
+        'restic': INSTALLED_RESTIC if code_root is None else str(root / SNAPSHOT_RESTIC),
+        'lsblk': '/usr/bin/lsblk',
+        'findmnt': '/usr/bin/findmnt', 'wipefs': '/usr/sbin/wipefs',
+        'sfdisk': '/usr/sbin/sfdisk', 'mkfs': '/usr/sbin/mkfs.ext4',
+        'tune2fs': '/usr/sbin/tune2fs', 'udevadm': '/usr/bin/udevadm',
+        'sync': '/usr/bin/sync', 'smbstatus': '/usr/bin/smbstatus',
+        'samba': str(root / 'samba_share_control.sh'),
+        'mounts': str(root / 'backup' / 'offsite_mounts.sh'),
+        'notify': str(root / 'ntfy_send.sh'),
+    }
+
+
+COMMANDS = command_paths()
+DEFAULT_STATE = Path('/var/lib/vanpi-offsite')
+
+
+def state_root():
+    # Tests point both the snapshot CLI and the run at a disposable state root.
+    return Path(os.environ.get('OFFSITE_STATE_ROOT', str(DEFAULT_STATE)))
 
 
 class Result(str, Enum):
@@ -148,6 +223,9 @@ class StatusRecord(TypedDict, total=False):
     sources: dict[str, SourceOutcome]
     cause: str
     cleanup_errors: list[str]
+    # Additive since granular locks: disks left mounted for another holder or
+    # already unmounted by a drain. Readers ignore unknown fields.
+    cleanup_notes: list[str]
     notification_error: str
     duration_seconds: float
     target_kind: TargetKind
@@ -167,21 +245,29 @@ class Source:
 class Config:
     borg: Path
     ignition: Path
-    state: Path = Path('/var/lib/vanpi-offsite')
+    state: Path = DEFAULT_STATE
     password: Path = Path('/root/.config/restic/vanpi-offsite.password')
     mount_root: Path = Path('/mnt')
     by_id: Path = Path('/dev/disk/by-id')
     drain: Path = Path('/run/lock/vanpi-samba-drain/mbp2tbkup')
     owner: int = 0
     block_devices: bool = True
+    # prepare-disk's exclusive legacy lock; every other command holds job-offsite.
     lock_fd: int = 9
     commands: dict[str, str] = field(default_factory=lambda: dict(COMMANDS))
+    # The run's frozen snapshot root; None for read-only commands and prepare-disk.
+    code_root: Path | None = None
+    borg_wait: float = BORG_WAIT_SECONDS
 
     @classmethod
     def from_environment(cls):
-        # These two values belong to backup_conf.sh, not a second policy file.
+        # BORG_REPO and the ignition flag belong to backup_conf.sh, not a second
+        # policy file; the launcher exports OFFSITE_CODE_ROOT for snapshot runs.
+        code = os.environ.get('OFFSITE_CODE_ROOT')
+        code_root = Path(code) if code else None
         return cls(borg=Path(os.environ['BORG_REPO']),
-                   ignition=Path(os.environ['OFFSITE_IGNITION_FLAG']))
+                   ignition=Path(os.environ['OFFSITE_IGNITION_FLAG']),
+                   state=state_root(), code_root=code_root, commands=command_paths(code_root))
 
     def sources(self):
         tm = self.mount_root / 'mbp2tbkup' / 'm4mac0.sparsebundle'

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Checkout launcher for the Linux test lane; the package resolves its own checkout.
+set -eu
+cd "$(dirname "$0")/../.."
+exec /usr/bin/python3 -B -m macbook.linux_test_lane "$@"

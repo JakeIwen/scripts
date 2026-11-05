@@ -17,7 +17,8 @@ from hotspare_rotation import rotation_plan
 @dataclass(frozen=True)
 class SettingsPaths:
     preferences: Path = Path('/etc/vanpi-backup-settings.json')
-    local: Path = Path('/home/pi/scripts/backup/backup_conf.sh')
+    # Script-relative, so an offsite code snapshot reads its own frozen copy.
+    local: Path = Path(__file__).resolve().parent / 'backup_conf.sh'
     pi: Path = Path('/etc/vanpi-icloud-backup.json')
     mac: Path = Path('/etc/vanpi-time-machine-icloud.json')
     lock_directory: Path = priority.DIRECTORY

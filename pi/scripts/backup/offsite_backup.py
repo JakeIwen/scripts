@@ -8,9 +8,11 @@ import sys
 
 from offsite_config import Config
 from offsite_dashboard import dashboard, rates, status
+from offsite_locks import admit
 from offsite_prepare import prepare
-from offsite_repository import Commands, Interrupted, LocalRepository, admit
+from offsite_repository import Commands, Interrupted, LocalRepository
 from offsite_run import Backup
+import offsite_snapshot
 
 
 def parser(cfg):
@@ -44,6 +46,43 @@ def parser(cfg):
     return root
 
 
+def mutate(cfg, args, commands):
+    if getattr(args, 'remote', False) or args.command in ('receipts', 'restore-test'):
+        from offsite_remote import RemoteRepository
+        repo = RemoteRepository(cfg, commands, args.label)
+    else:
+        repo = LocalRepository(cfg, commands, args.label)
+    with commands.signals():
+        commands.allowed()
+        if args.command == 'prepare-disk':
+            prepare(repo, args.device, args.erase_confirm, args.priority)
+            return 0
+        commands.locks.hold_policy_locks()
+        if args.command == 'backup':
+            return Backup(repo, list(dict.fromkeys(args.only or cfg.sources()))).run()
+        elif args.command == 'check':
+            subset = args.read_data_subset
+            if subset and not re.fullmatch(r'(?:[1-9][0-9]*/[1-9][0-9]*|(?:[0-9]+(?:\.[0-9]+)?)(?:%|[kKMGT]))', subset):
+                raise ValueError('Invalid --read-data-subset; use a percentage, n/t, or size')
+            print(repo.check(subset), end='', flush=True)
+        elif args.command == 'receipts':
+            from offsite_receipts import list_receipts
+            print(json.dumps(list_receipts(repo), sort_keys=True))
+        elif args.command == 'restore-test':
+            from offsite_receipts import restore_test
+            print(restore_test(repo, args.receipt, args.path, args.target), end='', flush=True)
+    return 0
+
+
+def discard_snapshot(cfg):
+    # The run's last step; nothing imports from the snapshot after it. The next
+    # run's garbage collection retries a snapshot left behind here.
+    try:
+        offsite_snapshot.remove(cfg.state, cfg.code_root)
+    except (OSError, RuntimeError) as exc:
+        print(f'offsite: could not remove code snapshot {cfg.code_root}: {exc}', file=sys.stderr, flush=True)
+
+
 def main(argv=None, *, config=None):
     try:
         cfg = config or Config.from_environment()
@@ -55,31 +94,13 @@ def main(argv=None, *, config=None):
                      dashboard(cfg) if args.command == 'dashboard' else status(cfg))
             print(json.dumps(value, sort_keys=True))
             return 0
-        admit(cfg)
-        commands = Commands(cfg)
-        if getattr(args, 'remote', False) or args.command in ('receipts', 'restore-test'):
-            from offsite_remote import RemoteRepository
-            repo = RemoteRepository(cfg, commands, args.label)
-        else:
-            repo = LocalRepository(cfg, commands, args.label)
-        with commands.signals():
-            commands.allowed()
-            if args.command == 'prepare-disk':
-                prepare(repo, args.device, args.erase_confirm, args.priority)
-            elif args.command == 'backup':
-                return Backup(repo, list(dict.fromkeys(args.only or cfg.sources()))).run()
-            elif args.command == 'check':
-                subset = args.read_data_subset
-                if subset and not re.fullmatch(r'(?:[1-9][0-9]*/[1-9][0-9]*|(?:[0-9]+(?:\.[0-9]+)?)(?:%|[kKMGT]))', subset):
-                    raise ValueError('Invalid --read-data-subset; use a percentage, n/t, or size')
-                print(repo.check(subset), end='', flush=True)
-            elif args.command == 'receipts':
-                from offsite_receipts import list_receipts
-                print(json.dumps(list_receipts(repo), sort_keys=True))
-            elif args.command == 'restore-test':
-                from offsite_receipts import restore_test
-                print(restore_test(repo, args.receipt, args.path, args.target), end='', flush=True)
-        return 0
+        locks = admit(cfg, prepare=args.command == 'prepare-disk')
+        try:
+            return mutate(cfg, args, Commands(cfg, locks))
+        finally:
+            locks.close_resources()
+            if cfg.code_root is not None:
+                discard_snapshot(cfg)
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         print(f'offsite: {exc}', file=sys.stderr, flush=True)
         return 143 if isinstance(exc, Interrupted) else 1

@@ -30,13 +30,14 @@ LOADED_RUNNER = Path(__file__).read_bytes()
 COMMAND_TIMEOUT = 900
 CACHE_WINDOW = 6 * 3600
 KEEP_PASSES = 50
-# Test-file prefix -> import roots its tests need, in search order.
+# Test file/directory -> import roots its tests need, in search order.
 PYTHON_IMPORT_ROOTS = {
     'macbook/bettertouchtool/tests': ('macbook/bettertouchtool',),
     'macbook/mac_panel/tests': ('macbook/mac_panel', 'shared/python'),
     'macbook/tests': ('shared/python', 'macbook/scripts', 'macbook/bettertouchtool'),
     'pi/tests': ('pi',),
     'pi/tests/backup': ('pi/scripts/backup',),
+    'pi/tests/test_update_services.py': ('pi/scripts/backup',),
     'pi/tests/price_check': ('pi/scripts/price_check',),
     'pi/projects/phone-drop': ('pi/projects/phone-drop',),
     'shared/tests': ('shared/python',),
@@ -49,10 +50,48 @@ def repository_paths(root):
                    and not os.fsdecode(name).startswith('.claude/worktrees/')})
 
 
-def test_files():
+def under(path, prefixes):
+    return any(path == prefix or prefix in path.parents for prefix in prefixes)
+
+
+def selection_prefixes(values, paths, option):
+    """Whole-component path prefixes; a typo must not silently select nothing."""
+    prefixes = []
+    for value in values:
+        prefix = Path(os.path.normpath(value))
+        if prefix.is_absolute() or not prefix.parts or prefix.parts[0] == '..':
+            raise ValueError(f'{option} {value} must be a path inside the repository')
+        if not any(under(path, (prefix,)) for path in paths):
+            raise ValueError(f'{option} {value} matches no repository path')
+        prefixes.append(prefix)
+    return sorted(set(prefixes))
+
+
+def test_files(include=(), exclude=()):
     """Nested agent worktrees have their own inventories, never the parent's."""
-    return [path for path in repository_paths(ROOT) if (ROOT / path).is_file()
-            and (path.name.startswith('test_') or '.test.' in path.name)]
+    paths = repository_paths(ROOT)
+    include = selection_prefixes(include, paths, '--path')
+    exclude = selection_prefixes(exclude, paths, '--exclude-path')
+    return [path for path in paths if (ROOT / path).is_file()
+            and (path.name.startswith('test_') or '.test.' in path.name)
+            and (not include or under(path, include)) and not under(path, exclude)]
+
+
+def selection_label(args):
+    if not (args.path or args.exclude_path):
+        return ''
+    label = ' under ' + ', '.join(args.path) if args.path else ''
+    if args.exclude_path:
+        label += ' excluding ' + ', '.join(args.exclude_path)
+    return label
+
+
+def selection_key(args):
+    """Normalized selection for the pass-cache key; empty for the whole suite."""
+    if not (args.path or args.exclude_path):
+        return ()
+    return tuple(tuple(sorted({os.path.normpath(value) for value in values}))
+                 for values in (args.path, args.exclude_path))
 
 
 def suite_commands(paths):
@@ -175,21 +214,28 @@ def hash_repository(digest, root, ancestors=()):
         hash_path(digest, path, ancestors)
 
 
-def tree_fingerprint():
+def tree_fingerprint(selection=()):
     try:
         # A process waiting on the lock may still be executing the old runner.
         if Path(__file__).read_bytes() != LOADED_RUNNER:
             raise ValueError('runner source changed since launch; restart to cache a pass')
         digest = hashlib.sha256()
+        if selection:
+            # A pass over part of the suite must never certify the whole of it;
+            # the full suite's key stays as it was before selection existed.
+            hash_value(digest, ('selection', selection))
         hash_repository(digest, ROOT)
         # These change resolution or opt-in behavior without changing source files.
         for item in (sys.version, sys.executable, sys.platform, sys.prefix,
                      *(os.environ.get(key, '') for key in
-                       ('BTT_LIVE_TESTS', 'PATH', 'PYTHONPATH'))):
+                       ('BTT_LIVE_TESTS', 'PATH', 'PYTHONPATH',
+                        'OFFSITE_RESTIC', 'OFFSITE_REST_SERVER'))):
             hash_value(digest, item)
         if sys.prefix != sys.base_prefix and Path(sys.prefix) != ROOT / '.local/test-venv':
             hash_path(digest, Path(sys.prefix))
-        for executable in (sys.executable, 'node', 'claude', 'bash', 'zsh'):
+        for executable in (sys.executable, 'node', 'claude', 'bash', 'zsh',
+                           *(os.environ[key] for key in ('OFFSITE_RESTIC', 'OFFSITE_REST_SERVER')
+                             if os.environ.get(key))):
             resolved = shutil.which(executable)
             hash_value(digest, (executable, resolved))
             if resolved:
@@ -228,9 +274,9 @@ def cached_pass(passes_file, fingerprint):
     return None
 
 
-def report_cached(count, when):
+def report_cached(count, when, label=''):
     stamp = datetime.fromtimestamp(when).strftime('%H:%M')
-    print(f'PASS: all {count} suite commands completed (cached: this exact tree '
+    print(f'PASS: all {count} suite commands{label} completed (cached: this exact tree '
           f'passed at {stamp}; --force reruns)', flush=True)
 
 
@@ -239,7 +285,7 @@ def command_environment(name):
     # one runner instead of adding sys.path workarounds to individual tests.
     environment = dict(os.environ)
     roots = [str(ROOT)] + [str(ROOT / root) for prefix, prefix_roots in PYTHON_IMPORT_ROOTS.items()
-                           if name.startswith(prefix + '/') for root in prefix_roots]
+                           if name == prefix or name.startswith(prefix + '/') for root in prefix_roots]
     environment['PYTHONPATH'] = os.pathsep.join(roots + [environment.get('PYTHONPATH', '')])
     environment['PYTHONDONTWRITEBYTECODE'] = '1'
     return environment
@@ -382,6 +428,10 @@ def parse_args(argv):
                         help='ignore the pass cache and run the suite')
     parser.add_argument('--timeout', type=float, default=COMMAND_TIMEOUT,
                         help='per-command deadline in seconds (default: 900)')
+    parser.add_argument('--path', action='append', default=[], metavar='PREFIX',
+                        help='only run tests under this repository path (repeatable)')
+    parser.add_argument('--exclude-path', action='append', default=[], metavar='PREFIX',
+                        help='skip tests under this repository path (repeatable)')
     args = parser.parse_args(argv)
     if args.jobs < 1 or not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error('jobs and timeout must be positive, finite numbers')
@@ -414,10 +464,11 @@ def interruption_handler():
 
 def run_locked(args, state, check_interruption):
     live = os.environ.get('BTT_LIVE_TESTS') == '1'
-    before = None if live else tree_fingerprint()
+    selection, label = selection_key(args), selection_label(args)
+    before = None if live else tree_fingerprint(selection)
     # Discovery belongs inside the lock and after the initial fingerprint:
     # a waiter must not certify tests from an earlier inventory as this tree.
-    paths = test_files()
+    paths = test_files(args.path, args.exclude_path)
     if not paths:
         raise ValueError('No tests discovered; refusing an empty success.')
     commands = list(suite_commands(paths))
@@ -427,15 +478,15 @@ def run_locked(args, state, check_interruption):
     check_interruption()
     passes_file = state / 'passes.json'
     when = None if args.force or before is None else cached_pass(passes_file, before)
-    if when is not None and tree_fingerprint() == before:
+    if when is not None and tree_fingerprint(selection) == before:
         check_interruption()
-        report_cached(len(commands), when)
+        report_cached(len(commands), when, label)
         return 0
     # A forced failure or interruption must revoke an older pass of this key.
     passes = read_json(passes_file) if before is not None else {}
     passes.pop(before, None)
     write_json(passes_file, passes)
-    print(f'Discovered {len(paths)} test files; running {len(commands)} commands '
+    print(f'Discovered {len(paths)} test files{label}; running {len(commands)} commands '
           f'with {args.jobs} jobs.', flush=True)
     timings_file = state / 'timings.json'
     timings = read_json(timings_file)
@@ -450,13 +501,13 @@ def run_locked(args, state, check_interruption):
         print(f'FAILED: {len(failures)} command(s) failed ({names}); {not_run} were not run.',
               file=sys.stderr, flush=True)
         return 1
-    after = None if before is None else tree_fingerprint()
+    after = None if before is None else tree_fingerprint(selection)
     check_interruption()
     if before is not None and after == before:
         record_pass(passes_file, before)
     else:
         print('Inputs changed or cache unavailable/live; this pass was not cached.', flush=True)
-    print(f'PASS: all {len(commands)} suite commands completed.', flush=True)
+    print(f'PASS: all {len(commands)} suite commands{label} completed.', flush=True)
     return 0
 
 

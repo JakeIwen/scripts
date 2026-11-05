@@ -202,7 +202,15 @@ class DeployInterfaceTests(GateFixture):
         shutil.copyfile(REPO / 'pi/scripts/samba_require_mount.sh', self.repo / 'samba-gate')
         samba_source = self.repo / 'pi/scripts/samba_require_mount.sh'
         shutil.copyfile(self.repo / 'samba-gate', samba_source)
-        self.script(self.root / 'bin/metered', 'echo "metered:$*" >> "$TEST_ROOT/events"\n')
+        self.script(self.root / 'bin/metered', '''
+import json, os, sys
+from pathlib import Path
+if sys.argv[1] == 'admit':
+    # The real CLI reads evidence to EOF; replying first can SIGPIPE the producer.
+    assert json.load(sys.stdin) == {}
+with (Path(os.environ['TEST_ROOT']) / 'events').open('a') as stream:
+    stream.write('metered:' + ' '.join(sys.argv[1:]) + '\\n')
+''', python=True)
         self.script(self.root / 'bin/testparm',
                     'echo "testparm:$*" >> "$TEST_ROOT/events"\n'
                     'if [[ "${!#}" == --parameter-name=preexec ]]; then\n'
@@ -223,7 +231,7 @@ name = sys.argv[1]
 if name == '/home/pi/scripts/samba_require_mount.sh':
     path = root / 'repo/samba-gate'
 elif name == '/home/pi/scripts/connectivity_status.py':
-    path = root / 'repo/pi/scripts/connectivity_status.py'
+    path = Path(os.environ.get('LIVE_CONNECTIVITY', str(root / 'repo/pi/scripts/connectivity_status.py')))
 else:
     path = Path(name)
 print(('0' * 64 if os.environ.get('FAIL_EVENT') == 'hash' else
@@ -231,6 +239,10 @@ print(('0' * 64 if os.environ.get('FAIL_EVENT') == 'hash' else
 ''', python=True)
         (self.repo / 'pi/backup_local_deploy.sh').write_text('''
 local_backup_previous_hashes() { echo reviewed; }
+local_backup_check_bootstrap() {
+  echo bootstrap-check >> "$TEST_ROOT/events"
+  [[ ${FAIL_EVENT:-} != bootstrap ]] || return 45
+}
 local_backup_begin() { echo begin >> "$TEST_ROOT/events"; }
 local_backup_publish() { echo publish >> "$TEST_ROOT/events"; }
 local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
@@ -252,6 +264,7 @@ local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
         events = self.events()
         self.assertIn('local-suite', events)
         self.assertIn('schedule:--check', events)
+        self.assertIn('bootstrap-check', events)
         self.assertTrue(any(event.startswith('metered:admit ') for event in events))
         self.assertTrue(any(event.startswith('systemd-analyze:verify ') for event in events))
         self.assertEqual(sum(event.startswith('testparm:') for event in events), 2)
@@ -260,6 +273,38 @@ local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
         staged_tests = {str(path.relative_to(self.root / 'stage'))
                         for path in (self.root / 'stage/pi/tests').rglob('test_*')}
         self.assertEqual(staged_tests, {source for source, _prefix in checks.TARGET_TESTS})
+
+    def test_check_requires_bootstrap_readiness_without_attempting_recovery(self):
+        self.deploy_fixture()
+        self.env['FAIL_EVENT'] = 'bootstrap'
+        result = self.deploy('--check')
+        self.assertEqual(result.returncode, 45, result.stdout + result.stderr)
+        self.assertIn('bootstrap-check', self.events())
+        self.assertNotIn('Target checks passed', result.stdout)
+        self.assertFalse(set(self.events()) & {'begin', 'publish', 'commit', 'capture-request'})
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'receiver fence requires Linux flock/fdinfo')
+    def test_nonbackup_helper_update_unblocks_targeted_check_after_bootstrap(self):
+        from pi.tests import test_update_services as receiver
+        fixture = receiver.UpdateServicesTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        fixture.bootstrap_ready()
+        helper = fixture.live['scripts'] / 'connectivity_status.py'
+        helper.write_text('# old helper\n')
+        shutil.copyfile(REPO / 'pi/scripts/connectivity_status.py', fixture.stage / 'scripts' / helper.name)
+        self.deploy_fixture()
+        self.env['LIVE_CONNECTIVITY'] = str(helper)
+        refused = self.deploy('--check')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('connectivity_status.py on the Pi differs', refused.stderr)
+        shutil.rmtree(self.root / 'stage')
+        updated = fixture.run_updater()
+        self.assertEqual(updated.returncode, 0, updated.stderr)
+        checked = self.deploy('--check')
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        self.assertIn('Target checks passed', checked.stdout)
+        self.assertNotIn('publish', self.events())
 
     def test_check_flag_accepts_target_before_or_after_it(self):
         self.deploy_fixture()
