@@ -369,6 +369,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
+- Custom Mac keyboard mappings: BTT shortcuts and `repair_key_sequences.py`,
+  plus `macbook/launchagents/com.jacobr.dictation-key-f13.plist`, are
+  documented in `~/dev/visual-guides/static/reference/keyboard-shortcuts.json`.
+  The Keyboard Shortcuts guide and shell `keys` command share that catalog.
+  When changing these mappings, update it in the same task, preserve scope,
+  conditions and enabled state, and check `keys --all` plus `npm test` in
+  Visual Guides. Keep private expansion text and executable payloads out
+  of the public catalog; its verification date records an inventory check,
+  not proof that the shortcut was exercised live.
 - `shared/`: code imported or deployed on more than one host.
 - `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper that
   types `continue` (with backoff) after an interactive Codex turn fails with
