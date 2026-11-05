@@ -3,9 +3,10 @@ import json
 from pathlib import Path
 import re
 import shlex
+import time
 
 from cli_runner import checked, json_result
-from cron_schedule import describe_schedule
+from cron_schedule import describe_schedule, next_runs
 from log_redaction import redact, safe_display_path
 from panel_contracts import ApiError, CronJob, CrontabPayload, OwnerKind, Reply
 from panel_paths import ROOT
@@ -118,7 +119,8 @@ def display_log(path):
     return str(target), modified
 
 
-def display_job(job):
+def display_job(job, now=None):
+    now = time.time() if now is None else now
     expression = ' '.join(job['schedule_fields'])
     block, switch = job['managed_block'], job['managed_switch']
     if block:
@@ -132,7 +134,8 @@ def display_job(job):
                    program=program_summary(job['command']),
                    description=job['description'], owner_kind=owner_kind, owner=owner,
                    log_path=log_path, log_modified=log_modified, paused=job['paused'],
-                   managed_block=block, managed_switch=switch)
+                   managed_block=block, managed_switch=switch,
+                   next_runs=[] if job['paused'] else next_runs(job['schedule_fields'], now, now + 7 * 86400))
 
 
 def cli_error(result):

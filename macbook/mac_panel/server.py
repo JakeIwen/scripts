@@ -102,7 +102,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                 self.send_json(200, {'stopping': True})
                 self.server.graceful_stop()
             elif method in ('GET', 'POST'):
-                reply = self.server.routes.dispatch(method, path, body)
+                reply = self.server.routes.dispatch(method, self.path, body)
                 self.send_json(reply.status, reply.body)
             else:
                 raise ApiError(405, 'Method not allowed')
@@ -145,15 +145,19 @@ class PanelHandler(BaseHTTPRequestHandler):
 
 def main():
     from panel_routes import PanelRoutes
+    from sampler import Sampler
     os.umask(0o077)
     routes = PanelRoutes()
     httpd = PanelServer(routes)
     write_record(RECORD, httpd.record)
     signal.signal(signal.SIGTERM, lambda *_: httpd.graceful_stop())
     signal.signal(signal.SIGINT, lambda *_: httpd.graceful_stop())
+    sampler = Sampler(routes.adapters, routes.history)
+    sampler.start()
     try:
         httpd.serve_forever(poll_interval=0.2)
     finally:
+        sampler.stop()
         httpd.server_close()
         remove_record(RECORD, httpd.record)
         routes.close()
