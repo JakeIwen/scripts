@@ -1,0 +1,30 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic "Select lights" [ref=e4]:
+      - button "All" [pressed] [ref=e5] [cursor=pointer]
+      - generic [ref=e6]:
+        - generic [ref=e7]: Living
+        - 'button "Dresser: on" [pressed] [ref=e8] [cursor=pointer]':
+          - generic [ref=e10]: Dresser
+        - 'button "Desk: on" [pressed] [ref=e11] [cursor=pointer]':
+          - generic [ref=e13]: Desk
+      - generic [ref=e14]:
+        - generic [ref=e15]: Bedroom
+        - 'button "Bed: off" [pressed] [ref=e16] [cursor=pointer]':
+          - generic [ref=e18]: Bed
+      - generic [ref=e19]:
+        - generic [ref=e20]: Cab
+        - 'button "Cab: unavailable" [disabled] [ref=e21]':
+          - generic [ref=e23]: Cab
+    - generic [ref=e24]:
+      - button "Colour" [ref=e25] [cursor=pointer]
+      - button "White" [active] [pressed] [ref=e26] [cursor=pointer]
+      - button "Turn on selected lights" [ref=e27] [cursor=pointer]: Turn on
+    - generic [ref=e45]:
+      - slider "White temperature" [ref=e46]
+      - status [ref=e53]: 3000 K
+    - generic [ref=e30]:
+      - generic [ref=e31]: Brightness
+      - status "Brightness" [ref=e32]: 72%
+      - slider "Brightness" [ref=e33] [cursor=pointer]: "72"
+    - status [ref=e34]: 3 lights selected

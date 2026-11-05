@@ -1,0 +1,294 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: vanpi controls
+      - heading [level=1] [ref=e7]:
+        - button "Van Dashboard — open hosted projects" [ref=e8] [cursor=pointer]: Van Dashboard
+    - generic [ref=e9]:
+      - generic [ref=e11]:
+        - generic "Vanpi system controls" [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: Pi
+            - button "Restart Pi" [ref=e15] [cursor=pointer]:
+              - generic [ref=e16]: ↻
+            - button "Power down Pi" [ref=e17] [cursor=pointer]:
+              - generic [ref=e18]: ⏻
+          - generic [ref=e19]:
+            - generic [ref=e20]: Dash
+            - button "Restart dashboard" [ref=e21] [cursor=pointer]:
+              - generic [ref=e22]: ↻
+            - button "Arrange tiles" [ref=e23] [cursor=pointer]:
+              - generic [ref=e24]: ✎
+        - status [ref=e25]
+      - generic [ref=e26]: 🚐
+  - main [ref=e27]:
+    - paragraph [ref=e28]
+    - button "STRANGER DANGER unavailable" [disabled] [ref=e31] [cursor=pointer]:
+      - generic [ref=e32]: "OFF"
+      - generic [ref=e33]:
+        - generic [ref=e34]: 🚨
+        - heading "STRANGER DANGER" [level=2] [ref=e35]: STRANGERDANGER
+      - generic [ref=e36]: Reading alert request and execution state…
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - generic [ref=e39]: CAN wake
+          - generic [ref=e40]: OFFLINE
+        - generic [ref=e41]:
+          - generic [ref=e42]: ext_led
+          - generic [ref=e43]: No data
+    - article [ref=e46]:
+      - generic [ref=e47]:
+        - generic [ref=e48]: ⭐
+        - heading "vOnStar" [level=2] [ref=e49]
+        - generic [ref=e50]: Ready
+      - generic [ref=e53]: Vehicle lock controls
+      - generic [ref=e54]:
+        - button "Open vOnStar status" [ref=e55] [cursor=pointer]
+        - group "Vehicle lock controls" [ref=e56]:
+          - button "Lock All" [ref=e57] [cursor=pointer]
+          - group "Unlock" [ref=e58]:
+            - generic [ref=e60]:
+              - button "Unlock Front" [ref=e61] [cursor=pointer]: Front
+              - button "Unlock Cargo" [ref=e62] [cursor=pointer]: Cargo
+        - status [ref=e63]:
+          - generic [ref=e64]: Last action
+          - generic [ref=e65]: Unlock Cargo · OK
+        - status [ref=e66]
+    - article [ref=e69] [cursor=pointer]:
+      - button "Open media organizer" [ref=e70]
+      - heading "Movies, TV, Audiobooks" [level=2] [ref=e77]
+      - generic [ref=e79]:
+        - generic [ref=e80]: Loading organizer…
+        - generic [ref=e81]: Loading watchlist…
+      - generic [ref=e83]:
+        - link "Open the library" [ref=e84]:
+          - /url: http://vanpi.lan:8789/
+        - button "Media organizer" [ref=e85]
+        - button "Watchlist" [ref=e86]
+        - link "Audiobooks" [ref=e87]:
+          - /url: http://vanpi.lan:8787/
+    - region [ref=e90]:
+      - button "Start service" [disabled] [ref=e91]: NO DATA
+      - link "Telemetry — Battery voltage unavailable No live or saved voltage reading" [ref=e92] [cursor=pointer]:
+        - /url: http://vanpi.lan:8765/
+        - generic [ref=e93]:
+          - generic [ref=e94]: 📊
+          - heading "Telemetry" [level=2] [ref=e95]
+        - generic [ref=e96]:
+          - strong [ref=e97]: —
+          - generic [ref=e98]: Battery voltage unavailable
+        - generic [ref=e99]: No live or saved voltage reading
+      - button "Check voltage now" [ref=e100] [cursor=pointer]:
+        - generic [ref=e101]: ↻
+    - article [ref=e105]:
+      - generic [ref=e106]:
+        - generic [ref=e107]: 🔊
+        - heading "Sonos" [level=2] [ref=e108]
+        - button "Finding…" [ref=e110] [cursor=pointer]
+      - generic [ref=e111]: Finding speakers and current playback…
+      - button "Open Sonos details" [ref=e112] [cursor=pointer]
+    - button "Open disk and torrent details" [ref=e115] [cursor=pointer]:
+      - generic [ref=e116]:
+        - generic [ref=e117]: 💾
+        - heading "Disk & Torrent" [level=2] [ref=e118]
+      - generic [ref=e119]: Reading disk and torrent policy
+    - article [ref=e122] [cursor=pointer]:
+      - button "Open system health details" [ref=e123]
+      - generic [ref=e124]:
+        - generic [ref=e125]: ⚡
+        - heading "System Health" [level=2] [ref=e126]
+        - button "System health status" [ref=e128]:
+          - generic [ref=e129]: No data
+      - generic [ref=e130]: Loading power and resource history…
+      - generic [ref=e132]:
+        - generic [ref=e133]:
+          - term [ref=e134]: Power
+          - definition [ref=e135]: Checking…
+        - generic [ref=e136]:
+          - term [ref=e137]: CPU peak
+          - definition [ref=e138]: —
+        - generic [ref=e139]:
+          - term [ref=e140]: CPU / SoC temp
+          - definition [ref=e141]: —
+        - generic [ref=e142]:
+          - term [ref=e143]: Throttling
+          - definition [ref=e144]: Checking…
+        - generic [ref=e145]:
+          - term [ref=e146]: Memory peak
+          - definition [ref=e147]: —
+        - generic [ref=e148]:
+          - term [ref=e149]: Network
+          - definition [ref=e150]: —
+        - generic [ref=e151]:
+          - term [ref=e152]: Disk I/O
+          - definition [ref=e153]: —
+    - article [ref=e156] [cursor=pointer]:
+      - button "Open M4 compute details" [ref=e157]
+      - generic [ref=e158]:
+        - generic [ref=e159]: 🧠
+        - heading "M4 Compute" [level=2] [ref=e160]
+        - button "Compute worker status" [ref=e162]:
+          - generic [ref=e163]: No data
+      - generic [ref=e164]: Checking offloaded analysis…
+      - generic [ref=e166]:
+        - generic [ref=e167]:
+          - term [ref=e168]: Worker
+          - definition [ref=e169]: —
+        - generic [ref=e170]:
+          - term [ref=e171]: Slots
+          - definition [ref=e172]: —
+        - generic [ref=e173]:
+          - term [ref=e174]: Queue
+          - definition [ref=e175]: —
+        - generic [ref=e176]:
+          - term [ref=e177]: Mac CPU delivered
+          - definition [ref=e178]: —
+        - generic [ref=e179]:
+          - term [ref=e180]: Peak job memory
+          - definition [ref=e181]: —
+        - generic [ref=e182]:
+          - term [ref=e183]: Eligible left on Pi
+          - definition [ref=e184]: —
+    - button "Open USB device details" [ref=e187] [cursor=pointer]:
+      - generic [ref=e188]:
+        - heading "USB Devices" [level=2] [ref=e196]
+        - generic [ref=e197]: NO DATA
+      - generic [ref=e198]: Reading live USB devices…
+      - generic [ref=e199]:
+        - generic [ref=e200]:
+          - text: Connected storage
+          - generic [ref=e201]: ; — total USB devices
+        - generic [ref=e202]: —
+    - generic [ref=e204]:
+      - article [ref=e205] [cursor=pointer]:
+        - button "Open backup details" [ref=e206]
+        - generic [ref=e207]:
+          - generic [ref=e208]: 🛟
+          - heading "Backups" [level=2] [ref=e209]
+          - 'button "Backup status: NO DATA" [ref=e210]': NO DATA
+        - generic [ref=e211]: Reading backup history…
+        - generic [ref=e212]:
+          - generic [ref=e213]:
+            - generic [ref=e214]: Borg
+            - generic [ref=e215]: Checking…
+          - generic [ref=e216]:
+            - generic [ref=e217]: EXFAT512
+            - generic [ref=e218]: Checking…
+          - generic [ref=e219]:
+            - generic [ref=e220]: OpenWrt
+            - generic [ref=e221]: Checking…
+          - generic [ref=e222]:
+            - generic [ref=e223]: m4mac
+            - generic [ref=e224]: Checking…
+      - dialog [ref=e225]:
+        - generic [ref=e227]:
+          - heading "Backups" [level=2] [ref=e229]
+          - generic [ref=e230]:
+            - button "Backup settings" [active] [ref=e231] [cursor=pointer]: ⚙
+            - button "Close Backups" [ref=e232] [cursor=pointer]: ×
+          - generic [ref=e233]:
+            - paragraph [ref=e234]: Freshness, runtime progress, hotspares, and Time Machine evidence.
+            - generic "No successful update yet" [ref=e235]: —
+        - generic [ref=e236]:
+          - region [ref=e237]:
+            - group [ref=e238]:
+              - generic "Backup evidence No data" [ref=e239] [cursor=pointer]:
+                - generic [ref=e240]: ▸
+                - heading "Backup evidence" [level=3] [ref=e241]
+                - generic [ref=e242]: No data
+              - generic [ref=e243]:
+                - paragraph [ref=e245]: Freshness stamps and live process evidence.
+                - paragraph [ref=e247]: Loading evidence…
+          - region [ref=e248]:
+            - group [ref=e249]:
+              - generic [ref=e250] [cursor=pointer]:
+                - generic [ref=e251]: ▸
+                - heading "Bootable hotspares" [level=3] [ref=e252]
+              - generic [ref=e253]:
+                - paragraph [ref=e255]: Configured labels, cadence, attachment, and clone age.
+                - paragraph [ref=e257]: Loading hotspares…
+          - region [ref=e258]:
+            - group [ref=e259]:
+              - generic "Offsite NAS Loading" [ref=e260] [cursor=pointer]:
+                - generic [ref=e261]: ▸
+                - heading "Offsite NAS" [level=3] [ref=e262]
+                - generic [ref=e263]: Loading
+        - status
+    - article [ref=e266] [cursor=pointer]:
+      - button "Open ignition monitor details" [ref=e267]
+      - generic [ref=e268]:
+        - generic [ref=e269]: 🔑
+        - heading "Ignition Monitor" [level=2] [ref=e270]
+        - generic [ref=e271]: No data
+      - generic [ref=e274]: Checking monitoring service…
+      - generic [ref=e276]:
+        - generic [ref=e277]:
+          - term [ref=e278]: Service
+          - definition [ref=e279]: Checking…
+        - generic [ref=e280]:
+          - term [ref=e281]: Monitoring
+          - definition [ref=e282]: Checking…
+    - article [ref=e285] [cursor=pointer]:
+      - button "Open Deal Watch details" [ref=e286]
+      - generic [ref=e287]:
+        - generic [ref=e288]: 🏷️
+        - heading "Deal Watch" [level=2] [ref=e289]
+        - button "Deal Watch status" [ref=e291]:
+          - generic [ref=e292]: —
+      - generic [ref=e293]: Loading watched items…
+      - generic [ref=e295]:
+        - generic [ref=e296]:
+          - term [ref=e297]: Latest price
+          - definition [ref=e298]: —
+        - generic [ref=e299]:
+          - term [ref=e300]: XMR
+          - definition [ref=e301]: —
+        - generic [ref=e302]:
+          - term [ref=e303]: Last check
+          - definition [ref=e304]: never
+    - article [ref=e307] [cursor=pointer]:
+      - button "Open lighting controls" [ref=e308]
+      - generic [ref=e309]:
+        - generic [ref=e310]: 💡
+        - heading "Lighting" [level=2] [ref=e311]
+        - generic [ref=e312]: Loading
+      - generic [ref=e315]: Reading room and light state…
+    - region [ref=e318]:
+      - button "Open UBNT Wi-Fi details" [ref=e319] [cursor=pointer]
+      - generic [ref=e320]:
+        - generic [ref=e321]: 📡
+        - heading "UBNT Wi-Fi" [level=2] [ref=e322]
+        - button "UBNT connection status" [ref=e324]:
+          - generic [ref=e325]: No data
+      - generic [ref=e326]: Waiting for antenna status…
+      - button "Starlink unavailable" [disabled] [ref=e329]:
+        - generic [ref=e330]:
+          - generic [ref=e331]: 🛰️
+          - strong [ref=e332]: Starlink
+        - generic [ref=e333]: No data
+        - generic [ref=e335]: Checking Tuya status…
+    - article [ref=e338] [cursor=pointer]:
+      - button "Open network history" [ref=e339]
+      - generic [ref=e340]:
+        - generic [ref=e341]: ◷
+        - heading "Network History" [level=2] [ref=e342]
+        - button "Network recording status" [ref=e344]:
+          - generic [ref=e345]: Loading
+      - generic [ref=e346]: Loading retained network evidence…
+      - paragraph [ref=e348]: Disconnects, supporting evidence, and coverage gaps
+    - article [ref=e351]:
+      - button "Open OpenWrt details" [ref=e352] [cursor=pointer]
+      - generic [ref=e353]:
+        - heading "OpenWrt" [level=2] [ref=e354]:
+          - generic [ref=e355]: 🌐
+        - generic [ref=e357]: Checking…
+      - generic [ref=e358]:
+        - generic [ref=e359]:
+          - generic [ref=e360]: MWAN3 route
+          - strong [ref=e362]: Route unavailable
+        - generic "MWAN3 interfaces"
+      - generic "Speed test" [ref=e363]:
+        - button "Speed Test" [ref=e364] [cursor=pointer]:
+          - generic [ref=e365]: ᯓ➤
+        - status [ref=e367]:
+          - strong [ref=e368]: Not run yet

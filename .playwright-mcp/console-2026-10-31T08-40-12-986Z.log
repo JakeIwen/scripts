@@ -1,0 +1,26 @@
+[     566ms] [LOG] [ServiceWorker] Registering service worker @ http://vanpi.lan/static/media/index-BgG53Xon.js:282
+[     567ms] [WARNING] [ServiceWorker] Service workers not supported @ http://vanpi.lan/static/media/index-BgG53Xon.js:282
+[     602ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://vanpi.lan/static/langs/en-US.json:0
+[     603ms] [WARNING] i18next::backendConnector: loading namespace translation for language en-US failed failed loading /static/langs/en-US.json; status code: 404 @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     605ms] [LOG] i18next::backendConnector: loaded namespace translation for language en {common_cancel: Cancel, common_save: Save, common_add: Add, common_back: Back, common_close: Close} @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     607ms] [LOG] i18next: languageChanged en-US @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     607ms] [LOG] i18next: initialized {debug: true, initImmediate: true, ns: Array(1), defaultNS: Array(1), fallbackLng: Array(1)} @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     694ms] [LOG] [useBackgroundProcesses] mounting @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     694ms] [LOG] [Poller] Starting worker @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     695ms] [LOG] [Pruner] Starting worker @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     695ms] [LOG] [AccountApi] Starting worker @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     695ms] [LOG] [VersionChecker] Starting version checker @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     795ms] [LOG] [useWebPushListener] Refreshing web push subscriptions [] @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     796ms] [ERROR] [useWebPushListener] Error refreshing web push subscriptions TypeError: Cannot read properties of undefined (reading 'getRegistration')
+    at Object.serviceWorkerRegistration (http://vanpi.lan/static/media/index-BgG53Xon.js:232:10318)
+    at Object.pushManager (http://vanpi.lan/static/media/index-BgG53Xon.js:232:10207)
+    at Object.webPushSubscription (http://vanpi.lan/static/media/index-BgG53Xon.js:232:10015)
+    at Object.updateWebPushSubscriptions (http://vanpi.lan/static/media/index-BgG53Xon.js:232:12911)
+    at http://vanpi.lan/static/media/index-BgG53Xon.js:232:97414
+    at http://vanpi.lan/static/media/index-BgG53Xon.js:232:97540
+    at Ic (http://vanpi.lan/static/media/index-BgG53Xon.js:8:91963)
+    at Sl (http://vanpi.lan/static/media/index-BgG53Xon.js:8:107141)
+    at xl (http://vanpi.lan/static/media/index-BgG53Xon.js:8:107025)
+    at Sl (http://vanpi.lan/static/media/index-BgG53Xon.js:8:107906) @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[     827ms] [LOG] [ConnectionManager] Refreshing connections @ http://vanpi.lan/static/media/index-BgG53Xon.js:231
+[    2772ms] [LOG] [Poller] Polling all subscriptions @ http://vanpi.lan/static/media/index-BgG53Xon.js:231

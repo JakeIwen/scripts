@@ -1,0 +1,25 @@
+[     436ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:14335
+[    6868ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://127.0.0.1:5173/api/speakers/art/5e47e7b7c1ea1abb:0
+[  121195ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:14335
+[  129426ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://127.0.0.1:5173/api/speakers/art/5e47e7b7c1ea1abb:0
+[  172057ms] ReferenceError: createPortal is not defined
+    at DiskStatsStrip (http://127.0.0.1:5173/src/features/storage/DiskStatsStrip.tsx?t=1793500025047:123:4)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:7994:27)
+[  172052ms] [WARNING] %s
+
+%s
+ An error occurred in the <DiskStatsStrip> component. Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries. @ http://127.0.0.1:5173/@vite/client:532
+[  180949ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://127.0.0.1:5173/api/speakers/art/5e47e7b7c1ea1abb:0
+[  192613ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=25edb6e0:14335
+[  200369ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://127.0.0.1:5173/api/speakers/art/5e47e7b7c1ea1abb:0
+[  778029ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/5e47e7b7c1ea1abb:0
+[  840931ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/5e47e7b7c1ea1abb:0

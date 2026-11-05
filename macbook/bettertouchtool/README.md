@@ -29,7 +29,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `status` | Playback-status output and compact row spacing. |
 | `notes` | Recent/Pinned Notes setup; `--labels-only --apply` limits edits to labels. |
 | `escape` | Escape dismissal while the three Media dropdowns are visible. |
-| `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
+| `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line and Cmd-C copies it; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
 | `finder-paste` | Cmd-V in Finder saves a clipboard image (a ctrl-cmd-shift-4 screenshot) as a PNG in the current folder; copied files and text paste as before. `--apply` installs, `--disable` turns it off; see below. |
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |
 | `repair sizes` | Repair conflicting min/max dimensions without normalizing valid custom sizes. |
@@ -300,20 +300,39 @@ this restore covers sequences lost before a checkpoint held them.
 /usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py text-keys --disable
 ```
 
-`install_text_editing_keys.py` adds seven global keyboard triggers and one
+`install_text_editing_keys.py` adds eight global keyboard triggers and one
 "Active App Did Change" trigger to the active Master preset, under fixed UUIDs:
 
 - `'` `"` `` ` `` `(` `[` `{` typed over a selection wrap it and keep the original
   text selected inside the pair, so a second key wraps again (`("word")`).
-- Cmd-X with no selection selects the caret's line and its line break with
-  Ctrl-A, Ctrl-Shift-E, Shift-Right, then presses the app's own Edit > Cut through
-  Accessibility. BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the cut
-  never goes through the keyboard.
+- Cmd-X with no selection cuts the caret's line: its logical line (a paragraph,
+  however it wraps) with the break that ends it, so the line is removed rather than
+  emptied. An unterminated last line has no break; an empty last line is left
+  alone. The runtime selects the line through Accessibility (a numeric range over
+  `AXValue`; in Firefox, the caret's text-marker paragraph), but only while the
+  caret and text are as it first read them, and reads the selection back. Only an
+  exact match, with the text unchanged and the same app and field still focused
+  (checked last, right before the press), is cut, by pressing the app's own Edit >
+  Cut through Accessibility: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
+  It then checks that exactly the line left the text. No keystrokes are posted,
+  since a posted key's delivery cannot be confirmed; if anything stops the cut
+  first, the caret goes back unless you have moved it. In Firefox a blank line is
+  refused with a notification: its flat text could not confirm the cut.
+- Cmd-C with no selection copies the caret's line (as VS Code does): its text and
+  one `\n`, whatever break the app uses, on the last line too, so an empty line
+  copies `\n` (in Firefox, the paragraph's text plus `\n`). The runtime writes it
+  to the clipboard itself, as plain text, so the field is never selected or
+  changed and the caret stays put; rich formatting is not copied. It notes the
+  clipboard's version before reading the field and reads the caret and focus again
+  after the text, and copies nothing if a key, a focus change or another copy came
+  in between. If the write itself fails, the previous clipboard (every item and
+  type) is put back. With a selection, or where the condition does not match,
+  Cmd-C is the app's normal copy.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
 `focused_element_details` shows a settable `AXSelectedText` with a nonempty range
-(wrapping) or an empty one (Cmd-X), in an app outside
+(wrapping) or an empty one (Cmd-X, Cmd-C), in an app outside
 `text_editing_conditions.EXCLUDED_APPS` (code editors
 and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
 no text tree never match. Checking the condition adds about 20 ms to each of these
@@ -324,8 +343,8 @@ before any write.
 Wrapping reuses `text_selection.js` (Firefox and Signal replace through Paste, as
 for the text transforms). Electron apps build their text tree only on request, so
 the app-switch trigger runs `runAppSwitch` to set `AXManualAccessibility`
-in the newly focused app. Firefox maps the paragraph keys to the visual line, so a
-soft-wrapped line in Firefox is cut one visual line at a time. Wrapping replaces
+in the newly focused app. A line is the logical line in every app, Firefox
+included, so a soft-wrapped line is cut or copied whole. Wrapping replaces
 the selection as plain text, which drops formatting in rich editors. Multiple
 cursors and "select next occurrence" are not possible: macOS text controls have a
 single insertion point.
@@ -477,7 +496,7 @@ and report identities. Recreate venvs rather than moving them.
 - `install_text_editing_keys.py`: the editing keys' guarded installer, also through
   the socket CLI (see Editing keys). `text_editing_conditions.py` holds their trigger
   conditions and truth table, evaluated with NSPredicate by `text_editing_conditions.js`.
-  `text_editing_keys.js` is their runtime (wrap, line cut, app-switch preparation),
+  `text_editing_keys.js` is their runtime (wrap, line cut and copy, app-switch preparation),
   loaded after `text_selection.js`; each trigger's action reads both files.
 - `text_selection.js`: runtime Accessibility adapter, executed inside BTT via
   `runJXA`. It reads the focused control's selected text/range, checks that the
@@ -503,7 +522,12 @@ and report identities. Recreate venvs rather than moving them.
   Runtime source is loaded on each use, so subsequent source fixes do not need
   another menu installation.
 - `text_menu_paste.js`: `findEditMenuItem` locates the Cut/Copy/Paste group (the
-  editing keys' Cmd-X presses its Cut).
+  editing keys press its Cut), `focusUnchanged` is the focus check both Paste and
+  the line cut repeat before they act, and `writeClipboardText` is the one plain
+  clipboard write, used by Paste's temporary clipboard and the editing keys' Cmd-C:
+  it refuses if the clipboard moved since `copyPasteboard` saved it, and on a
+  failed write `restorePasteboard` puts the saved clipboard back while the failed
+  write is still the newest.
   Signal/Firefox's replacement adapter uses the unique native Paste
   menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
   It preserves every readable clipboard item/format, marks transformed text transient
@@ -513,9 +537,11 @@ and report identities. Recreate venvs rather than moving them.
   the resulting draft must match the exact expected edit before success is reported.
   It then restores the transformed selection. No Copy or message-send action runs.
   `tests/menu_paste.test.cjs` covers restoration, concurrent copies, menu refusal,
-  unverified writes and asynchronous draft confirmation. With `BTT_LIVE_TESTS=1`,
-  it also exercises the real Cocoa bridge on a disposable named pasteboard; that
-  opt-in test never accesses the general clipboard or user text.
+  unverified writes and asynchronous draft confirmation, on the in-memory
+  pasteboard in `tests/pasteboard_fixture.cjs` that the editing keys' tests share.
+  With `BTT_LIVE_TESTS=1`, it also exercises the real Cocoa bridge on a disposable
+  named pasteboard; that opt-in test never accesses the general clipboard or user
+  text.
   Command discovery inspects only immediate Cut/Copy/Paste siblings in a top-level
   menu; it never descends into browser history, bookmarks or Services submenus.
   Firefox bypasses `AXSelectedText` because its
@@ -526,7 +552,8 @@ and report identities. Recreate venvs rather than moving them.
   Temporary outcome diagnostics retain per-app results and the last error, so a
   successful Notes transform cannot erase evidence of a Firefox failure. App
   attribution uses AX keyboard focus; these private files contain no selected text.
-- `text_markers.js`: Firefox reselection keeps native text-node positions. A flat
+- `text_markers.js`: Firefox reselection keeps native text-node positions (its
+  `paragraphAt` ranges are also the editing keys' Firefox lines). A flat
   offset can denote both the end of a paragraph and the start of the next one;
   restoring that offset can include an invisible paragraph separator. The adapter
   steps native character boundaries backward from the verified insertion caret,
@@ -543,11 +570,12 @@ and report identities. Recreate venvs rather than moving them.
   break, including one ending at the next paragraph's start, is refused because the
   flattened text would be pasted back merged. Selections across formatting runs
   within one paragraph, and whole-field selections in the URL bar, are allowed.
-  `tests/text_markers.test.cjs` models those Firefox semantics from its
-  accessibility sources, reproduces the refused paragraph-start selection and the
-  URL-bar select-all, and verifies consecutive transforms, Unicode length changes,
-  repeated text, document-end selections, boundary refusals and selection movement
-  during reselection.
+  `tests/firefox_editor_fixture.cjs` models those Firefox semantics from its
+  accessibility sources for both `tests/text_markers.test.cjs` and the editing keys'
+  `tests/editing_keys.test.cjs`. The first reproduces the refused paragraph-start
+  selection and the URL-bar select-all, and verifies consecutive transforms,
+  Unicode length changes, repeated text, document-end selections, boundary refusals
+  and selection movement during reselection.
 - `signal_text_diagnostic.js`: temporary Media > Tools > Signal Diagnostic button's
   target-app runner. It requests Signal activation and waits up to 30 seconds for a stable draft selection,
   optionally attempts the selected transform, then returns to BTT with a detailed

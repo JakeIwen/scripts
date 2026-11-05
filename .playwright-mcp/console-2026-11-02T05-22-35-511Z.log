@@ -1,0 +1,4 @@
+[    3205ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/fcb812400431b310:0
+[   23954ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://vanpi.lan:8788/api/status:0
+[   24335ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://vanpi.lan:8788/api/connectivity?active=1:0
+[   25536ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://vanpi.lan:8788/api/connectivity?active=1:0

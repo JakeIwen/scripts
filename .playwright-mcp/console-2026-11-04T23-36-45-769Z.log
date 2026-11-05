@@ -1,0 +1,12 @@
+[    4671ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/b51c34efcdea82db:0
+[   22582ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/0cd2f48c8580578e:0
+[  494024ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/63d98494376732e7:0
+[  831394ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/1ff9c20c5d8d112a:0
+[ 1077934ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/44e79e17bc7078db:0
+[ 1356702ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/2886dc92eb7e28a5:0
+[ 1707182ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/de4ef76bc623fa90:0
+[ 1949025ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/dd6430d5c271a35e:0
+[ 2113445ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/afef420096a0318f:0
+[ 2297829ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/8eba7279f603fb3f:0
+[ 2633261ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/888b3ce1ae115769:0
+[ 2847645ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/speakers/art/bc5836fec7e4c5f8:0

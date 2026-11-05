@@ -1,0 +1,10 @@
+[  170833ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/media-organizer/status:0
+[  178105ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/backups:0
+[  179114ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/ipt-watch/status:0
+[  180936ms] [ERROR] Failed to load resource: the server responded with a status of 502 (BAD GATEWAY) @ http://vanpi.lan:8788/api/price-checks:0
+[  182189ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/network-history?hours=6:0
+[  192112ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/ignition-monitor:0
+[  194020ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/system-monitor?hours=6:0
+[  239258ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/system-monitor?hours=6:0
+[  259225ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/network-history?hours=6:0
+[  348864ms] [ERROR] Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE) @ http://vanpi.lan:8788/api/ignition-monitor:0

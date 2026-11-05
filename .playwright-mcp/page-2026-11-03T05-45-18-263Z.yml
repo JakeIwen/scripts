@@ -1,0 +1,29 @@
+- main [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - generic "Select lights" [ref=f1e4]:
+      - button "All" [ref=f1e5] [cursor=pointer]
+      - generic [ref=f1e6]:
+        - generic [ref=f1e7]: Living
+        - 'button "Dresser: on" [ref=f1e8] [cursor=pointer]':
+          - generic [ref=f1e10]: Dresser
+        - 'button "Desk: on" [ref=f1e11] [cursor=pointer]':
+          - generic [ref=f1e13]: Desk
+      - generic [ref=f1e14]:
+        - generic [ref=f1e15]: Bedroom
+        - 'button "Bed: off" [ref=f1e16] [cursor=pointer]':
+          - generic [ref=f1e18]: Bed
+      - generic [ref=f1e19]:
+        - generic [ref=f1e20]: Cab
+        - 'button "Cab: unavailable" [disabled] [ref=f1e21]':
+          - generic [ref=f1e23]: Cab
+    - generic [ref=f1e24]:
+      - button "Colour" [disabled] [pressed] [ref=f1e25]
+      - button "White" [disabled] [ref=f1e26]
+      - button "Turn on selected lights" [disabled] [ref=f1e27]: Turn on
+    - generic [ref=f1e29]:
+      - 'slider "Colour: left/right hue, up/down saturation" [disabled]'
+    - generic [ref=f1e30]:
+      - generic [ref=f1e31]: Brightness
+      - status "Brightness" [ref=f1e32]: 100%
+      - slider "Brightness" [disabled] [ref=f1e33] [cursor=pointer]: "100"
+    - status [ref=f1e34]: Sending…

@@ -1,0 +1,1100 @@
+- generic [active] [ref=f2e1]:
+  - navigation "Breadcrumb" [ref=f2e2]:
+    - link "Visual Guides & Documentation" [ref=f2e3] [cursor=pointer]:
+      - /url: ../index.html
+    - generic [ref=f2e4]: /
+    - generic [ref=f2e5]: Keyboard shortcuts
+  - main [ref=f2e6]:
+    - heading "Keyboard shortcuts" [level=1] [ref=f2e7]
+    - search "Filter keyboard shortcuts" [ref=f2e8]:
+      - generic [ref=f2e9]:
+        - text: Search keys, action or source
+        - searchbox "Search keys, action or source" [ref=f2e10]
+      - generic [ref=f2e11]:
+        - text: Provider
+        - combobox "Provider" [ref=f2e12]:
+          - option "All providers" [selected]
+          - option "BetterTouchTool"
+          - option "iTerm2"
+          - option "iTerm2 and zsh"
+          - option "macOS hidutil"
+          - option "zsh"
+      - generic [ref=f2e13]:
+        - text: App / scope
+        - combobox "App / scope" [ref=f2e14]:
+          - option "All scopes" [selected]
+          - option "All apps (global)"
+          - option "Atom"
+          - option "BTT Clipboard Manager"
+          - option "Both configured terminal profiles"
+          - option "Chrome"
+          - option "Emacs and vi insert mode"
+          - option "Emacs and vi keymaps"
+          - option "Emacs mode and optional vi insert mode"
+          - option "Firefox"
+          - option "Global terminal mapping"
+          - option "Notes"
+          - option "Pages"
+          - option "Spotify"
+          - option "System-wide on input services carrying this mapping"
+          - option "Vi insert mode"
+          - option "Vi normal mode"
+          - option "Zsh emacs and vi insert mode"
+      - generic [ref=f2e15]:
+        - checkbox "Include disabled" [ref=f2e16]
+        - text: Include disabled
+      - button "Reset" [ref=f2e17] [cursor=pointer]
+    - status [ref=f2e18]: 100 of 113 mappings. Disabled mappings hidden.
+    - group [ref=f2e19]:
+      - generic "Coverage and limitations" [ref=f2e20] [cursor=pointer]
+    - list "Keyboard mappings" [ref=f2e21]:
+      - listitem [ref=f2e22]:
+        - group "'" [ref=f2e23]
+        - generic [ref=f2e25]:
+          - heading "Wrap the selected text in single quotes." [level=2] [ref=f2e26]
+          - generic [ref=f2e27]: conditional
+          - paragraph [ref=f2e28]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e29]: "Conditions: Editable, nonempty selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original key passes through."
+          - paragraph [ref=f2e30]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable selection; unsupported editors may refuse the operation."
+          - group [ref=f2e31]:
+            - generic "Source · verified 2026-11-04" [ref=f2e32] [cursor=pointer]
+      - listitem [ref=f2e33]:
+        - group ". then O then M then . then O then M" [ref=f2e34]:
+          - generic [ref=f2e35]: .
+          - generic [ref=f2e36]: →
+          - generic [ref=f2e37]: O
+          - generic [ref=f2e38]: →
+          - generic [ref=f2e39]: M
+          - generic [ref=f2e40]: →
+          - generic [ref=f2e41]: .
+          - generic [ref=f2e42]: →
+          - generic [ref=f2e43]: O
+          - generic [ref=f2e44]: →
+          - generic [ref=f2e45]: M
+        - generic [ref=f2e46]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e47]
+          - generic [ref=f2e48]: enabled
+          - paragraph [ref=f2e49]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e50]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 6 triggering characters before the action. Saved sequence keyboard ID -2052004921; device identity not resolved. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e51]:
+            - generic "Source · verified 2026-11-04" [ref=f2e52] [cursor=pointer]
+      - listitem [ref=f2e53]:
+        - group ". then P then R then Y" [ref=f2e54]:
+          - generic [ref=f2e55]: .
+          - generic [ref=f2e56]: →
+          - generic [ref=f2e57]: P
+          - generic [ref=f2e58]: →
+          - generic [ref=f2e59]: R
+          - generic [ref=f2e60]: →
+          - generic [ref=f2e61]: "Y"
+        - generic [ref=f2e62]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e63]
+          - generic [ref=f2e64]: enabled
+          - paragraph [ref=f2e65]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e66]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 4 triggering characters before the action. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e67]:
+            - generic "Source · verified 2026-11-04" [ref=f2e68] [cursor=pointer]
+      - listitem [ref=f2e69]:
+        - group "[" [ref=f2e70]
+        - generic [ref=f2e72]:
+          - heading "Wrap the selected text in square brackets." [level=2] [ref=f2e73]
+          - generic [ref=f2e74]: conditional
+          - paragraph [ref=f2e75]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e76]: "Conditions: Editable, nonempty selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original key passes through."
+          - paragraph [ref=f2e77]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable selection; unsupported editors may refuse the operation."
+          - group [ref=f2e78]:
+            - generic "Source · verified 2026-11-04" [ref=f2e79] [cursor=pointer]
+      - listitem [ref=f2e80]:
+        - 'group "`" [ref=f2e81]'
+        - generic [ref=f2e83]:
+          - heading "Wrap the selected text in backticks." [level=2] [ref=f2e84]
+          - generic [ref=f2e85]: conditional
+          - paragraph [ref=f2e86]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e87]: "Conditions: Editable, nonempty selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original key passes through."
+          - paragraph [ref=f2e88]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable selection; unsupported editors may refuse the operation."
+          - group [ref=f2e89]:
+            - generic "Source · verified 2026-11-04" [ref=f2e90] [cursor=pointer]
+      - listitem [ref=f2e91]:
+        - group "A then Q then B" [ref=f2e92]:
+          - generic [ref=f2e93]: A
+          - generic [ref=f2e94]: →
+          - generic [ref=f2e95]: Q
+          - generic [ref=f2e96]: →
+          - generic [ref=f2e97]: B
+        - generic [ref=f2e98]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e99]
+          - generic [ref=f2e100]: enabled
+          - paragraph [ref=f2e101]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e102]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.376 seconds. BTT removes 3 triggering characters before the action. Saved sequence keyboard ID 1715; device identity not resolved. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e103]:
+            - generic "Source · verified 2026-11-04" [ref=f2e104] [cursor=pointer]
+      - listitem [ref=f2e105]:
+        - group "Cmd+C" [ref=f2e106]
+        - generic [ref=f2e108]:
+          - heading "Copy the current line plus one newline, preserving the caret." [level=2] [ref=f2e109]
+          - generic [ref=f2e110]: conditional
+          - paragraph [ref=f2e111]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e112]: "Conditions: Editable caret with no selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original shortcut passes through."
+          - paragraph [ref=f2e113]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable text; unsupported editors may refuse the operation."
+          - group [ref=f2e114]:
+            - generic "Source · verified 2026-11-04" [ref=f2e115] [cursor=pointer]
+      - listitem [ref=f2e116]:
+        - group "Cmd+V" [ref=f2e117]
+        - generic [ref=f2e119]:
+          - heading "Paste files/text in Finder, or save a clipboard image as a PNG in the current Finder folder." [level=2] [ref=f2e120]
+          - generic [ref=f2e121]: conditional
+          - paragraph [ref=f2e122]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e123]: "Conditions: Finder frontmost and no editable text field focused; otherwise Cmd+V passes through."
+          - paragraph [ref=f2e124]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Image paste writes a new file; normal file/text paste uses Finder native Paste."
+          - group [ref=f2e125]:
+            - generic "Source · verified 2026-11-04" [ref=f2e126] [cursor=pointer]
+      - listitem [ref=f2e127]:
+        - group "Cmd+X" [ref=f2e128]
+        - generic [ref=f2e130]:
+          - heading "Cut the current line when nothing is selected." [level=2] [ref=f2e131]
+          - generic [ref=f2e132]: conditional
+          - paragraph [ref=f2e133]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e134]: "Conditions: Editable caret with no selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original shortcut passes through."
+          - paragraph [ref=f2e135]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable text; unsupported editors may refuse the operation."
+          - group [ref=f2e136]:
+            - generic "Source · verified 2026-11-04" [ref=f2e137] [cursor=pointer]
+      - listitem [ref=f2e138]:
+        - group "Ctrl+Option+Cmd+Brightness Down" [ref=f2e139]
+        - generic [ref=f2e141]:
+          - heading "Decrease volume across the configured Sonos speakers." [level=2] [ref=f2e142]
+          - generic [ref=f2e143]: enabled
+          - paragraph [ref=f2e144]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e145]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified. Another retained binding uses this chord for a different Sonos action and a different saved keyboard ID."
+          - group [ref=f2e146]:
+            - generic "Source · verified 2026-11-04" [ref=f2e147] [cursor=pointer]
+      - listitem [ref=f2e148]:
+        - group "Ctrl+Option+Cmd+Brightness Down" [ref=f2e149]
+        - generic [ref=f2e151]:
+          - heading "Group Sonos speakers for party mode and equalize/unmute their volume." [level=2] [ref=f2e152]
+          - generic [ref=f2e153]: enabled
+          - paragraph [ref=f2e154]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e155]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. This changes speaker grouping and may change volume and mute state. Another retained binding uses this chord for a different Sonos action and a different saved keyboard ID."
+          - group [ref=f2e156]:
+            - generic "Source · verified 2026-11-04" [ref=f2e157] [cursor=pointer]
+      - listitem [ref=f2e158]:
+        - group "Ctrl+Option+Cmd+Brightness Up" [ref=f2e159]
+        - generic [ref=f2e161]:
+          - heading "Stop Sonos playback and ungroup the configured speakers." [level=2] [ref=f2e162]
+          - generic [ref=f2e163]: enabled
+          - paragraph [ref=f2e164]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e165]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified."
+          - group [ref=f2e166]:
+            - generic "Source · verified 2026-11-04" [ref=f2e167] [cursor=pointer]
+      - listitem [ref=f2e168]:
+        - group "Ctrl+Option+Cmd+Mute" [ref=f2e169]
+        - generic [ref=f2e171]:
+          - heading "Stop Sonos playback and ungroup the configured speakers." [level=2] [ref=f2e172]
+          - generic [ref=f2e173]: enabled
+          - paragraph [ref=f2e174]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e175]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified."
+          - group [ref=f2e176]:
+            - generic "Source · verified 2026-11-04" [ref=f2e177] [cursor=pointer]
+      - listitem [ref=f2e178]:
+        - group "Ctrl+Option+Cmd+P" [ref=f2e179]
+        - generic [ref=f2e181]:
+          - heading "Open the saved URL (private destination)." [level=2] [ref=f2e182]
+          - generic [ref=f2e183]: enabled
+          - paragraph [ref=f2e184]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e185]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Saved destination and browser choice are intentionally withheld."
+          - group [ref=f2e186]:
+            - generic "Source · verified 2026-11-04" [ref=f2e187] [cursor=pointer]
+      - listitem [ref=f2e188]:
+        - group "Ctrl+Option+Cmd+Volume Down" [ref=f2e189]
+        - generic [ref=f2e191]:
+          - heading "Decrease volume across the configured Sonos speakers." [level=2] [ref=f2e192]
+          - generic [ref=f2e193]: enabled
+          - paragraph [ref=f2e194]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e195]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified."
+          - group [ref=f2e196]:
+            - generic "Source · verified 2026-11-04" [ref=f2e197] [cursor=pointer]
+      - listitem [ref=f2e198]:
+        - group "Ctrl+Option+Cmd+Volume Up" [ref=f2e199]
+        - generic [ref=f2e201]:
+          - heading "Increase volume across the configured Sonos speakers." [level=2] [ref=f2e202]
+          - generic [ref=f2e203]: enabled
+          - paragraph [ref=f2e204]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e205]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified."
+          - group [ref=f2e206]:
+            - generic "Source · verified 2026-11-04" [ref=f2e207] [cursor=pointer]
+      - listitem [ref=f2e208]:
+        - group "Ctrl+Option+Shift+Cmd+5" [ref=f2e209]
+        - generic [ref=f2e211]:
+          - heading "Switch Sonos to the movie/optical listening preset." [level=2] [ref=f2e212]
+          - generic [ref=f2e213]: conditional
+          - paragraph [ref=f2e214]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e215]: "Conditions: Hold the chord for at least 1.035 seconds."
+          - paragraph [ref=f2e216]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Movie preset changes grouping, mute state and volume; it is not just play/pause."
+          - group [ref=f2e217]:
+            - generic "Source · verified 2026-11-04" [ref=f2e218] [cursor=pointer]
+      - listitem [ref=f2e219]:
+        - group "Ctrl+Option+Shift+Cmd+Fast Forward" [ref=f2e220]
+        - generic [ref=f2e222]:
+          - heading "Request a 5-minute skip forward in remote video playback." [level=2] [ref=f2e223]
+          - generic [ref=f2e224]: conditional
+          - paragraph [ref=f2e225]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e226]: "Conditions: Hold the chord for at least 1.035 seconds."
+          - paragraph [ref=f2e227]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Uses a remote playback command; remote availability and live behavior were not tested. A second retained binding uses this same chord; overlapping hold thresholds/action ordering were not tested."
+          - group [ref=f2e228]:
+            - generic "Source · verified 2026-11-04" [ref=f2e229] [cursor=pointer]
+      - listitem [ref=f2e230]:
+        - group "Ctrl+Option+Shift+Cmd+Fast Forward" [ref=f2e231]
+        - generic [ref=f2e233]:
+          - heading "Request a 20-second skip forward in remote video playback." [level=2] [ref=f2e234]
+          - generic [ref=f2e235]: enabled
+          - paragraph [ref=f2e236]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e237]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified. Uses a remote playback command; remote availability and live behavior were not tested. A second retained binding uses this same chord; overlapping hold thresholds/action ordering were not tested."
+          - group [ref=f2e238]:
+            - generic "Source · verified 2026-11-04" [ref=f2e239] [cursor=pointer]
+      - listitem [ref=f2e240]:
+        - group "Ctrl+Option+Shift+Cmd+Play/Pause" [ref=f2e241]
+        - generic [ref=f2e243]:
+          - heading "Toggle remote video playback between play and pause." [level=2] [ref=f2e244]
+          - generic [ref=f2e245]: enabled
+          - paragraph [ref=f2e246]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e247]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Uses a remote playback command; remote availability and live behavior were not tested."
+          - group [ref=f2e248]:
+            - generic "Source · verified 2026-11-04" [ref=f2e249] [cursor=pointer]
+      - listitem [ref=f2e250]:
+        - group "Ctrl+Option+Shift+Cmd+Rewind" [ref=f2e251]
+        - generic [ref=f2e253]:
+          - heading "Request a 20-second skip backward in remote video playback." [level=2] [ref=f2e254]
+          - generic [ref=f2e255]: conditional
+          - paragraph [ref=f2e256]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e257]: "Conditions: Hold the chord for at least 1.035 seconds."
+          - paragraph [ref=f2e258]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Matching named target is stored only in an inactive preset; explicit-dispatch behavior is unverified. Uses a remote playback command; remote availability and live behavior were not tested. A second retained binding uses this same chord; overlapping hold thresholds/action ordering were not tested."
+          - group [ref=f2e259]:
+            - generic "Source · verified 2026-11-04" [ref=f2e260] [cursor=pointer]
+      - listitem [ref=f2e261]:
+        - group "Ctrl+Option+Shift+Cmd+Rewind" [ref=f2e262]
+        - generic [ref=f2e264]:
+          - heading "Request a 5-minute skip backward in remote video playback." [level=2] [ref=f2e265]
+          - generic [ref=f2e266]: conditional
+          - paragraph [ref=f2e267]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e268]: "Conditions: Hold the chord for at least 1.035 seconds."
+          - paragraph [ref=f2e269]: "Limitations: Saved keyboard ID 2741; its device identity/filtering semantics were not resolved. Uses a remote playback command; remote availability and live behavior were not tested. A second retained binding uses this same chord; overlapping hold thresholds/action ordering were not tested."
+          - group [ref=f2e270]:
+            - generic "Source · verified 2026-11-04" [ref=f2e271] [cursor=pointer]
+      - listitem [ref=f2e272]:
+        - group "Fn+Ctrl+Option+Cmd+F8" [ref=f2e273]
+        - generic [ref=f2e275]:
+          - heading "Invoke the saved resume action; its named target could not be found." [level=2] [ref=f2e276]
+          - generic [ref=f2e277]: enabled
+          - paragraph [ref=f2e278]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e279]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. No matching named trigger exists in the current store; intended effect is unresolved."
+          - group [ref=f2e280]:
+            - generic "Source · verified 2026-11-04" [ref=f2e281] [cursor=pointer]
+      - listitem [ref=f2e282]:
+        - group "Fn+Ctrl+Option+Shift+Cmd+Down Arrow" [ref=f2e283]
+        - generic [ref=f2e285]:
+          - heading "Convert selected text to lowercase." [level=2] [ref=f2e286]
+          - generic [ref=f2e287]: conditional
+          - paragraph [ref=f2e288]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e289]: "Conditions: Requires a supported editable text selection at runtime; saved activation predicate is always true."
+          - paragraph [ref=f2e290]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Does not transform the whole document; unsupported or missing selections are refused."
+          - group [ref=f2e291]:
+            - generic "Source · verified 2026-11-04" [ref=f2e292] [cursor=pointer]
+      - listitem [ref=f2e293]:
+        - group "Fn+Ctrl+Option+Shift+Cmd+Up Arrow" [ref=f2e294]
+        - generic [ref=f2e296]:
+          - heading "Convert selected text to uppercase." [level=2] [ref=f2e297]
+          - generic [ref=f2e298]: conditional
+          - paragraph [ref=f2e299]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e300]: "Conditions: Requires a supported editable text selection at runtime; saved activation predicate is always true."
+          - paragraph [ref=f2e301]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Does not transform the whole document; unsupported or missing selections are refused."
+          - group [ref=f2e302]:
+            - generic "Source · verified 2026-11-04" [ref=f2e303] [cursor=pointer]
+      - listitem [ref=f2e304]:
+        - group "Fn+Esc" [ref=f2e305]
+        - generic [ref=f2e307]:
+          - heading "Show the BTT Touch Bar." [level=2] [ref=f2e308]
+          - generic [ref=f2e309]: enabled
+          - paragraph [ref=f2e310]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e311]: "Limitations: Saved keyboard ID 2658; its device identity/filtering semantics were not resolved."
+          - group [ref=f2e312]:
+            - generic "Source · verified 2026-11-04" [ref=f2e313] [cursor=pointer]
+      - listitem [ref=f2e314]:
+        - group "J then I then Shift+2 (@ on US layout)" [ref=f2e315]:
+          - generic [ref=f2e316]: J
+          - generic [ref=f2e317]: →
+          - generic [ref=f2e318]: I
+          - generic [ref=f2e319]: →
+          - generic [ref=f2e320]: Shift+2 (@ on US layout)
+        - generic [ref=f2e321]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e322]
+          - generic [ref=f2e323]: enabled
+          - paragraph [ref=f2e324]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e325]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 3 triggering characters before the action. Saved sequence keyboard ID -2052004921; device identity not resolved. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e326]:
+            - generic "Source · verified 2026-11-04" [ref=f2e327] [cursor=pointer]
+      - listitem [ref=f2e328]:
+        - group "J then Q then Q" [ref=f2e329]:
+          - generic [ref=f2e330]: J
+          - generic [ref=f2e331]: →
+          - generic [ref=f2e332]: Q
+          - generic [ref=f2e333]: →
+          - generic [ref=f2e334]: Q
+        - generic [ref=f2e335]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e336]
+          - generic [ref=f2e337]: enabled
+          - paragraph [ref=f2e338]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e339]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 3 triggering characters before the action. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e340]:
+            - generic "Source · verified 2026-11-04" [ref=f2e341] [cursor=pointer]
+      - listitem [ref=f2e342]:
+        - group "L then 3 then K" [ref=f2e343]:
+          - generic [ref=f2e344]: L
+          - generic [ref=f2e345]: →
+          - generic [ref=f2e346]: "3"
+          - generic [ref=f2e347]: →
+          - generic [ref=f2e348]: K
+        - generic [ref=f2e349]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e350]
+          - generic [ref=f2e351]: enabled
+          - paragraph [ref=f2e352]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e353]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 3 triggering characters before the action. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e354]:
+            - generic "Source · verified 2026-11-04" [ref=f2e355] [cursor=pointer]
+      - listitem [ref=f2e356]:
+        - group "L then D then E then V" [ref=f2e357]:
+          - generic [ref=f2e358]: L
+          - generic [ref=f2e359]: →
+          - generic [ref=f2e360]: D
+          - generic [ref=f2e361]: →
+          - generic [ref=f2e362]: E
+          - generic [ref=f2e363]: →
+          - generic [ref=f2e364]: V
+        - generic [ref=f2e365]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e366]
+          - generic [ref=f2e367]: conditional
+          - paragraph [ref=f2e368]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e369]: "Conditions: Not in Terminal, iTerm2, Ghostty, Warp, Kitty, Alacritty or WezTerm."
+          - paragraph [ref=f2e370]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 4 triggering characters before the action. Saved sequence keyboard ID -2052004921; device identity not resolved. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e371]:
+            - generic "Source · verified 2026-11-04" [ref=f2e372] [cursor=pointer]
+      - listitem [ref=f2e373]:
+        - group "L then F then D" [ref=f2e374]:
+          - generic [ref=f2e375]: L
+          - generic [ref=f2e376]: →
+          - generic [ref=f2e377]: F
+          - generic [ref=f2e378]: →
+          - generic [ref=f2e379]: D
+        - generic [ref=f2e380]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e381]
+          - generic [ref=f2e382]: enabled
+          - paragraph [ref=f2e383]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e384]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 3 triggering characters before the action. Saved sequence keyboard ID -2052004921; device identity not resolved. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e385]:
+            - generic "Source · verified 2026-11-04" [ref=f2e386] [cursor=pointer]
+      - listitem [ref=f2e387]:
+        - group "R then L then F" [ref=f2e388]:
+          - generic [ref=f2e389]: R
+          - generic [ref=f2e390]: →
+          - generic [ref=f2e391]: L
+          - generic [ref=f2e392]: →
+          - generic [ref=f2e393]: F
+        - generic [ref=f2e394]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e395]
+          - generic [ref=f2e396]: enabled
+          - paragraph [ref=f2e397]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e398]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 3 triggering characters before the action. Saved sequence keyboard ID -2052004921; device identity not resolved. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e399]:
+            - generic "Source · verified 2026-11-04" [ref=f2e400] [cursor=pointer]
+      - listitem [ref=f2e401]:
+        - group "S then H then R then G" [ref=f2e402]:
+          - generic [ref=f2e403]: S
+          - generic [ref=f2e404]: →
+          - generic [ref=f2e405]: H
+          - generic [ref=f2e406]: →
+          - generic [ref=f2e407]: R
+          - generic [ref=f2e408]: →
+          - generic [ref=f2e409]: G
+        - generic [ref=f2e410]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e411]
+          - generic [ref=f2e412]: enabled
+          - paragraph [ref=f2e413]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e414]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.300 seconds. BTT removes 4 triggering characters before the action. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e415]:
+            - generic "Source · verified 2026-11-04" [ref=f2e416] [cursor=pointer]
+      - listitem [ref=f2e417]:
+        - group "Shift+'" [ref=f2e418]
+        - generic [ref=f2e420]:
+          - heading "Wrap the selected text in double quotes." [level=2] [ref=f2e421]
+          - generic [ref=f2e422]: conditional
+          - paragraph [ref=f2e423]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e424]: "Conditions: Editable, nonempty selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original key passes through."
+          - paragraph [ref=f2e425]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable selection; unsupported editors may refuse the operation."
+          - group [ref=f2e426]:
+            - generic "Source · verified 2026-11-04" [ref=f2e427] [cursor=pointer]
+      - listitem [ref=f2e428]:
+        - group "Shift+9" [ref=f2e429]
+        - generic [ref=f2e431]:
+          - heading "Wrap the selected text in parentheses." [level=2] [ref=f2e432]
+          - generic [ref=f2e433]: conditional
+          - paragraph [ref=f2e434]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e435]: "Conditions: Editable, nonempty selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original key passes through."
+          - paragraph [ref=f2e436]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable selection; unsupported editors may refuse the operation."
+          - group [ref=f2e437]:
+            - generic "Source · verified 2026-11-04" [ref=f2e438] [cursor=pointer]
+      - listitem [ref=f2e439]:
+        - group "Shift+[" [ref=f2e440]
+        - generic [ref=f2e442]:
+          - heading "Wrap the selected text in braces." [level=2] [ref=f2e443]
+          - generic [ref=f2e444]: conditional
+          - paragraph [ref=f2e445]: BetterTouchTool · All apps (global)
+          - paragraph [ref=f2e446]: "Conditions: Editable, nonempty selection; excludes configured code editors and terminal apps (including JetBrains). Otherwise the original key passes through."
+          - paragraph [ref=f2e447]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Requires Accessibility-readable/settable selection; unsupported editors may refuse the operation."
+          - group [ref=f2e448]:
+            - generic "Source · verified 2026-11-04" [ref=f2e449] [cursor=pointer]
+      - listitem [ref=f2e450]:
+        - group "C then O then S then N then T then Space" [ref=f2e451]:
+          - generic [ref=f2e452]: C
+          - generic [ref=f2e453]: →
+          - generic [ref=f2e454]: O
+          - generic [ref=f2e455]: →
+          - generic [ref=f2e456]: S
+          - generic [ref=f2e457]: →
+          - generic [ref=f2e458]: "N"
+          - generic [ref=f2e459]: →
+          - generic [ref=f2e460]: T
+          - generic [ref=f2e461]: →
+          - generic [ref=f2e462]: Space
+        - generic [ref=f2e463]:
+          - heading "Insert saved text (private)." [level=2] [ref=f2e464]
+          - generic [ref=f2e465]: enabled
+          - paragraph [ref=f2e466]: BetterTouchTool · Atom
+          - paragraph [ref=f2e467]: "Limitations: Type the steps consecutively; saved inter-key pause setting is 0.258 seconds. Saved sequence uses Undo afterwards; replacement/caret details were not tested. Expansion content is intentionally withheld; payload and resulting caret position were not tested."
+          - group [ref=f2e468]:
+            - generic "Source · verified 2026-11-04" [ref=f2e469] [cursor=pointer]
+      - listitem [ref=f2e470]:
+        - group "Cmd+1" [ref=f2e471]
+        - generic [ref=f2e473]:
+          - heading "Paste clipboard-history item 1 from BTT Clipboard Manager." [level=2] [ref=f2e474]
+          - generic [ref=f2e475]: enabled
+          - paragraph [ref=f2e476]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e477]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e478]:
+            - generic "Source · verified 2026-11-04" [ref=f2e479] [cursor=pointer]
+      - listitem [ref=f2e480]:
+        - group "Cmd+2" [ref=f2e481]
+        - generic [ref=f2e483]:
+          - heading "Paste clipboard-history item 2 from BTT Clipboard Manager." [level=2] [ref=f2e484]
+          - generic [ref=f2e485]: enabled
+          - paragraph [ref=f2e486]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e487]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e488]:
+            - generic "Source · verified 2026-11-04" [ref=f2e489] [cursor=pointer]
+      - listitem [ref=f2e490]:
+        - group "Cmd+3" [ref=f2e491]
+        - generic [ref=f2e493]:
+          - heading "Paste clipboard-history item 3 from BTT Clipboard Manager." [level=2] [ref=f2e494]
+          - generic [ref=f2e495]: enabled
+          - paragraph [ref=f2e496]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e497]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e498]:
+            - generic "Source · verified 2026-11-04" [ref=f2e499] [cursor=pointer]
+      - listitem [ref=f2e500]:
+        - group "Cmd+4" [ref=f2e501]
+        - generic [ref=f2e503]:
+          - heading "Paste clipboard-history item 4 from BTT Clipboard Manager." [level=2] [ref=f2e504]
+          - generic [ref=f2e505]: enabled
+          - paragraph [ref=f2e506]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e507]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e508]:
+            - generic "Source · verified 2026-11-04" [ref=f2e509] [cursor=pointer]
+      - listitem [ref=f2e510]:
+        - group "Cmd+5" [ref=f2e511]
+        - generic [ref=f2e513]:
+          - heading "Paste clipboard-history item 5 from BTT Clipboard Manager." [level=2] [ref=f2e514]
+          - generic [ref=f2e515]: enabled
+          - paragraph [ref=f2e516]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e517]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e518]:
+            - generic "Source · verified 2026-11-04" [ref=f2e519] [cursor=pointer]
+      - listitem [ref=f2e520]:
+        - group "Cmd+6" [ref=f2e521]
+        - generic [ref=f2e523]:
+          - heading "Paste clipboard-history item 6 from BTT Clipboard Manager." [level=2] [ref=f2e524]
+          - generic [ref=f2e525]: enabled
+          - paragraph [ref=f2e526]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e527]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e528]:
+            - generic "Source · verified 2026-11-04" [ref=f2e529] [cursor=pointer]
+      - listitem [ref=f2e530]:
+        - group "Cmd+7" [ref=f2e531]
+        - generic [ref=f2e533]:
+          - heading "Paste clipboard-history item 7 from BTT Clipboard Manager." [level=2] [ref=f2e534]
+          - generic [ref=f2e535]: enabled
+          - paragraph [ref=f2e536]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e537]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e538]:
+            - generic "Source · verified 2026-11-04" [ref=f2e539] [cursor=pointer]
+      - listitem [ref=f2e540]:
+        - group "Cmd+8" [ref=f2e541]
+        - generic [ref=f2e543]:
+          - heading "Paste clipboard-history item 8 from BTT Clipboard Manager." [level=2] [ref=f2e544]
+          - generic [ref=f2e545]: enabled
+          - paragraph [ref=f2e546]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e547]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e548]:
+            - generic "Source · verified 2026-11-04" [ref=f2e549] [cursor=pointer]
+      - listitem [ref=f2e550]:
+        - group "Cmd+9" [ref=f2e551]
+        - generic [ref=f2e553]:
+          - heading "Paste clipboard-history item 9 from BTT Clipboard Manager." [level=2] [ref=f2e554]
+          - generic [ref=f2e555]: enabled
+          - paragraph [ref=f2e556]: BetterTouchTool · BTT Clipboard Manager
+          - paragraph [ref=f2e557]: "Limitations: Saved keyboard ID 1573; its device identity/filtering semantics were not resolved. Clipboard contents are private and were not read."
+          - group [ref=f2e558]:
+            - generic "Source · verified 2026-11-04" [ref=f2e559] [cursor=pointer]
+      - listitem [ref=f2e560]:
+        - group "Ctrl+Shift+Tab" [ref=f2e561]
+        - generic [ref=f2e563]:
+          - heading "Send Ctrl+K in Chrome." [level=2] [ref=f2e564]
+          - generic [ref=f2e565]: enabled
+          - paragraph [ref=f2e566]: BetterTouchTool · Chrome
+          - paragraph [ref=f2e567]: "Limitations: Saved keyboard ID 5833; its device identity/filtering semantics were not resolved. The receiving Chrome/extension command was not identified; no built-in meaning is assumed."
+          - group [ref=f2e568]:
+            - generic "Source · verified 2026-11-04" [ref=f2e569] [cursor=pointer]
+      - listitem [ref=f2e570]:
+        - group "Ctrl+Tab" [ref=f2e571]
+        - generic [ref=f2e573]:
+          - heading "Send Ctrl+J in Chrome." [level=2] [ref=f2e574]
+          - generic [ref=f2e575]: enabled
+          - paragraph [ref=f2e576]: BetterTouchTool · Chrome
+          - paragraph [ref=f2e577]: "Limitations: Saved keyboard ID 5833; its device identity/filtering semantics were not resolved. The receiving Chrome/extension command was not identified; no built-in meaning is assumed."
+          - group [ref=f2e578]:
+            - generic "Source · verified 2026-11-04" [ref=f2e579] [cursor=pointer]
+      - listitem [ref=f2e580]:
+        - group "Option+Cmd+X" [ref=f2e581]
+        - generic [ref=f2e583]:
+          - heading "Cut selected text, or select and cut the current line when nothing is selected." [level=2] [ref=f2e584]
+          - generic [ref=f2e585]: enabled
+          - paragraph [ref=f2e586]: BetterTouchTool · Chrome
+          - paragraph [ref=f2e587]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Falls back to ordinary Cmd+X when selection information is unavailable; line selection uses app keyboard navigation and was not live-tested."
+          - group [ref=f2e588]:
+            - generic "Source · verified 2026-11-04" [ref=f2e589] [cursor=pointer]
+      - listitem [ref=f2e590]:
+        - group "Option+Cmd+X" [ref=f2e591]
+        - generic [ref=f2e593]:
+          - heading "Cut selected text, or select and cut the current line when nothing is selected." [level=2] [ref=f2e594]
+          - generic [ref=f2e595]: enabled
+          - paragraph [ref=f2e596]: BetterTouchTool · Firefox
+          - paragraph [ref=f2e597]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Falls back to ordinary Cmd+X when selection information is unavailable; line selection uses app keyboard navigation and was not live-tested."
+          - group [ref=f2e598]:
+            - generic "Source · verified 2026-11-04" [ref=f2e599] [cursor=pointer]
+      - listitem [ref=f2e600]:
+        - group "Option+Cmd+X" [ref=f2e601]
+        - generic [ref=f2e603]:
+          - heading "Cut selected text, or select and cut the current line when nothing is selected." [level=2] [ref=f2e604]
+          - generic [ref=f2e605]: enabled
+          - paragraph [ref=f2e606]: BetterTouchTool · Notes
+          - paragraph [ref=f2e607]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Falls back to ordinary Cmd+X when selection information is unavailable; line selection uses app keyboard navigation and was not live-tested."
+          - group [ref=f2e608]:
+            - generic "Source · verified 2026-11-04" [ref=f2e609] [cursor=pointer]
+      - listitem [ref=f2e610]:
+        - group "Option+Cmd+X" [ref=f2e611]
+        - generic [ref=f2e613]:
+          - heading "Cut selected text, or select and cut the current line when nothing is selected." [level=2] [ref=f2e614]
+          - generic [ref=f2e615]: enabled
+          - paragraph [ref=f2e616]: BetterTouchTool · Pages
+          - paragraph [ref=f2e617]: "Limitations: Saved keyboard ID 0; its device identity/filtering semantics were not resolved. Falls back to ordinary Cmd+X when selection information is unavailable; line selection uses app keyboard navigation and was not live-tested."
+          - group [ref=f2e618]:
+            - generic "Source · verified 2026-11-04" [ref=f2e619] [cursor=pointer]
+      - listitem [ref=f2e620]:
+        - group "Shift+Cmd+P" [ref=f2e621]
+        - generic [ref=f2e623]:
+          - heading "Run the saved Spotify navigation/reload macro." [level=2] [ref=f2e624]
+          - generic [ref=f2e625]: enabled
+          - paragraph [ref=f2e626]: BetterTouchTool · Spotify
+          - paragraph [ref=f2e627]: "Limitations: Saved keyboard ID 5822; its device identity/filtering semantics were not resolved. Sends Cmd+Shift+/, Right twice, Down three times, Return, then Cmd+R twice with delays; intended menu target is unresolved and UI-version-sensitive."
+          - group [ref=f2e628]:
+            - generic "Source · verified 2026-11-04" [ref=f2e629] [cursor=pointer]
+      - listitem [ref=f2e630]:
+        - group "Cmd+Backspace" [ref=f2e631]
+        - generic [ref=f2e633]:
+          - 'heading "Send Ctrl+U: kill from the caret back to logical line start in zsh" [level=2] [ref=f2e634]'
+          - generic [ref=f2e635]: conditional
+          - paragraph [ref=f2e636]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e637]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e638]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e639]:
+            - generic "Source · verified 2026-11-04" [ref=f2e640] [cursor=pointer]
+      - listitem [ref=f2e641]:
+        - group "Cmd+Left" [ref=f2e642]
+        - generic [ref=f2e644]:
+          - 'heading "Send Ctrl+A: move to logical line start in compatible line editors" [level=2] [ref=f2e645]'
+          - generic [ref=f2e646]: conditional
+          - paragraph [ref=f2e647]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e648]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e649]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e650]:
+            - generic "Source · verified 2026-11-04" [ref=f2e651] [cursor=pointer]
+      - listitem [ref=f2e652]:
+        - group "Cmd+Right" [ref=f2e653]
+        - generic [ref=f2e655]:
+          - 'heading "Send Ctrl+E: move to logical line end in compatible line editors" [level=2] [ref=f2e656]'
+          - generic [ref=f2e657]: conditional
+          - paragraph [ref=f2e658]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e659]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e660]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e661]:
+            - generic "Source · verified 2026-11-04" [ref=f2e662] [cursor=pointer]
+      - listitem [ref=f2e663]:
+        - group "Forward Delete" [ref=f2e664]
+        - generic [ref=f2e666]:
+          - 'heading "Send Ctrl+D: delete forward, or EOF on an empty shell line" [level=2] [ref=f2e667]'
+          - generic [ref=f2e668]: conditional
+          - paragraph [ref=f2e669]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e670]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e671]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e672]:
+            - generic "Source · verified 2026-11-04" [ref=f2e673] [cursor=pointer]
+      - listitem [ref=f2e674]:
+        - group "Option+Backspace" [ref=f2e675]
+        - generic [ref=f2e677]:
+          - 'heading "Send Escape then Backspace: delete the previous word in compatible line editors" [level=2] [ref=f2e678]'
+          - generic [ref=f2e679]: conditional
+          - paragraph [ref=f2e680]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e681]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e682]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e683]:
+            - generic "Source · verified 2026-11-04" [ref=f2e684] [cursor=pointer]
+      - listitem [ref=f2e685]:
+        - group "Option+Forward Delete" [ref=f2e686]
+        - generic [ref=f2e688]:
+          - 'heading "Send Escape then D: delete the next word in compatible line editors" [level=2] [ref=f2e689]'
+          - generic [ref=f2e690]: conditional
+          - paragraph [ref=f2e691]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e692]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e693]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e694]:
+            - generic "Source · verified 2026-11-04" [ref=f2e695] [cursor=pointer]
+      - listitem [ref=f2e696]:
+        - group "Option+Left" [ref=f2e697]
+        - generic [ref=f2e699]:
+          - 'heading "Send Escape then B: move backward one word in compatible line editors" [level=2] [ref=f2e700]'
+          - generic [ref=f2e701]: conditional
+          - paragraph [ref=f2e702]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e703]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e704]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e705]:
+            - generic "Source · verified 2026-11-04" [ref=f2e706] [cursor=pointer]
+      - listitem [ref=f2e707]:
+        - group "Option+Right" [ref=f2e708]
+        - generic [ref=f2e710]:
+          - 'heading "Send Escape then F: move forward one word in compatible line editors" [level=2] [ref=f2e711]'
+          - generic [ref=f2e712]: conditional
+          - paragraph [ref=f2e713]: iTerm2 · Both configured terminal profiles
+          - paragraph [ref=f2e714]: "Conditions: One of the two configured saved profiles is active."
+          - paragraph [ref=f2e715]: "Limitations: Other programs or session-specific overrides can interpret the emitted bytes differently."
+          - group [ref=f2e716]:
+            - generic "Source · verified 2026-11-04" [ref=f2e717] [cursor=pointer]
+      - listitem [ref=f2e718]:
+        - group "Cmd+-" [ref=f2e719]
+        - generic [ref=f2e721]:
+          - heading "Decrease font size throughout the current window" [level=2] [ref=f2e722]
+          - generic [ref=f2e723]: conditional
+          - paragraph [ref=f2e724]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e725]: "Conditions: The font follower is running and its window-font RPC is registered."
+          - paragraph [ref=f2e726]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e727]:
+            - generic "Source · verified 2026-11-04" [ref=f2e728] [cursor=pointer]
+      - listitem [ref=f2e729]:
+        - group "Cmd+0" [ref=f2e730]
+        - generic [ref=f2e732]:
+          - heading "Restore the current window font size for its display" [level=2] [ref=f2e733]
+          - generic [ref=f2e734]: conditional
+          - paragraph [ref=f2e735]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e736]: "Conditions: The font follower is running and its window-font RPC is registered."
+          - paragraph [ref=f2e737]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e738]:
+            - generic "Source · verified 2026-11-04" [ref=f2e739] [cursor=pointer]
+      - listitem [ref=f2e740]:
+        - group "Cmd+=" [ref=f2e741]
+        - generic [ref=f2e743]:
+          - heading "Increase font size throughout the current window" [level=2] [ref=f2e744]
+          - generic [ref=f2e745]: conditional
+          - paragraph [ref=f2e746]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e747]: "Conditions: The font follower is running and its window-font RPC is registered."
+          - paragraph [ref=f2e748]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e749]:
+            - generic "Source · verified 2026-11-04" [ref=f2e750] [cursor=pointer]
+      - listitem [ref=f2e751]:
+        - group "Cmd+Down" [ref=f2e752]
+        - generic [ref=f2e754]:
+          - heading "Scroll down one line" [level=2] [ref=f2e755]
+          - generic [ref=f2e756]: enabled
+          - paragraph [ref=f2e757]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e758]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e759]:
+            - generic "Source · verified 2026-11-04" [ref=f2e760] [cursor=pointer]
+      - listitem [ref=f2e761]:
+        - group "Cmd+End" [ref=f2e762]
+        - generic [ref=f2e764]:
+          - heading "Scroll to bottom" [level=2] [ref=f2e765]
+          - generic [ref=f2e766]: enabled
+          - paragraph [ref=f2e767]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e768]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e769]:
+            - generic "Source · verified 2026-11-04" [ref=f2e770] [cursor=pointer]
+      - listitem [ref=f2e771]:
+        - group "Cmd+Home" [ref=f2e772]
+        - generic [ref=f2e774]:
+          - heading "Scroll to top" [level=2] [ref=f2e775]
+          - generic [ref=f2e776]: enabled
+          - paragraph [ref=f2e777]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e778]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e779]:
+            - generic "Source · verified 2026-11-04" [ref=f2e780] [cursor=pointer]
+      - listitem [ref=f2e781]:
+        - group "Cmd+Left" [ref=f2e782]
+        - generic [ref=f2e784]:
+          - heading "Previous terminal session" [level=2] [ref=f2e785]
+          - generic [ref=f2e786]: conditional
+          - paragraph [ref=f2e787]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e788]: "Conditions: Only when the current profile does not override this key."
+          - paragraph [ref=f2e789]: "Limitations: Saved preference inspected; no live keystroke was sent. Both configured saved profiles override this global mapping."
+          - group [ref=f2e790]:
+            - generic "Source · verified 2026-11-04" [ref=f2e791] [cursor=pointer]
+      - listitem [ref=f2e792]:
+        - group "Cmd+Page Down" [ref=f2e793]
+        - generic [ref=f2e795]:
+          - heading "Scroll down one page" [level=2] [ref=f2e796]
+          - generic [ref=f2e797]: enabled
+          - paragraph [ref=f2e798]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e799]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e800]:
+            - generic "Source · verified 2026-11-04" [ref=f2e801] [cursor=pointer]
+      - listitem [ref=f2e802]:
+        - group "Cmd+Page Up" [ref=f2e803]
+        - generic [ref=f2e805]:
+          - heading "Scroll up one page" [level=2] [ref=f2e806]
+          - generic [ref=f2e807]: enabled
+          - paragraph [ref=f2e808]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e809]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e810]:
+            - generic "Source · verified 2026-11-04" [ref=f2e811] [cursor=pointer]
+      - listitem [ref=f2e812]:
+        - group "Cmd+Right" [ref=f2e813]
+        - generic [ref=f2e815]:
+          - heading "Next terminal session" [level=2] [ref=f2e816]
+          - generic [ref=f2e817]: conditional
+          - paragraph [ref=f2e818]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e819]: "Conditions: Only when the current profile does not override this key."
+          - paragraph [ref=f2e820]: "Limitations: Saved preference inspected; no live keystroke was sent. Both configured saved profiles override this global mapping."
+          - group [ref=f2e821]:
+            - generic "Source · verified 2026-11-04" [ref=f2e822] [cursor=pointer]
+      - listitem [ref=f2e823]:
+        - group "Cmd+Shift+=" [ref=f2e824]
+        - generic [ref=f2e826]:
+          - heading "Increase font size throughout the current window" [level=2] [ref=f2e827]
+          - generic [ref=f2e828]: conditional
+          - paragraph [ref=f2e829]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e830]: "Conditions: The font follower is running and its window-font RPC is registered."
+          - paragraph [ref=f2e831]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e832]:
+            - generic "Source · verified 2026-11-04" [ref=f2e833] [cursor=pointer]
+      - listitem [ref=f2e834]:
+        - group "Cmd+Shift+Left" [ref=f2e835]
+        - generic [ref=f2e837]:
+          - heading "Move tab left" [level=2] [ref=f2e838]
+          - generic [ref=f2e839]: enabled
+          - paragraph [ref=f2e840]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e841]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e842]:
+            - generic "Source · verified 2026-11-04" [ref=f2e843] [cursor=pointer]
+      - listitem [ref=f2e844]:
+        - group "Cmd+Shift+Right" [ref=f2e845]
+        - generic [ref=f2e847]:
+          - heading "Move tab right" [level=2] [ref=f2e848]
+          - generic [ref=f2e849]: enabled
+          - paragraph [ref=f2e850]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e851]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e852]:
+            - generic "Source · verified 2026-11-04" [ref=f2e853] [cursor=pointer]
+      - listitem [ref=f2e854]:
+        - group "Cmd+Up" [ref=f2e855]
+        - generic [ref=f2e857]:
+          - heading "Scroll up one line" [level=2] [ref=f2e858]
+          - generic [ref=f2e859]: enabled
+          - paragraph [ref=f2e860]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e861]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e862]:
+            - generic "Source · verified 2026-11-04" [ref=f2e863] [cursor=pointer]
+      - listitem [ref=f2e864]:
+        - group "Ctrl+Shift+Tab" [ref=f2e865]
+        - generic [ref=f2e867]:
+          - heading "Previous recently used tab" [level=2] [ref=f2e868]
+          - generic [ref=f2e869]: enabled
+          - paragraph [ref=f2e870]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e871]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e872]:
+            - generic "Source · verified 2026-11-04" [ref=f2e873] [cursor=pointer]
+      - listitem [ref=f2e874]:
+        - group "Ctrl+Tab" [ref=f2e875]
+        - generic [ref=f2e877]:
+          - heading "Next recently used tab" [level=2] [ref=f2e878]
+          - generic [ref=f2e879]: enabled
+          - paragraph [ref=f2e880]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e881]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e882]:
+            - generic "Source · verified 2026-11-04" [ref=f2e883] [cursor=pointer]
+      - listitem [ref=f2e884]:
+        - group "Shift+Page Down" [ref=f2e885]
+        - generic [ref=f2e887]:
+          - heading "Scroll down one page" [level=2] [ref=f2e888]
+          - generic [ref=f2e889]: enabled
+          - paragraph [ref=f2e890]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e891]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e892]:
+            - generic "Source · verified 2026-11-04" [ref=f2e893] [cursor=pointer]
+      - listitem [ref=f2e894]:
+        - group "Shift+Page Up" [ref=f2e895]
+        - generic [ref=f2e897]:
+          - heading "Scroll up one page" [level=2] [ref=f2e898]
+          - generic [ref=f2e899]: enabled
+          - paragraph [ref=f2e900]: iTerm2 · Global terminal mapping
+          - paragraph [ref=f2e901]: "Limitations: Saved preference inspected; no live keystroke was sent."
+          - group [ref=f2e902]:
+            - generic "Source · verified 2026-11-04" [ref=f2e903] [cursor=pointer]
+      - listitem [ref=f2e904]:
+        - group "Dictation key (F5 position)" [ref=f2e905]
+        - generic [ref=f2e907]:
+          - heading "Send F13 instead of the dictation/voice-command key." [level=2] [ref=f2e908]
+          - generic [ref=f2e909]: enabled
+          - paragraph [ref=f2e910]: macOS hidutil · System-wide on input services carrying this mapping
+          - paragraph [ref=f2e911]: "Limitations: This remaps the consumer voice-command usage, not every ordinary F5 key. F13 behavior belongs to the receiving application; no built-in shortcut is implied."
+          - group [ref=f2e912]:
+            - generic "Source · verified 2026-11-04" [ref=f2e913] [cursor=pointer]
+      - listitem [ref=f2e914]:
+        - group "Ctrl+X then Ctrl+E" [ref=f2e915]:
+          - generic [ref=f2e916]: Ctrl+X
+          - generic [ref=f2e917]: →
+          - generic [ref=f2e918]: Ctrl+E
+        - generic [ref=f2e919]:
+          - heading "Edit the command buffer in the configured external editor" [level=2] [ref=f2e920]
+          - generic [ref=f2e921]: conditional
+          - paragraph [ref=f2e922]: zsh · Emacs and vi insert mode
+          - paragraph [ref=f2e923]: "Conditions: The zsh line editor is active and an editor is configured."
+          - group [ref=f2e924]:
+            - generic "Source · verified 2026-11-04" [ref=f2e925] [cursor=pointer]
+      - listitem [ref=f2e926]:
+        - group "Ctrl+N" [ref=f2e927]
+        - generic [ref=f2e929]:
+          - heading "Search forward through history matching the typed substring" [level=2] [ref=f2e930]
+          - generic [ref=f2e931]: conditional
+          - paragraph [ref=f2e932]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e933]: "Conditions: The zsh history-substring-search plugin is loaded."
+          - group [ref=f2e934]:
+            - generic "Source · verified 2026-11-04" [ref=f2e935] [cursor=pointer]
+      - listitem [ref=f2e936]:
+        - group "Ctrl+P" [ref=f2e937]
+        - generic [ref=f2e939]:
+          - heading "Search backward through history matching the typed substring" [level=2] [ref=f2e940]
+          - generic [ref=f2e941]: conditional
+          - paragraph [ref=f2e942]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e943]: "Conditions: The zsh history-substring-search plugin is loaded."
+          - group [ref=f2e944]:
+            - generic "Source · verified 2026-11-04" [ref=f2e945] [cursor=pointer]
+      - listitem [ref=f2e946]:
+        - group "Down" [ref=f2e947]
+        - generic [ref=f2e949]:
+          - heading "Search forward through history matching the typed substring" [level=2] [ref=f2e950]
+          - generic [ref=f2e951]: conditional
+          - paragraph [ref=f2e952]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e953]: "Conditions: The zsh history-substring-search plugin is loaded."
+          - group [ref=f2e954]:
+            - generic "Source · verified 2026-11-04" [ref=f2e955] [cursor=pointer]
+      - listitem [ref=f2e956]:
+        - group "End" [ref=f2e957]
+        - generic [ref=f2e959]:
+          - heading "Move to logical line end" [level=2] [ref=f2e960]
+          - generic [ref=f2e961]: conditional
+          - paragraph [ref=f2e962]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e963]: "Conditions: The terminal emits the corresponding Home, End or Delete escape sequence."
+          - group [ref=f2e964]:
+            - generic "Source · verified 2026-11-04" [ref=f2e965] [cursor=pointer]
+      - listitem [ref=f2e966]:
+        - group "Forward Delete" [ref=f2e967]
+        - generic [ref=f2e969]:
+          - heading "Delete the character under the caret" [level=2] [ref=f2e970]
+          - generic [ref=f2e971]: conditional
+          - paragraph [ref=f2e972]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e973]: "Conditions: The terminal emits the corresponding Home, End or Delete escape sequence."
+          - group [ref=f2e974]:
+            - generic "Source · verified 2026-11-04" [ref=f2e975] [cursor=pointer]
+      - listitem [ref=f2e976]:
+        - group "Home" [ref=f2e977]
+        - generic [ref=f2e979]:
+          - heading "Move to logical line start" [level=2] [ref=f2e980]
+          - generic [ref=f2e981]: conditional
+          - paragraph [ref=f2e982]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e983]: "Conditions: The terminal emits the corresponding Home, End or Delete escape sequence."
+          - group [ref=f2e984]:
+            - generic "Source · verified 2026-11-04" [ref=f2e985] [cursor=pointer]
+      - listitem [ref=f2e986]:
+        - group "Up" [ref=f2e987]
+        - generic [ref=f2e989]:
+          - heading "Search backward through history matching the typed substring" [level=2] [ref=f2e990]
+          - generic [ref=f2e991]: conditional
+          - paragraph [ref=f2e992]: zsh · Emacs and vi keymaps
+          - paragraph [ref=f2e993]: "Conditions: The zsh history-substring-search plugin is loaded."
+          - group [ref=f2e994]:
+            - generic "Source · verified 2026-11-04" [ref=f2e995] [cursor=pointer]
+      - listitem [ref=f2e996]:
+        - group "Ctrl+A" [ref=f2e997]
+        - generic [ref=f2e999]:
+          - heading "Move to logical line start" [level=2] [ref=f2e1000]
+          - generic [ref=f2e1001]: conditional
+          - paragraph [ref=f2e1002]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1003]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1004]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1005]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1006] [cursor=pointer]
+      - listitem [ref=f2e1007]:
+        - group "Ctrl+E" [ref=f2e1008]
+        - generic [ref=f2e1010]:
+          - heading "Move to logical line end" [level=2] [ref=f2e1011]
+          - generic [ref=f2e1012]: conditional
+          - paragraph [ref=f2e1013]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1014]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1015]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1016]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1017] [cursor=pointer]
+      - listitem [ref=f2e1018]:
+        - group "Ctrl+K" [ref=f2e1019]
+        - generic [ref=f2e1021]:
+          - heading "Kill from caret to logical line end using the shell kill ring" [level=2] [ref=f2e1022]
+          - generic [ref=f2e1023]: conditional
+          - paragraph [ref=f2e1024]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1025]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1026]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1027]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1028] [cursor=pointer]
+      - listitem [ref=f2e1029]:
+        - group "Ctrl+R" [ref=f2e1030]
+        - generic [ref=f2e1032]:
+          - heading "Search history backward incrementally" [level=2] [ref=f2e1033]
+          - generic [ref=f2e1034]: conditional
+          - paragraph [ref=f2e1035]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1036]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1037]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1038]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1039] [cursor=pointer]
+      - listitem [ref=f2e1040]:
+        - group "Ctrl+S" [ref=f2e1041]
+        - generic [ref=f2e1043]:
+          - heading "Search history forward incrementally" [level=2] [ref=f2e1044]
+          - generic [ref=f2e1045]: conditional
+          - paragraph [ref=f2e1046]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1047]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1048]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1049]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1050] [cursor=pointer]
+      - listitem [ref=f2e1051]:
+        - group "Ctrl+U" [ref=f2e1052]
+        - generic [ref=f2e1054]:
+          - heading "Kill from caret back to logical line start" [level=2] [ref=f2e1055]
+          - generic [ref=f2e1056]: conditional
+          - paragraph [ref=f2e1057]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1058]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1059]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1060]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1061] [cursor=pointer]
+      - listitem [ref=f2e1062]:
+        - group "Ctrl+W" [ref=f2e1063]
+        - generic [ref=f2e1065]:
+          - heading "Kill the previous word, stopping at slash or equals" [level=2] [ref=f2e1066]
+          - generic [ref=f2e1067]: conditional
+          - paragraph [ref=f2e1068]: zsh · Emacs mode and optional vi insert mode
+          - paragraph [ref=f2e1069]: "Conditions: The zsh line editor owns terminal input."
+          - paragraph [ref=f2e1070]: "Limitations: These are shell editor actions, not universal terminal or harness commands."
+          - group [ref=f2e1071]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1072] [cursor=pointer]
+      - listitem [ref=f2e1073]:
+        - group "Backspace" [ref=f2e1074]
+        - generic [ref=f2e1076]:
+          - heading "Delete the preceding character, including text entered before the current insert session" [level=2] [ref=f2e1077]
+          - generic [ref=f2e1078]: conditional
+          - paragraph [ref=f2e1079]: zsh · Vi insert mode
+          - paragraph [ref=f2e1080]: "Conditions: Optional vi mode is selected and the line editor is in insert mode."
+          - group [ref=f2e1081]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1082] [cursor=pointer]
+      - listitem [ref=f2e1083]:
+        - group "Ctrl+H" [ref=f2e1084]
+        - generic [ref=f2e1086]:
+          - heading "Delete the preceding character, including text entered before the current insert session" [level=2] [ref=f2e1087]
+          - generic [ref=f2e1088]: conditional
+          - paragraph [ref=f2e1089]: zsh · Vi insert mode
+          - paragraph [ref=f2e1090]: "Conditions: Optional vi mode is selected and the line editor is in insert mode."
+          - group [ref=f2e1091]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1092] [cursor=pointer]
+      - listitem [ref=f2e1093]:
+        - group "j" [ref=f2e1094]
+        - generic [ref=f2e1096]:
+          - heading "Search forward through history matching the typed substring" [level=2] [ref=f2e1097]
+          - generic [ref=f2e1098]: conditional
+          - paragraph [ref=f2e1099]: zsh · Vi normal mode
+          - paragraph [ref=f2e1100]: "Conditions: Optional vi mode is selected and the line editor is in normal mode; emacs is the default."
+          - group [ref=f2e1101]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1102] [cursor=pointer]
+      - listitem [ref=f2e1103]:
+        - group "k" [ref=f2e1104]
+        - generic [ref=f2e1106]:
+          - heading "Search backward through history matching the typed substring" [level=2] [ref=f2e1107]
+          - generic [ref=f2e1108]: conditional
+          - paragraph [ref=f2e1109]: zsh · Vi normal mode
+          - paragraph [ref=f2e1110]: "Conditions: Optional vi mode is selected and the line editor is in normal mode; emacs is the default."
+          - group [ref=f2e1111]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1112] [cursor=pointer]
+      - listitem [ref=f2e1113]:
+        - group "v" [ref=f2e1114]
+        - generic [ref=f2e1116]:
+          - heading "Edit the command buffer in the configured external editor" [level=2] [ref=f2e1117]
+          - generic [ref=f2e1118]: conditional
+          - paragraph [ref=f2e1119]: zsh · Vi normal mode
+          - paragraph [ref=f2e1120]: "Conditions: Optional vi mode is selected and the line editor is in normal mode; emacs is the default."
+          - group [ref=f2e1121]:
+            - generic "Source · verified 2026-11-04" [ref=f2e1122] [cursor=pointer]
+    - region [ref=f2e1123]:
+      - heading "Terminal" [level=2] [ref=f2e1124]
+      - paragraph [ref=f2e1125]:
+        - code [ref=f2e1126]: python3 ~/dev/visual-guides/keyboard_reference.py
+        - text: prints the reference (Python 3.9+, no dependencies). The Mac
+        - code [ref=f2e1127]: keys
+        - text: shell function is prepared but review and activation are pending; it is a command, not a chord. Add a search phrase or
+        - code [ref=f2e1128]: "--all"
+        - text: to include disabled and pending mappings.
+      - paragraph [ref=f2e1129]:
+        - text: Default output shows grouped keys, actions and statuses. Use
+        - code [ref=f2e1130]: "--details"
+        - text: for each row’s conditions, limitations, sources and verification date;
+        - code [ref=f2e1131]: "--notes"
+        - text: prints catalog-wide caveats after the results.
+        - code [ref=f2e1132]: "--json"
+        - text: always includes complete records and notes.
+    - region [ref=f2e1133]:
+      - heading "Keeping this current" [level=2] [ref=f2e1134]
+      - paragraph [ref=f2e1135]:
+        - text: When a custom BTT, iTerm, zsh or harness mapping changes, update the
+        - link "canonical catalog" [ref=f2e1136] [cursor=pointer]:
+          - /url: ../reference/keyboard-shortcuts.json
+        - text: in the same task and verify this guide and the terminal output. A verified date records a source check, not a claim that the shortcut was exercised in every app. Review every catalog string before publishing; automated privacy checks catch common leaks, not every private detail.
+      - paragraph [ref=f2e1137]:
+        - text: Keycaps separated by an arrow are consecutive sequence steps, not one simultaneous chord. Search can join those steps, such as
+        - code [ref=f2e1138]: cosnt
+        - text: for C → O → S → N → T → Space. Built-in macOS shortcuts are outside this custom reference.
+    - paragraph [ref=f2e1139]:
+      - link "Source" [ref=f2e1140] [cursor=pointer]:
+        - /url: https://github.com/JakeIwen/visual-guides/blob/main/static/reference/keyboard-shortcuts.json
+      - text: ·
+      - link "History" [ref=f2e1141] [cursor=pointer]:
+        - /url: https://github.com/JakeIwen/visual-guides/commits/main/static/reference/keyboard-shortcuts.json
+      - text: ·
+      - link "Schema" [ref=f2e1142] [cursor=pointer]:
+        - /url: ../reference/keyboard-shortcuts.schema.json
