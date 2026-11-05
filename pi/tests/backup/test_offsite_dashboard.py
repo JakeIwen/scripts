@@ -161,6 +161,8 @@ class DashboardTests(unittest.TestCase):
     def test_read_only_exports_preserve_status_and_all_evidence_without_lock_or_ignition(self):
         self.assertEqual(self.f.run('status').stdout, '{"result": "not-run"}\n')
         self.assertEqual(self.read_json('dashboard'), {'schema': 1, 'status': {'result': 'not-run'},
+                                                     'controls': {'supported': False, 'reason': 'local-target'},
+                                                     'availability': None,
                                                      'history': {}, 'evidence': {'check': None, 'restore_test': None}})
         status = {'schema': 1, 'result': 'running', 'bytes_done': 12, 'source': 'borg', 'extra': 'retained'}
         check = {'schema': 1, 'operation': 'check', 'label': self.f.label, 'repo_id': 'a' * 64,
@@ -174,6 +176,8 @@ class DashboardTests(unittest.TestCase):
         before = {str(p): (p.read_bytes(), p.stat().st_mtime_ns) for p in self.f.root.rglob('*') if p.is_file()}
         value = self.read_json('dashboard')
         self.assertEqual(value, {'schema': 1, 'status': status, 'history': {},
+                                 'controls': {'supported': False, 'reason': 'local-target'},
+                                 'availability': None,
                                  'evidence': {'check': check, 'restore_test': restore}})
         self.assertEqual(self.f.run('status').stdout, json.dumps(status, sort_keys=True) + '\n')
         for source in self.f.cfg.sources():

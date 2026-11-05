@@ -203,7 +203,7 @@ class OffsiteFixture:
     def start(self, *args, code=BOOTSTRAP, env=None, extra_fds=()):
         """Start one CLI command; env entries override the production-like metadata."""
         environment = dict(self.env)
-        if args[0] in READ_ONLY:
+        if args[0] in (*READ_ONLY, 'pause', 'resume'):
             descriptors = ()
         elif args[0] == 'prepare-disk':
             descriptors = (self.fd,)

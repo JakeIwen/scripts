@@ -43,6 +43,11 @@ def parser(cfg):
     sub.add_parser('dashboard', help='print status, per-source history and verification evidence; read-only')
     rate = sub.add_parser('rates', help='print per-minute logical processing rates; read-only')
     rate.add_argument('source', choices=tuple(cfg.sources()))
+    for name in ('pause', 'resume', 'resume-run'):
+        control = sub.add_parser(name, help='manual remote backup control (resume-run is the admitted worker)')
+        control.add_argument('--remote', action='store_true', required=True)
+        control.add_argument('--label', required=True)
+        control.add_argument('--revision', required=True)
     return root
 
 
@@ -58,8 +63,15 @@ def mutate(cfg, args, commands):
             prepare(repo, args.device, args.erase_confirm, args.priority)
             return 0
         commands.locks.hold_policy_locks()
-        if args.command == 'backup':
-            return Backup(repo, list(dict.fromkeys(args.only or cfg.sources()))).run()
+        if args.command in ('backup', 'resume-run'):
+            from offsite_control import admit_backup, resume_backup
+            if args.command == 'resume-run':
+                selected = resume_backup(repo, args.revision)
+            else:
+                selected = list(dict.fromkeys(args.only or cfg.sources()))
+                if getattr(repo, 'remote', False):
+                    admit_backup(repo, selected)
+            return Backup(repo, selected).run()
         elif args.command == 'check':
             subset = args.read_data_subset
             if subset and not re.fullmatch(r'(?:[1-9][0-9]*/[1-9][0-9]*|(?:[0-9]+(?:\.[0-9]+)?)(?:%|[kKMGT]))', subset):
@@ -93,6 +105,10 @@ def main(argv=None, *, config=None):
             value = (rates(cfg, args.source) if args.command == 'rates' else
                      dashboard(cfg) if args.command == 'dashboard' else status(cfg))
             print(json.dumps(value, sort_keys=True))
+            return 0
+        if args.command in ('pause', 'resume'):
+            from offsite_control import request_control
+            print(json.dumps(request_control(cfg, args.command, args.label, args.revision), sort_keys=True))
             return 0
         locks = admit(cfg, prepare=args.command == 'prepare-disk')
         try:

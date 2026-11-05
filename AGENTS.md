@@ -40,6 +40,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi.apps.metered` | `vanpi-metered.service`, independently of the dashboard | `pi/apps/metered/`; unit/package owned by `pi/deploy_python.py` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
+| `pi/scripts/backup/offsite_backup.sh` (`pause` / `resume --remote`) | van-dashboard guarded backup controls and root CLI | `pi/scripts/backup/offsite_control.py`; revisions from `dashboard` |
 | `pi/scripts/smart_watch.sh` | `vanpi-smart-watch.timer`; alerts on the `NTFY_WARNING_URL` topic | the script; see `pi/docs/monitoring/SMART.md` |
 | `pi/scripts/alias_media.sh` | Pi `am`/`an` functions and qBittorrent's completion command (`alias_media.sh new`) | thin wrapper; `pi/apps/media_organizer/alias_main.py` in the package release |
 | `python3 -P -m pi.apps.media_organizer mirror-sync` | `pi/scripts/backup/pi_backup.sh`, as `pi`, right before the media rsync | `pi/apps/media_organizer/mirror_sync.py` in the package release |
@@ -1252,8 +1253,8 @@ The active design is represented by:
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/backup/offsite_backup.sh`: encrypted restic offsite drives, seeded
   locally then served by a friend's Synology over Tailscale. `prepare-disk` holds the
-  exclusive legacy lock like `restore_from_borg.sh`; the other mutating commands hold
-  `job-offsite` (fd 10, PID record), hold the legacy lock shared only while
+  exclusive legacy lock like `restore_from_borg.sh`; backup, check, receipts,
+  restore-test and the resume worker hold `job-offsite` (fd 10, PID record), hold the legacy lock shared only while
   `offsite_snapshot.py` copies their code, then exec that frozen copy, so the cohort
   installers, nightly Borg and EXFAT run beside a days-long seed. `acquire_job_lock`
   also takes `job-offsite`; the deploy fence does not, and its registry guard
@@ -1278,6 +1279,13 @@ The active design is represented by:
   `last_ok`) and read-only `dashboard`/`rates <source>` exports. Logical per-source
   rates reuse `upload_speed_log.py` in private `rates/<source>.bin`; history/rate
   failures never abort backups, and malformed history is retained with a status error.
+  `offsite_control.py` owns per-label durable remote holds and revision-bound source/repository
+  plans (`offsite_backup.sh pause|resume --remote --label LABEL --revision REVISION`).
+  Workers poll the hold through their existing cancellation path; saved PIDs are never signalled.
+  Resume starts one transient guarded attempt, not a timer, schedule or local seed.
+  `offsite_availability.py` reads bounded local Tailscale/route evidence for the dashboard;
+  it never contacts the receiver and never claims an online peer proves a mounted target.
+  Both modules ship in the targeted cohort and frozen closure; provider deploy precedes dashboard.
   `install_restic.sh` pins restic 0.19.1. No schedule or automatic retry is installed.
   Runbooks: `pi/docs/backup/OFFSITE.md` and `OFFSITE_NAS.md` beside it.
 - `synology/offsite/`: native DSM receiver and explicit installer. `mounts.py`

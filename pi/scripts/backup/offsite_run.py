@@ -30,7 +30,10 @@ class Backup:
                       'result': Result.RUNNING, 'source': None, 'bytes_done': 0,
                       'bytes_total': None, 'percent': None, 'rate': None, 'eta': None,
                       'started': time.time(), 'last_result': None,
-                      'sources': {name: {'result': Result.NOT_RUN} for name in selected}}
+                      'sources': {name: {'result': Result.NOT_RUN} for name in selected},
+                      'target_kind': TargetKind.REMOTE if self.remote else TargetKind.LOCAL}
+        if self.remote and self.commands.remote_control is not None:
+            self.state['control_revision'] = self.commands.remote_control.revision
 
     def save(self):
         self.state['updated'] = time.time()

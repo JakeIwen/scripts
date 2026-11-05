@@ -26,6 +26,12 @@ V2_RELEASE = '5ed7311'
 V2_PATHS = ('pi/__init__.py', 'pi/tests/__init__.py', 'pi/scripts/backup', 'pi/tests/backup')
 
 
+def legacy_sections(value):
+    # New read-only dashboard capabilities are additive, not persisted-state changes.
+    return {**value, 'dashboard': {key: item for key, item in value['dashboard'].items()
+                                   if key not in ('controls', 'availability')}}
+
+
 def v2_available():
     try:
         return subprocess.run(['git', '-C', str(REPO), 'cat-file', '-e', V2_RELEASE + '^{commit}'],
@@ -139,7 +145,9 @@ finally:
             if target.is_dir():
                 shutil.rmtree(target)
             (shutil.copytree if path.is_dir() else shutil.copy2)(path, target)
-        self.assertEqual(readers(f), expected)
+        actual = readers(f)
+        self.assertFalse(actual['dashboard']['controls']['supported'])
+        self.assertEqual(legacy_sections(actual), expected)
 
     def test_v2_readers_parse_state_written_by_the_newest_writer(self):
         f = self.fixture()
@@ -158,7 +166,7 @@ finally:
         newest = readers(f)
         self.assertIn('cleanup_notes', newest['status'])
         old = json.loads(self.v2_python(V2_READER, str(f.cfg.state)))
-        self.assertEqual({key: old[key] for key in ('status', 'dashboard', 'rates')}, newest)
+        self.assertEqual({key: old[key] for key in ('status', 'dashboard', 'rates')}, legacy_sections(newest))
         self.assertEqual(set(old['repos']['repos']), {f.label})
         self.assertEqual(len(old['rates']['borg']['samples']), 2)
 

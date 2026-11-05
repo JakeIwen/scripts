@@ -9,7 +9,7 @@ umask 077
 refuse() { printf '%s\n' "$1" >&2; exit 1; }
 require_root() { (( EUID == 0 )) || refuse 'Run offsite_backup.sh with sudo.'; }
 case "${1:-}" in
-  dashboard|rates) require_root ;;
+  dashboard|rates|pause|resume) require_root ;;
 esac
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$here/backup_conf.sh"
@@ -37,13 +37,13 @@ hold_offsite_run() { # job identity first, then the legacy lock shared for the s
 }
 
 case "${1:-}" in
-  status|dashboard|rates|-h|--help) ;;
+  status|dashboard|rates|pause|resume|-h|--help) ;;
   prepare-disk)
     require_root
     acquire_job_lock || refuse 'Another backup or maintenance job is active.'
     require_parked
     ;;
-  backup|check|receipts|restore-test)
+  backup|check|receipts|restore-test|resume-run)
     require_root
     hold_offsite_run
     require_parked

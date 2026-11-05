@@ -32,6 +32,7 @@ class Commands:
         self.cfg, self.locks = cfg, locks
         self.cancelled = None  # the signal's name, once TERM/INT arrives
         self.stopped = None  # the latched stop cause; see stop_cause()
+        self.remote_control = None  # admitted remote backup's label and immutable revision
 
     @contextmanager
     def signals(self):
@@ -53,6 +54,9 @@ class Commands:
                 self.stopped = f'Stopped by {self.cancelled}; rerun when parked to resume'
             elif self.cfg.ignition.exists() or self.cfg.ignition.is_symlink():
                 self.stopped = 'Ignition is on; rerun when parked to resume'
+            elif self.remote_control is not None:
+                from offsite_control import stop_cause
+                self.stopped = stop_cause(self.cfg, self.remote_control)
         return self.stopped
 
     def allowed(self):

@@ -87,7 +87,8 @@ FROZEN_IMPLEMENTATION = (
     'backup/backup_settings_control.py', 'backup/cloud_backup_control.py',
     'backup/cloud_backup_requests.py', 'backup/hotspare_rotation.py', 'backup/icloud_progress.py',
     'backup/icloud_status.py', 'backup/icloud_uplink.py', 'backup/mac_capture_control.py',
-    'backup/offsite_backup.py', 'backup/offsite_config.py', 'backup/offsite_dashboard.py',
+    'backup/offsite_availability.py', 'backup/offsite_backup.py', 'backup/offsite_config.py',
+    'backup/offsite_control.py', 'backup/offsite_dashboard.py',
     'backup/offsite_locks.py', 'backup/offsite_mounts.sh', 'backup/offsite_prepare.py',
     'backup/offsite_receipts.py', 'backup/offsite_remote.py', 'backup/offsite_repository.py',
     'backup/offsite_run.py', 'backup/offsite_samba.py', 'backup/offsite_snapshot.py',
@@ -98,6 +99,7 @@ FROZEN_IMPLEMENTATION = (
 # Live scripts-tree paths that frozen code names on purpose and that stay live.
 LIVE_BOUNDARIES = {
     METERED_CLI: 'fresh metering admission CLI; it imports the current package release by design',
+    'backup/offsite_backup.sh': 'explicit remote resume starts the stable launcher to take a fresh code snapshot',
     'backup/pi_backup.sh': 'identity abort_backup.sh --user matches in a live command line; never run',
     'backup/exfat_snapshot.sh': 'identity abort_backup.sh --user matches in a live command line; never run',
     'backup/icloud_backup.sh': 'display text: the iCloud login hint a person runs',
@@ -148,6 +150,22 @@ class Result(str, Enum):
 class TargetKind(str, Enum):
     LOCAL = 'local'
     REMOTE = 'remote'
+
+
+@dataclass(frozen=True)
+class RemoteControlGuard:
+    label: str
+    revision: str
+    expected_paused: bool = False
+
+
+class RemoteControlRecord(TypedDict):
+    schema: int
+    label: str
+    revision: str
+    repo_id: str
+    sources: list[str]
+    paused: bool
 
 
 class MarkerRecord(TypedDict):
@@ -230,6 +248,7 @@ class StatusRecord(TypedDict, total=False):
     target_kind: TargetKind
     progress_measure: str
     history_error: str
+    control_revision: str
 
 
 @dataclass(frozen=True)

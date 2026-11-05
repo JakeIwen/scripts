@@ -89,7 +89,12 @@ def rate_sampler(cfg, source):
 
 
 def dashboard(cfg):
-    return {'schema': SCHEMA, 'status': status(cfg), 'history': history(cfg),
+    from offsite_availability import remote_availability
+    from offsite_control import control_status
+    current = status(cfg)
+    return {'schema': SCHEMA, 'status': current, 'history': history(cfg),
+            'controls': control_status(cfg, current),
+            'availability': remote_availability(cfg) if current.get('target_kind') == TargetKind.REMOTE else None,
             'evidence': {'check': optional_record(cfg.state / 'remote-check.json'),
                          'restore_test': optional_record(cfg.state / 'remote-restore-test.json')}}
 

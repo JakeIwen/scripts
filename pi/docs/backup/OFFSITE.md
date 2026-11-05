@@ -181,11 +181,18 @@ sudo /home/pi/scripts/backup/offsite_backup.sh rates exfat512
 ```
 
 Both commands require root and print one sorted-key JSON line. They are read-only:
-no backup lock, ignition check, mount, network access or state writes. `status`
-retains its existing output. `dashboard` returns `{schema: 1, status, history,
-evidence: {check, restore_test}}`; status is the unchanged status object, history
-is empty when absent, and missing evidence is null. Evidence passes through all
-fields from `remote-check.json` and `remote-restore-test.json`.
+no backup lock, ignition check, mount, receiver request or state writes. For a remote
+target, `dashboard` reads local Tailscale status and route evidence with two-second
+bounds; it never runs restic or fetches receiver data merely to render a page. `status`
+retains its existing output. `dashboard` returns `{schema: 1, status, history, controls,
+availability, evidence: {check, restore_test}}`; history is empty when absent, and missing
+evidence is null. Evidence passes through all fields from `remote-check.json` and
+`remote-restore-test.json`. The added controls and availability fields are optional
+for older consumers. `availability` is null for local targets (the dashboard uses its
+validated block-device inventory instead), or `{state, reason}` for remote targets:
+`unavailable/not-configured`, `unavailable/network-offline`, `unknown/probe-failed`,
+or `unknown/target-unverified`. An online Tailscale peer is never proof that the
+receiver has the correct disk; full target verification remains a run-time guard.
 
 The root-private `/var/lib/vanpi-offsite/history.json` retains each label/source's
 `latest` terminal outcome and `last_ok` (null until success). Entries include the
@@ -204,6 +211,55 @@ Samples average logical source bytes processed per second over a minute, **not
 network or disk throughput**. A new sampler starts for each source because restic's
 counter resets; missing files return empty samples. History and rate failures
 never stop a backup. A killed process cannot publish a terminal history entry.
+
+## Manual remote pause and resume
+
+After a remote backup has run with the controls-capable provider, `dashboard.controls`
+is `{supported: true, label, revision, paused}`. The label and 32-character revision
+are read from that response, not guessed. Otherwise it reports `{supported: false,
+reason}`: `local-target`, `older-run` or `unknown`; the dashboard additionally uses
+`older-provider` when the installed CLI has no such contract.
+
+```sh
+sudo /home/pi/scripts/backup/offsite_backup.sh pause --remote \
+  --label LABEL_FROM_DASHBOARD --revision REVISION_FROM_DASHBOARD
+sudo /home/pi/scripts/backup/offsite_backup.sh dashboard
+sudo /home/pi/scripts/backup/offsite_backup.sh resume --remote \
+  --label LABEL_FROM_DASHBOARD --revision FRESH_REVISION_FROM_DASHBOARD
+```
+
+Pause durably writes a per-label hold in root-private
+`remote-control-LABEL.json`, serialized by `remote-control.lock`. A new remote backup
+refuses that hold. An active controls-capable worker polls it through the existing
+latched cancellation path, stops/reaps only its own child processes, releases its
+Samba gate and resource descriptors, and records interrupted source history. The
+control never signals the PID in status and never stops another cloud/local job.
+A saved hold means **stop requested**, not proof cleanup has finished.
+
+Resume launches one transient `vanpi-offsite-resume.service` with `KillMode=mixed`,
+using the normal launcher and its `resume-run --remote` worker boundary. No schedule,
+timer, automatic retry, or timed pause is added. The worker must acquire `job-offsite`,
+take its frozen code snapshot and normal resource locks, match the stored repository
+ID and original source selection, and pass fresh remote identity/network admission
+before clearing the hold. A newer pause invalidates a pending resume by revision.
+A busy job, ignition, unconfigured transport, denied uplink or unavailable receiver
+leaves the hold intact; inspect `journalctl -u vanpi-offsite-resume` and retry explicitly
+after resolving the cause. Later source/Samba failures keep normal failed-attempt
+bookkeeping and also require an explicit retry. Restic may reread unfinished sources.
+Local seeds and check/receipt/restore commands are intentionally not paused here.
+Mac Time Machine settings and existing iCloud policies are never changed.
+
+The dashboard sends form POSTs to `/api/backups/offsite/pause` or `/resume` with exactly
+`label` and `revision`, behind the existing origin/header guards. Accepted requests
+return HTTP 202; stale, unsupported, refused or unconfirmed requests return 409. It
+refreshes authoritative state after either outcome and never replays a mutation.
+
+Deploy the complete scripts cohort (both new modules are in `backup_deploy_plan.sh`
+and `FROZEN_IMPLEMENTATION`) before the dashboard consumer. Runs already executing
+older snapshots cannot adopt cooperative holds; their controls stay unsupported.
+Do not downgrade the provider while remote holds are relied on: older workers can
+read the additive status but do not enforce these holds. No NAS setup is performed
+by this feature.
 
 ## Sources and consistency
 
