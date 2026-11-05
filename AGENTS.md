@@ -962,14 +962,17 @@ and preserve unrelated local or deployed changes.
 
 ## Vanpi connections
 
-When connected to the van's local network, prefer `vanpi.lan` for SSH and other
-connections to the Raspberry Pi. The bare hostname `vanpi` resolves through
-Tailscale and should generally be used only as a fallback when `vanpi.lan` is
-unavailable, such as when the client is not connected to the local network.
-Use `vanpi.lan` in new connection defaults and command examples, including SSH,
-HTTP, and media URLs; do not introduce bare `vanpi` or `vanpi.local` as a primary
-connection target. Keep device identities, service names, and filesystem paths
-unchanged.
+Bare `vanpi` is the Pi's name in links, command examples and interactive
+commands: `ssh vanpi` probes the LAN and falls back to Tailscale, and
+`http://vanpi:<port>` resolves through the Mac's `/etc/hosts` line on or off
+the van LAN (on the LAN, Tailscale goes direct). Never give `vanpi.lan`,
+`vanpi.local` or a Tailscale IP in a link or an example: the first two
+resolve only on the van LAN, and the IP lives in `~/.ssh/config` and
+`/etc/hosts` alone. `vanpi.lan` belongs in code that must never cross the
+metered uplink and has nobody to ask (scheduled jobs, syncs, bulk copies), so
+it fails off the LAN instead of rerouting, and in URLs handed to LAN devices
+without the Mac's hosts line (Sonos chime URIs, scripts running on the Pi).
+Keep device identities, service names and filesystem paths unchanged.
 
 ## UBNT manual-selection protection
 
@@ -1288,7 +1291,7 @@ mirrors it):
   Deploy the van-dashboard repo first (its `docs/cutover.md`).
 - A scripts deploy that changes those modules does not restart the dashboard: it
   keeps the release it pinned at start. Restart it afterwards
-  (`ssh pi@vanpi.lan sudo systemctl restart van-dashboard`) or redeploy it.
+  (`ssh vanpi sudo systemctl restart van-dashboard`) or redeploy it.
 - Its HTTP API on `:8788` is a contract here too: `macbook/scripts/van_dashboard_http.py`
   (lighting, cab dimmer), the video library's dashboard link and the storage
   installer's readiness check (`/api/network-history`).
