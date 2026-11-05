@@ -231,7 +231,7 @@ name = sys.argv[1]
 if name == '/home/pi/scripts/samba_require_mount.sh':
     path = root / 'repo/samba-gate'
 elif name == '/home/pi/scripts/connectivity_status.py':
-    path = root / 'repo/pi/scripts/connectivity_status.py'
+    path = Path(os.environ.get('LIVE_CONNECTIVITY', str(root / 'repo/pi/scripts/connectivity_status.py')))
 else:
     path = Path(name)
 print(('0' * 64 if os.environ.get('FAIL_EVENT') == 'hash' else
@@ -282,6 +282,29 @@ local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
         self.assertIn('bootstrap-check', self.events())
         self.assertNotIn('Target checks passed', result.stdout)
         self.assertFalse(set(self.events()) & {'begin', 'publish', 'commit', 'capture-request'})
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'receiver fence requires Linux flock/fdinfo')
+    def test_nonbackup_helper_update_unblocks_targeted_check_after_bootstrap(self):
+        from pi.tests import test_update_services as receiver
+        fixture = receiver.UpdateServicesTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        fixture.bootstrap_ready()
+        helper = fixture.live['scripts'] / 'connectivity_status.py'
+        helper.write_text('# old helper\n')
+        shutil.copyfile(REPO / 'pi/scripts/connectivity_status.py', fixture.stage / 'scripts' / helper.name)
+        self.deploy_fixture()
+        self.env['LIVE_CONNECTIVITY'] = str(helper)
+        refused = self.deploy('--check')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('connectivity_status.py on the Pi differs', refused.stderr)
+        shutil.rmtree(self.root / 'stage')
+        updated = fixture.run_updater()
+        self.assertEqual(updated.returncode, 0, updated.stderr)
+        checked = self.deploy('--check')
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        self.assertIn('Target checks passed', checked.stdout)
+        self.assertNotIn('publish', self.events())
 
     def test_check_flag_accepts_target_before_or_after_it(self):
         self.deploy_fixture()

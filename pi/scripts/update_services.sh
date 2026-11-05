@@ -1,35 +1,35 @@
 #!/bin/bash
 set -euo pipefail
 
-check_backup_bootstrap_allows_broad_sync() {
-  local state=${VANPI_BACKUP_DEPLOY_STATE_DIR:-/var/lib/vanpi-backup-deploy}
-  if [[ -e "$state" || -L "$state" ]]; then
-    echo 'Broad sync refuses backup deployment state (including unfinished bootstrap); use the guarded targeted installers. No live files were changed.' >&2
-    return 1
-  fi
-}
-
-# The Mac streams this same read-only boundary before any upload; repeat it in
-# the receiver before unrelated writes too. Old in-flight publishers still
-# belong to the explicit initial-bootstrap operator maintenance boundary.
-check_backup_bootstrap_allows_broad_sync || exit 1
-if [[ "$#" == 1 && "$1" == --check-backup-bootstrap ]]; then
-  exit 0
-fi
-
 stage="${1:-/tmp/systemd-tmp}"
 if [[ ! "$stage" =~ ^/tmp/systemd-tmp(\.[0-9]+)?$ ]]; then
   echo "refusing unsafe service update staging path: $stage" >&2
   exit 1
 fi
 
+[[ -d "$stage" && ! -L "$stage" && -d "$stage/.backup-sync" && ! -L "$stage/.backup-sync" ]] || {
+  echo 'Unsafe or incomplete service update stage.' >&2; exit 1;
+}
+boundary="$stage/.backup-sync/backup_deploy_sync.py"
+[[ -f "$boundary" && ! -L "$boundary" ]] || { echo 'Missing independent backup sync boundary.' >&2; exit 1; }
+# The root supervisor holds the existing legacy inode shared while this receiver
+# keeps its original user identity. No sudo descriptor-preservation is required.
+sync_sudo=${UPDATE_SERVICES_SUDO:-/usr/bin/sudo}
+if [[ "$#" == 1 ]]; then
+  exec "$sync_sudo" -n /usr/bin/python3 -B "$boundary" run "$stage" /bin/bash "$0" "$stage" --backup-fenced
+fi
+[[ "$#" == 2 && "$2" == --backup-fenced ]] || exit 2
+/usr/bin/python3 -B "$stage/.backup-sync/backup_locks.py" --check-legacy-hold
+cleanup_relative=scripts/setup_router_policy_trigger.sh
+"$sync_sudo" -n /usr/bin/python3 -B "$boundary" check-stage "$stage" --remove "$cleanup_relative"
+
 staged_services="$stage/services"
 staged_scripts="$stage/scripts"
 staged_tmpfiles="$stage/tmpfiles.d"
 # Overridable only so tests can run this against a temporary tree.
-live_services="${UPDATE_SERVICES_LIVE_SERVICES:-/etc/systemd/system}"
-live_scripts="${UPDATE_SERVICES_LIVE_SCRIPTS:-/home/pi/scripts}"
-live_tmpfiles="${UPDATE_SERVICES_LIVE_TMPFILES:-/etc/tmpfiles.d}"
+live_services=${UPDATE_SERVICES_LIVE_SERVICES:-$(/usr/bin/python3 -B "$boundary" root services)}
+live_scripts=${UPDATE_SERVICES_LIVE_SCRIPTS:-$(/usr/bin/python3 -B "$boundary" root scripts)}
+live_tmpfiles=${UPDATE_SERVICES_LIVE_TMPFILES:-$(/usr/bin/python3 -B "$boundary" root tmpfiles.d)}
 
 cleanup() {
   case "$stage" in
@@ -50,20 +50,14 @@ staged_units=(
   "$staged_services"/*.path
   "$staged_services"/*.timer
 )
-if (( ${#staged_units[@]} == 0 )); then
-  echo "service update staging contains no systemd units" >&2
-  exit 1
-fi
 staged_tmpfile_configs=("$staged_tmpfiles"/*.conf)
-if (( ${#staged_tmpfile_configs[@]} == 0 )); then
-  echo "service update staging contains no tmpfiles configuration" >&2
-  exit 1
-fi
+# Canonical backup and storage exclusions can legitimately empty these roots.
 
 declare -a new_units=()
 declare -a changed_units=()
 
-for staged_unit in "${staged_units[@]}"; do
+for staged_unit in "${staged_units[@]:-}"; do
+  [[ -n "$staged_unit" ]] || continue
   unit="${staged_unit##*/}"
   live_unit="$live_services/$unit"
   changed=false
@@ -103,7 +97,8 @@ done
 # scripts can reference them. systemd-tmpfiles creates missing files and
 # reconciles owner/mode without replacing an inode held by a running process.
 sudo install -d -m 0755 "$live_tmpfiles"
-for staged_tmpfile in "${staged_tmpfile_configs[@]}"; do
+for staged_tmpfile in "${staged_tmpfile_configs[@]:-}"; do
+  [[ -n "$staged_tmpfile" ]] || continue
   tmpfile_name="${staged_tmpfile##*/}"
   live_tmpfile="$live_tmpfiles/$tmpfile_name"
   sudo install -m 0644 "$staged_tmpfile" "$live_tmpfile"
@@ -121,19 +116,12 @@ for staged_script in "$staged_scripts"/*; do
   fi
 done
 mkdir -p "$live_scripts"
-cp -a "$staged_scripts/." "$live_scripts/"
-# clone_to_sd.sh moved under backup/. The staged copy is installed first so an
-# interrupted deployment cannot leave the host without the cloning command.
-if [[ -f "$live_scripts/backup/clone_to_sd.sh" ]]; then
-  rm -f -- "$live_scripts/clone_to_sd.sh"
-fi
-# These unreferenced predecessors were superseded by rpi-clone and the removal
-# of the router-to-Pi mwan3 policy trigger.
-rm -f -- \
-  "$live_scripts/rsync_to_clone.sh" \
-  "$live_scripts/setup_router_policy_trigger.sh"
+/usr/bin/python3 -B "$boundary" copy-scripts "$staged_scripts" "$live_scripts"
+# Legacy clone cleanup belongs to backup maintenance, not this non-backup sync.
+rm -f -- "$live_scripts/${cleanup_relative#scripts/}"
 
-for staged_unit in "${staged_units[@]}"; do
+for staged_unit in "${staged_units[@]:-}"; do
+  [[ -n "$staged_unit" ]] || continue
   sudo install -m 0644 "$staged_unit" "$live_services/${staged_unit##*/}"
 done
 
@@ -141,12 +129,14 @@ done
 # files match (for example, after an earlier copy that missed daemon-reload).
 sudo systemctl daemon-reload
 
-for unit in "${new_units[@]}"; do
+for unit in "${new_units[@]:-}"; do
+  [[ -n "$unit" ]] || continue
   echo "NEW UNIT: $unit (enabling and starting)"
   sudo systemctl enable --now "$unit"
 done
 
-for unit in "${changed_units[@]}"; do
+for unit in "${changed_units[@]:-}"; do
+  [[ -n "$unit" ]] || continue
   echo "UPDATED UNIT: $unit"
   if sudo systemctl is-active --quiet "$unit"; then
     sudo systemctl restart "$unit"

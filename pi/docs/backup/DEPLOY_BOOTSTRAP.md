@@ -186,9 +186,33 @@ unbootstrapped predecessor. Preserve
 condition drop-ins. The bootstrap guard rejects old payloads through supported
 installers, but an old installer cannot be retroactively made to obey it.
 
-Current broad `pi/sync_scripts.sh` refuses any deployment-state pathname before
-uploads; its receiver repeats that refusal before live writes. Use targeted
-installers once bootstrap exists, including for non-backup broad-sync requests.
+Current `pi/sync_scripts.sh` remains the deployment route for **non-backup**
+files, including `connectivity_status.py`, flat shared scripts, shell config,
+labwc and unrelated units, followed by package/compute updates. Both profiles
+of `local_backup_plan` define its exclusions; no second cohort list is maintained.
+The receiver independently rejects protected payload/cleanup overlap before any
+live write. Its file copier preserves existing directory metadata, including
+`backup/`, even if a staged parent is empty. Legacy clone cleanup is not performed
+by this non-backup sync.
+
+Only the small inspection closure is uploaded before readiness. The client takes
+the existing validated legacy inode **shared**, checks root-private readiness
+under privilege, and retains the hold through all unrelated uploads and phases.
+The receiver independently takes a shared hold and repeats readiness/scope checks
+before writing. Bootstrap and targeted cohort publication need the exclusive
+fence, so they cannot slip into the preflight-to-publication gap. Normal jobs may
+still take shared admission. Missing locks fail early; this path never creates
+or replaces lock inodes. A genuinely unbootstrapped host with its existing legacy
+lock remains supported, but broad sync excludes the backup cohort there too.
+
+Maintenance, pending, incomplete or unsafe bootstrap state refuses the entire
+sync before unrelated uploads. A retained `bootstrap-publishing` intent alone
+is not a failure after verified readiness/release. A stale connectivity helper can
+therefore be updated by normal non-backup sync before retrying a targeted backup
+installer. An interrupted non-backup sync is not transactional: completed unrelated
+writes remain, and retry repeats the checks. Inspection stages are retained in
+`/tmp/vanpi-sync-check.*` until ordinary temporary-file cleanup/reboot.
+
 Older/in-flight publishers and arbitrary direct restoration cannot be retroactively
 fenced: excluding them remains part of the initial operator maintenance boundary.
 Never use them to remove guards or roll back backup-cohort files.

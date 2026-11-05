@@ -86,11 +86,7 @@ class Bootstrap:
 
     def inspect_inputs(self, source):
         proposed = json.loads(files.read(source / 'plan.json'))
-        if (proposed.get('version') != 1 or len(proposed['files']) != len(plan.GUARDS)
-                or {r['name'] for r in proposed['files']} != set(plan.GUARDS)
-                or set(proposed['stable']) != set(plan.STABLE_FILES)
-                or set(proposed['checks']) != set(plan.GUARDS)):
-            raise ValueError('Unsupported bootstrap plan')
+        plan.validate_plan(proposed)
         payload = {}
         expected = {r['name']: r['after'] for r in proposed['files']}
         expected.update({'stable-' + name: value for name, value in proposed['stable'].items()})
@@ -217,13 +213,14 @@ class Bootstrap:
             raise ValueError('Bootstrap maintenance condition is not effective: ' + service)
 
     @contextmanager
-    def fence(self):
+    def fence(self, shared=False):
         fd = locks.open_lock(locks.legacy_lock(), legacy=True)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            os.ftruncate(fd, 0)
-            os.write(fd, (str(os.getpid()) + '\n').encode())
-            yield
+            fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+            if not shared:
+                os.ftruncate(fd, 0)
+                os.write(fd, (str(os.getpid()) + '\n').encode())
+            yield fd
         finally:
             os.close(fd)
 
@@ -291,6 +288,7 @@ class Bootstrap:
         if os.path.lexists(self.maintenance) and not allow_maintenance:
             raise ValueError('Bootstrap maintenance is held; verify and explicitly release it first')
         proposed = files.read_json(self.ready)
+        plan.validate_plan(proposed)
         files.directory(self.stable, 0o755, create=False)
         for name, expected in proposed['stable'].items():
             if plan.digest(files.read(self.stable / name, private=True)) != expected:

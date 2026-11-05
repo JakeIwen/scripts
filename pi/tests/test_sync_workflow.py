@@ -33,6 +33,7 @@ class SyncWorkflowTests(unittest.TestCase):
 # Every external operation is a fake; only the actual preflight/workflow run.
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(checkout))}
+BACKUP_SYNC_REMOTE_BOUNDARY=/tmp/vanpi-sync-check.ABC123/backup_deploy_sync.py
 ssh() {{
   if [[ "$*" == *activated.json* ]]; then
     printf 'activation-check\\n'
@@ -81,11 +82,13 @@ run_sync_workflow
             state = root / 'deploy-state'
             harness = definitions + f'''
 export VANPI_BACKUP_DEPLOY_STATE_DIR={shlex.quote(str(state))}
+export VANPI_BOOTSTRAP_ROOT={shlex.quote(str(root / 'host'))}
+BACKUP_SYNC_REMOTE_BOUNDARY=/tmp/vanpi-sync-check.ABC123/backup_deploy_sync.py
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(root))}
 ssh() {{
-  if [[ "$*" == *--check-backup-bootstrap* ]]; then
-    /bin/bash -s -- --check-backup-bootstrap
+  if [[ "$*" == *backup_deploy_sync.py* ]]; then
+    /usr/bin/python3 -B "$dsc/pi/scripts/backup/backup_deploy_sync.py" check
   elif [[ "$*" == *'git hash-object'* ]]; then
     git -C "$dsc" hash-object pi/.bashrc
   fi
@@ -104,7 +107,7 @@ run_sync_workflow
                 self.assertEqual(result.returncode, int(present), result.stderr)
                 if present:
                     self.assertEqual(result.stdout, '')
-                    self.assertIn('no upload was made', result.stderr)
+                    self.assertIn('no unrelated upload was made', result.stderr)
                 else:
                     self.assertEqual(result.stdout.splitlines(),
                                      ['non-python-write', 'package-write', 'compute-write'])

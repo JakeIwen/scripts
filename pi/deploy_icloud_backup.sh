@@ -50,7 +50,7 @@ done < <(local_backup_sources pi)
 sudo -n /usr/bin/python3 pi/scripts/backup/backup_schedule.py --check
 # icloud_uplink.py imports the flat connectivity helper that only the broad sync
 # publishes; a stale live copy breaks every cloud attempt's route check.
-[[ $(sha256sum /home/pi/scripts/connectivity_status.py | awk '{print $1}') == "$3" ]] || { echo 'connectivity_status.py on the Pi differs from the checkout; run pi/sync_scripts.sh first so icloud_uplink.py and its helper match.' >&2; exit 1; }
+[[ $(sha256sum /home/pi/scripts/connectivity_status.py | awk '{print $1}') == "$3" ]] || { echo 'connectivity_status.py on the Pi differs from the checkout; run the non-backup pi/sync_scripts.sh first so icloud_uplink.py and its helper match.' >&2; exit 1; }
 local_backup_begin "$stage" pi "$2"
 local_backup_publish
 /usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf /etc/tmpfiles.d/vanpi-samba-drain.conf

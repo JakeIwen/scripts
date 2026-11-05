@@ -1,4 +1,8 @@
 import os
+import grp
+import pwd
+import shutil
+import sys
 import random
 import stat
 import subprocess
@@ -6,9 +10,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import backup_bootstrap_plan as bootstrap_plan
+from pi.tests.backup.bootstrap_fixtures import BACKUP, seed_bootstrap
+
 UPDATE_SERVICES = Path(__file__).resolve().parents[1] / "scripts" / "update_services.sh"
 
 FAKE_SUDO = """#!/bin/sh
+[ "$1" != -n ] || shift
 exec "$@"
 """
 # Logs every call; reports units active so changed units are restarted.
@@ -25,6 +33,7 @@ def mode(path):
     return stat.S_IMODE(path.stat().st_mode)
 
 
+@unittest.skipUnless(sys.platform.startswith('linux'), 'receiver fence requires Linux flock/fdinfo')
 class UpdateServicesTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
@@ -44,7 +53,10 @@ class UpdateServicesTests(unittest.TestCase):
             path.write_text(body)
             path.chmod(0o755)
         self.log = self.root / "calls.log"
-        self.live = {name: self.root / "live" / name for name in ("services", "scripts", "tmpfiles")}
+        self.host_root = self.root / 'live'
+        self.live = {'services': self.host_root / 'etc/systemd/system',
+                     'scripts': self.host_root / 'home/pi/scripts',
+                     'tmpfiles': self.host_root / 'etc/tmpfiles.d'}
         for path in self.live.values():
             path.mkdir(parents=True)
         self.env = dict(
@@ -52,10 +64,24 @@ class UpdateServicesTests(unittest.TestCase):
             PATH=f"{bin_dir}:/usr/bin:/bin",
             FAKE_LOG=str(self.log),
             VANPI_BACKUP_DEPLOY_STATE_DIR=str(self.root / 'backup-deploy-state'),
+            VANPI_BOOTSTRAP_ROOT=str(self.host_root),
+            VANPI_BACKUP_JOB_LOCK=str(self.root / 'legacy'),
+            VANPI_BACKUP_JOB_LOCK_OWNER=pwd.getpwuid(os.getuid()).pw_name,
+            VANPI_BACKUP_JOB_LOCK_GROUP=grp.getgrgid(os.getgid()).gr_name,
+            VANPI_BACKUP_JOB_LOCK_MODE='660',
+            UPDATE_SERVICES_SUDO=str(bin_dir / 'sudo'),
             UPDATE_SERVICES_LIVE_SERVICES=str(self.live["services"]),
             UPDATE_SERVICES_LIVE_SCRIPTS=str(self.live["scripts"]),
             UPDATE_SERVICES_LIVE_TMPFILES=str(self.live["tmpfiles"]),
         )
+
+        lock = Path(self.env['VANPI_BACKUP_JOB_LOCK'])
+        lock.touch()
+        lock.chmod(0o660)
+        boundary = self.stage / '.backup-sync'
+        boundary.mkdir(parents=True)
+        for name in bootstrap_plan.SYNC_FILES:
+            shutil.copyfile(BACKUP / name, boundary / name)
 
         # Staged tree. One new and one changed unit keep both unit arrays
         # non-empty, so the script also runs under macOS's bash 3.2.
@@ -98,7 +124,26 @@ class UpdateServicesTests(unittest.TestCase):
         return subprocess.run(["/bin/bash", str(UPDATE_SERVICES), str(self.stage)],
                               env=self.env, capture_output=True, text=True, timeout=60)
 
-    def test_bootstrap_state_refuses_receiver_before_any_live_write(self):
+    def bootstrap_ready(self):
+        backup = self.live['scripts'] / 'backup'
+        backup.mkdir(exist_ok=True)
+        for name in bootstrap_plan.GUARDS:
+            shutil.copyfile(BACKUP / name, backup / name)
+        host = seed_bootstrap(self.root, self.host_root, self.env)
+        (host.state / 'bootstrap-publishing').write_text('completed publication intent\n')
+        return host
+
+    def test_symlinked_stage_refuses_before_loading_staged_code(self):
+        actual = self.root / 'actual-stage'
+        self.stage.rename(actual)
+        self.stage.symlink_to(actual)
+        result = self.run_updater()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Unsafe or incomplete', result.stderr)
+        self.assertFalse(self.log.exists())
+        self.assertTrue((actual / 'scripts/tool.sh').exists())
+
+    def test_incomplete_state_refuses_receiver_before_any_live_write(self):
         state = Path(self.env['VANPI_BACKUP_DEPLOY_STATE_DIR'])
         for kind in ('directory', 'dangling-symlink'):
             with self.subTest(kind=kind):
@@ -108,7 +153,7 @@ class UpdateServicesTests(unittest.TestCase):
                     state.symlink_to(self.root / 'absent')
                 result = self.run_updater()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Broad sync refuses', result.stderr)
+                self.assertIn('Backup sync refused', result.stderr)
                 self.assertFalse(self.log.exists())
                 self.assertEqual((self.live['scripts'] / 'tool.sh').read_text(), '# old tool.sh\n')
                 self.assertTrue(self.stage.exists())
@@ -116,6 +161,118 @@ class UpdateServicesTests(unittest.TestCase):
                     state.rmdir()
                 else:
                     state.unlink()
+
+    def test_healthy_bootstrap_updates_helper_without_touching_backup_or_directory_metadata(self):
+        host = self.bootstrap_ready()
+        backup = self.live['scripts'] / 'backup'
+        backup.chmod(0o750)
+        previous = {path: path.read_bytes() for path in backup.iterdir()}
+        (self.stage / 'scripts/backup').mkdir()
+        (self.stage / 'scripts/backup').chmod(0o777)
+        helper = self.live['scripts'] / 'connectivity_status.py'
+        helper.write_text('# old connectivity helper\n')
+        shutil.copyfile(BACKUP.parent / helper.name, self.stage / 'scripts' / helper.name)
+        (self.stage / 'tmpfiles.d/x.conf').unlink()  # all canonical/storage tmpfiles may be excluded
+        result = self.run_updater()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(helper.read_bytes(), (BACKUP.parent / helper.name).read_bytes())
+        self.assertEqual(previous, {path: path.read_bytes() for path in previous})
+        self.assertEqual(mode(backup), 0o750)
+        self.assertTrue((host.state / 'bootstrap-publishing').exists())
+
+    def test_pending_maintenance_and_malformed_readiness_refuse_before_writes(self):
+        host = self.bootstrap_ready()
+        for name in ('maintenance', 'pending'):
+            marker = host.state / name
+            marker.write_text('held\n')
+            marker.chmod(0o600)
+            result = self.run_updater()
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(self.log.exists())
+            marker.unlink()
+        host.ready.write_text('{}')
+        self.assertNotEqual(self.run_updater().returncode, 0)
+        self.assertFalse(self.log.exists())
+
+    def test_polluted_payload_and_parent_symlink_refuse_before_unrelated_writes(self):
+        self.bootstrap_ready()
+        for relative in ('scripts/backup/backup_conf.sh', 'scripts/mount_disks.sh',
+                         'services/vanpi-icloud-backup.service', 'tmpfiles.d/vanpi-backup.conf'):
+            with self.subTest(relative=relative):
+                path = self.stage / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('polluted\n')
+                result = self.run_updater()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Backup-owned staged overlap', result.stderr)
+                self.assertFalse(self.log.exists())
+                self.assertEqual((self.live['scripts'] / 'tool.sh').read_text(), '# old tool.sh\n')
+                path.unlink()
+        (self.stage / 'scripts/backup').rmdir()
+        (self.stage / 'scripts/backup').symlink_to(self.root)
+        self.assertNotEqual(self.run_updater().returncode, 0)
+        self.assertFalse(self.log.exists())
+
+    def test_cleanup_destination_newly_owned_by_plan_is_refused(self):
+        self.bootstrap_ready()
+        canonical = self.stage / '.backup-sync/backup_deploy_plan.sh'
+        with canonical.open('a') as stream:
+            stream.write("\nBACKUP_DEPLOY_PLAN+=('both|pi/scripts/setup_router_policy_trigger.sh|"
+                         "/home/pi/scripts/setup_router_policy_trigger.sh|revision|pi:pi|750|new')\n")
+        legacy = self.live['scripts'] / 'setup_router_policy_trigger.sh'
+        legacy.write_text('protected cleanup target\n')
+        result = self.run_updater()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Backup-owned cleanup overlap', result.stderr)
+        self.assertEqual(legacy.read_text(), 'protected cleanup target\n')
+        self.assertFalse(self.log.exists())
+
+    def test_nonbackup_alias_cannot_write_through_to_protected_code(self):
+        self.bootstrap_ready()
+        protected = self.live['scripts'] / 'backup/backup_conf.sh'
+        before = protected.read_bytes()
+        alias = self.live['scripts'] / 'tool.sh'
+        alias.unlink()
+        alias.symlink_to(protected)
+        result = self.run_updater()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(protected.read_bytes(), before)
+        self.assertFalse(alias.is_symlink())
+        self.assertEqual(alias.read_text(), '# new tool.sh\n')
+
+    def test_root_private_readiness_is_checked_with_privilege(self):
+        if os.geteuid() == 0:
+            self.skipTest('requires a separate unprivileged installer identity')
+        private = self.root / 'root-state'
+        private.mkdir()
+        self.env['VANPI_BACKUP_DEPLOY_STATE_DIR'] = str(private / 'state')
+        host = self.bootstrap_ready()
+        paths = [private, host.stable, host.cron.parent, self.live['services']]
+        self.addCleanup(subprocess.run, ['/usr/bin/sudo', '-n', '/usr/bin/chown', '-R',
+                                        str(os.getuid()) + ':' + str(os.getgid()), str(self.root)], check=True)
+        subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/chown', '-R', 'root:root', *map(str, paths)], check=True)
+        subprocess.run(['/usr/bin/sudo', '-n', '/bin/chmod', '600', str(host.ready)], check=True)
+        sudo = self.root / 'bin/sudo'
+        sudo.write_text('#!/bin/sh\n[ "$1" != -n ] || shift\n'
+                        'if [ "$1" = /usr/bin/python3 ]; then\n'
+                        ' exec /usr/bin/sudo -n -E /usr/bin/env PATH="$PATH" "$@"\nfi\nexec "$@"\n')
+        # Only inspect/refuse here: root-owned services are not writable by the
+        # fixture installer, and no actual supervisor command may run.
+        pending = host.state / 'pending'
+        subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/touch', str(pending)], check=True)
+        subprocess.run(['/usr/bin/sudo', '-n', '/bin/chmod', '600', str(pending)], check=True)
+        subprocess.run(['/usr/bin/sudo', '-n', '/bin/chmod', '700', str(private)], check=True)
+        self.assertFalse(os.path.lexists(host.state), 'fixture must hide even state existence from the installer')
+        result = self.run_updater()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('transaction is pending', result.stderr)
+        self.assertFalse(self.log.exists())
+        subprocess.run(['/usr/bin/sudo', '-n', '/bin/rm', str(pending)], check=True)
+        subprocess.run(['/usr/bin/sudo', '-n', '/bin/chmod', '755', str(private)], check=True)
+        checked = subprocess.run([str(sudo), '/usr/bin/python3', '-B',
+                                  str(self.stage / '.backup-sync/backup_deploy_sync.py'), 'check'],
+                                 env=self.env, capture_output=True, text=True)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
 
     def test_successful_update_makes_only_staged_top_level_scripts_executable(self):
         result = self.run_updater()

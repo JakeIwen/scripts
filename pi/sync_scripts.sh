@@ -47,14 +47,16 @@ check_dashboard_cut_over() {
 }
 
 check_backup_bootstrap_allows_sync() {
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
-    /bin/bash -s -- --check-backup-bootstrap < "$dsc/pi/scripts/update_services.sh" || {
-    echo 'Backup bootstrap/broad-sync preflight failed; no upload was made.' >&2
-    return 1
+  [[ ${BACKUP_SYNC_REMOTE_BOUNDARY:-} =~ ^/tmp/vanpi-sync-check\.[A-Za-z0-9]{6}/backup_deploy_sync\.py$ ]] || {
+    echo 'Run sync_scripts.sh through its guarded entry point.' >&2; return 1;
+  }
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" /usr/bin/sudo -n \
+    /usr/bin/python3 -B "$BACKUP_SYNC_REMOTE_BOUNDARY" check || {
+    echo 'Backup readiness check failed; no unrelated upload was made.' >&2; return 1;
   }
 }
 
-sync_preflight() {
+sync_local_preflight() {
   (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
   # sync_compute runs this installer last; refuse before any upload if it is missing.
   compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
@@ -62,7 +64,10 @@ sync_preflight() {
     echo "Van compute checkout is missing its executable installer: $compute_installer" >&2
     return 1
   fi
+}
 
+sync_preflight() {
+  sync_local_preflight || return 1
   check_backup_bootstrap_allows_sync || return 1
   check_pi_bashrc_known || return 1
   check_dashboard_cut_over || return 1
@@ -99,6 +104,19 @@ sync_labwc() {
     "$pi_ip:/home/pi/.config/labwc/"
 }
 
+stage_backup_scope() {
+  local kind name names helper="$dsc/pi/scripts/backup/backup_deploy_sync.py"
+  /bin/mkdir -p "$local_stage/.backup-sync" || return 1
+  for kind in scripts services tmpfiles.d; do
+    python3 "$helper" excludes "$kind" > "$local_stage/backup-$kind.exclude" || return 1
+  done
+  names=$(python3 "$helper" files) || return 1
+  while IFS= read -r name; do
+    cp "$dsc/pi/scripts/backup/$name" "$local_stage/.backup-sync/$name" || return 1
+  done <<< "$names"
+  [[ -f "$local_stage/.backup-sync/backup_deploy_sync.py" ]] || return 1
+}
+
 sync_non_python() {
   local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || return 1
   staged_scripts="$local_stage/scripts"
@@ -111,6 +129,7 @@ sync_non_python() {
   trap cleanup_local_stage EXIT
 
   /bin/mkdir -p "$staged_scripts" "$staged_services" "$staged_tmpfiles"
+  stage_backup_scope || return 1
   # deploy_network_storage.py owns the recorder files it installs; never stage them.
   storage_managed="$dsc/pi/sync_storage_managed.exclude"
   package_units_exclude="$local_stage/python-package-units.exclude"
@@ -128,15 +147,19 @@ sync_non_python() {
   fi
   /usr/bin/rsync -a \
     --exclude '__pycache__/' \
-    --exclude '*.pyc' \
+    --exclude '*.pyc' --prune-empty-dirs \
+    --exclude-from="$local_stage/backup-scripts.exclude" \
     --exclude-from="$storage_managed" \
     "$repo_scripts/" "$staged_scripts/" || return 1
   /usr/bin/rsync -a --exclude-from="$package_units_exclude" \
+    --exclude-from="$local_stage/backup-services.exclude" \
     --exclude-from="$storage_managed" \
     "$services/" "$staged_services/" || return 1
   /usr/bin/rsync -a --exclude-from="$storage_managed" \
+    --exclude-from="$local_stage/backup-tmpfiles.d.exclude" \
     "$tmpfiles/" "$staged_tmpfiles/" || return 1
-  cp -a "$shared_sh/." "$staged_scripts/"
+  /usr/bin/rsync -a --prune-empty-dirs --exclude-from="$local_stage/backup-scripts.exclude" \
+    "$shared_sh/" "$staged_scripts/" || return 1
   # deploy_python.py owns allowlisted Python deployment.
 
   # one multiplexed connection shared by every ssh/scp below: parallel transfers
@@ -149,7 +172,7 @@ sync_non_python() {
   cp_services() {
     local remote_stage="/tmp/systemd-tmp.$$"
     ssh $mux $pi_ip "mkdir -p '$remote_stage'" || return 1
-    scp $mux -r "$staged_services" "$staged_scripts" "$staged_tmpfiles" \
+    scp $mux -r "$staged_services" "$staged_scripts" "$staged_tmpfiles" "$local_stage/.backup-sync" \
       "$pi_ip:$remote_stage/" || return 1
     ssh $mux $pi_ip "bash '$remote_stage/scripts/update_services.sh' '$remote_stage'"
   }
@@ -235,4 +258,8 @@ sync_compute() {
 }
 
 source "$dsc/pi/sync_workflow.sh" || exit 1
-run_sync_workflow
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  sync_local_preflight || exit 1
+  cd "$dsc" || exit 1
+  exec python3 -B -m pi.backup_sync_client "$dsc" "$pi_ip"
+fi

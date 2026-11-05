@@ -30,13 +30,14 @@ LOADED_RUNNER = Path(__file__).read_bytes()
 COMMAND_TIMEOUT = 900
 CACHE_WINDOW = 6 * 3600
 KEEP_PASSES = 50
-# Test-file prefix -> import roots its tests need, in search order.
+# Test file/directory -> import roots its tests need, in search order.
 PYTHON_IMPORT_ROOTS = {
     'macbook/bettertouchtool/tests': ('macbook/bettertouchtool',),
     'macbook/mac_panel/tests': ('macbook/mac_panel', 'shared/python'),
     'macbook/tests': ('shared/python', 'macbook/scripts', 'macbook/bettertouchtool'),
     'pi/tests': ('pi',),
     'pi/tests/backup': ('pi/scripts/backup',),
+    'pi/tests/test_update_services.py': ('pi/scripts/backup',),
     'pi/tests/price_check': ('pi/scripts/price_check',),
     'pi/projects/phone-drop': ('pi/projects/phone-drop',),
     'shared/tests': ('shared/python',),
@@ -284,7 +285,7 @@ def command_environment(name):
     # one runner instead of adding sys.path workarounds to individual tests.
     environment = dict(os.environ)
     roots = [str(ROOT)] + [str(ROOT / root) for prefix, prefix_roots in PYTHON_IMPORT_ROOTS.items()
-                           if name.startswith(prefix + '/') for root in prefix_roots]
+                           if name == prefix or name.startswith(prefix + '/') for root in prefix_roots]
     environment['PYTHONPATH'] = os.pathsep.join(roots + [environment.get('PYTHONPATH', '')])
     environment['PYTHONDONTWRITEBYTECODE'] = '1'
     return environment

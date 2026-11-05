@@ -39,6 +39,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi/scripts/vanpi-metered` | Pi shell, authenticated Mac SSH sync and cloud admission | `pi/apps/metered/` plus `shared/metered/` in the immutable package release |
 | `pi.apps.metered` | `vanpi-metered.service`, independently of the dashboard | `pi/apps/metered/`; unit/package owned by `pi/deploy_python.py` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
+| `pi/sync_scripts.sh` | Mac non-backup broad sync | `pi/backup_sync_client.py`, `pi/scripts/update_services.sh`, `pi/scripts/backup/backup_deploy_sync.py` |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
 | `/usr/local/lib/vanpi-backup-deploy/recover` | independent root cron `/etc/cron.d/vanpi-backup-deploy` | `pi/backup_deploy_bootstrap.py` and `pi/scripts/backup/backup_bootstrap_*.py`; outside cohort rollback |
 | `pi/scripts/smart_watch.sh` | `vanpi-smart-watch.timer`; alerts on the `NTFY_WARNING_URL` topic | the script; see `pi/docs/monitoring/SMART.md` |
@@ -838,9 +839,20 @@ compare it with this checkout. Deployed files may differ from the repository.
   owns no-follow reads and durable files for that separately installed runtime
   (it intentionally has no shared/python import root). Staging supports Python
   3.9+; host execution requires Linux/Python 3.11+. All live/staged predecessors
-  must retain guards. Current broad sync refuses any bootstrap state before
-  uploads and again in its receiver; older publishers and unguarded rollback
-  remain unsupported. Bootstrap cannot revoke already-running old shells.
+  must retain guards. Broad sync deploys only non-backup destinations, excluded
+  from the canonical union of both plan profiles; its receiver independently
+  refuses backup-owned payload/cleanup overlap before writes and preserves existing
+  parent-directory metadata. `pi/backup_sync_client.py` (Python 3.9+) uploads the
+  inspection closure and holds the validated legacy inode shared through all sync
+  phases; `backup_deploy_sync.py` (scope CLI 3.9+, host runtime Linux/3.11+) owns
+  canonical exclusions, scope validation and privileged readiness using the existing
+  bootstrap inspector/fence. The receiver retains its own shared hold, with no sudo
+  descriptor-preservation requirement. Only inspection code uploads before readiness;
+  maintenance/pending/incomplete/unsafe state refuses unrelated work. Healthy released
+  and genuinely unbootstrapped hosts remain supported (an existing legacy lock is
+  required). `connectivity_status.py` still deploys through this non-backup sync.
+  Older publishers and unguarded rollback remain unsupported; bootstrap cannot
+  revoke already-running old shells.
   Read-only preflight precedes holds and repeats under the fence. `abandon`
   archives only provably unpublished attempts after restoring/flushing crontabs;
   published attempts retain maintenance until same-bundle rerun/release. Cron

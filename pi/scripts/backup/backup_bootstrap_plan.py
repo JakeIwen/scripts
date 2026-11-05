@@ -22,9 +22,32 @@ GUARDS = ('backup_conf.sh', 'backup_locks.sh', 'backup_locks.py', 'backup_admiss
           'offsite_backup.sh', 'offsite_config.py', 'clone_to_sd.sh', 'backup_deploy_state.sh')
 STABLE_FILES = ('backup_bootstrap_host.py', 'backup_bootstrap_plan.py', 'backup_bootstrap_files.py',
                 'backup_deploy_trigger.sh', 'backup_deploy_state.sh', 'backup_locks.py')
+SYNC_FILES = STABLE_FILES + ('backup_deploy_plan.sh', 'backup_deploy_sync.py')
+SYNC_READY = 'backup-sync-ready'
+SYNC_RELEASE = 'backup-sync-release'
 SCHEDULED_JOBS = ('backup_window.sh', 'pi_backup.sh', 'exfat_snapshot.sh', 'clone_now.sh',
                   'clone_to_sd.sh', 'hotspare_rotation.sh', 'icloud_backup.sh',
                   'time_machine_icloud.sh', 'offsite_backup.sh', 'openwrt_backup.sh')
+
+
+def validate_plan(proposed):
+    try:
+        records, stable, checks = proposed['files'], proposed['stable'], proposed['checks']
+        valid = (type(proposed['version']) is int and proposed['version'] == 1
+                 and isinstance(proposed['revision'], str) and bool(proposed['revision'])
+                 and isinstance(records, list) and len(records) == len(GUARDS)
+                 and {record['name'] for record in records} == set(GUARDS)
+                 and isinstance(stable, dict) and set(stable) == set(STABLE_FILES)
+                 and isinstance(checks, dict) and set(checks) == set(GUARDS))
+        hashes = list(stable.values()) + [record['after'] for record in records]
+        hashes += [record['before'] for record in records if record['before'] != 'absent']
+        valid = valid and all(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) for value in hashes)
+        valid = valid and all(isinstance(parts, list) and parts and
+                              all(isinstance(part, str) and part for part in parts) for parts in checks.values())
+    except (AttributeError, KeyError, TypeError):
+        valid = False
+    if not valid:
+        raise ValueError('Unsupported bootstrap plan')
 
 
 def digest(data):
