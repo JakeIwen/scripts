@@ -1,12 +1,12 @@
 // llm-restore: the CLI owns its crontab block; the page only flips the snapshot switch.
-import {button, keyValues, node, timeNode} from './panel_dom.mjs';
+import {anchor, button, keyValues, node, timeNode} from './panel_dom.mjs';
 import {action, refresh} from './panel_sections.mjs';
 import {Level, status, tag} from './status_cell.mjs';
 
 const SECTION = 'llm-restore';
 
 export function render(data) {
-  const root = node('div');
+  const root = anchor(node('div'), 'snapshots');
   const line = node('p', null, 'summary-line');
   line.append(status(data.enabled ? Level.OK : Level.IDLE, data.enabled ? 'Snapshots on' : 'Snapshots off'), ' ');
   line.append(tag(data.installed ? 'cron block installed' : 'cron block missing', data.installed ? undefined : Level.ERROR));

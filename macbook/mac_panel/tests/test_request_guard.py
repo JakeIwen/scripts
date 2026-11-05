@@ -1,11 +1,14 @@
 from email.message import Message
 import json
+import os
+import subprocess
+import sys
 import unittest
 
 from panel_contracts import ApiError
 from request_guard import guard_request
 
-from panel_paths import HOST
+from panel_paths import DEFAULT_PORT, DIRECTORY, HOST, port_from_env
 from panel_test_support import auth, request, running_server
 
 
@@ -26,6 +29,23 @@ class RequestTests(unittest.TestCase):
         with self.assertRaises(ApiError) as raised:
             guard_request('POST', '/api/stop', headers, 'fixture-token')
         self.assertEqual(raised.exception.status, 400)
+
+    def test_dev_port_override_accepts_only_plain_digits(self):
+        self.assertEqual(port_from_env({}), DEFAULT_PORT)
+        self.assertEqual(port_from_env({'MAC_PANEL_PORT': '8770'}), 8770)
+        for bad in ('', 'abc', '87 70', '-1', '0', '65536', '８７７０', '1e3'):
+            with self.subTest(value=bad):
+                self.assertEqual(port_from_env({'MAC_PANEL_PORT': bad}), DEFAULT_PORT)
+
+    def test_host_allowlist_follows_the_override(self):
+        code = 'import request_guard; print(sorted(request_guard.HOSTS))'
+        for override, expected in (('8770', ['127.0.0.1:8770', 'localhost:8770']), (None, sorted([HOST, f'localhost:{DEFAULT_PORT}']))):
+            env = {key: value for key, value in os.environ.items() if key != 'MAC_PANEL_PORT'}
+            if override:
+                env['MAC_PANEL_PORT'] = override
+            result = subprocess.run([sys.executable, '-B', '-c', code], cwd=DIRECTORY, env=env,
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.strip(), str(expected))
 
     def test_host_allowlist_health_and_security_headers(self):
         with running_server() as server:

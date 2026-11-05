@@ -1,14 +1,11 @@
 // Settings forms generated from each tool's declaration; saves go through tool_settings on the server.
-import {button, isChanged, node} from './panel_dom.mjs';
+import {anchor, button, isChanged, node} from './panel_dom.mjs';
 import {action, refresh} from './panel_sections.mjs';
+import {settingAnchor, settingLabel} from './settings_fields.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 
 const SECTION = 'settings';
 const CONFLICT = 409;
-
-function labelFor(setting) {
-  return setting.label || setting.name.replace(/_/g, ' ');
-}
 
 function makeInput(setting, value, id) {
   let input;
@@ -47,13 +44,13 @@ function readValue(setting, input) {
 }
 
 function settingRow(declaration, setting, value) {
-  const id = `${declaration.tool}-${setting.name}`;
+  const id = settingAnchor(declaration.tool, setting.name);
   const input = makeInput(setting, value, id);
-  const row = node('div', null, 'setting');
+  const row = anchor(node('div', null, 'setting'), id);
   const text = node('div', null, 'setting-text');
   const label = node('label');
   label.htmlFor = id;
-  label.append(node('strong', labelFor(setting)));
+  label.append(node('strong', settingLabel(setting)));
   const unit = setting.unit ? ` ${setting.unit}` : '';
   text.append(label, node('small', `${setting.description} Default: ${setting.default}${unit}.`));
   const control = node('div', null, 'control');

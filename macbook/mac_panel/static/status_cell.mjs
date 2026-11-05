@@ -1,5 +1,8 @@
 // One vocabulary for "how is this thing doing", shared by every section and the tab dots.
-import {node} from './panel_dom.mjs';
+import {tag} from './components.mjs';
+import {node} from './dom_core.mjs';
+
+export {tag};
 
 export const Level = Object.freeze({OK: 'ok', IDLE: 'idle', UNKNOWN: 'unknown', WARN: 'warn', ERROR: 'error'});
 const RANK = [Level.OK, Level.IDLE, Level.UNKNOWN, Level.WARN, Level.ERROR];
@@ -17,8 +20,4 @@ export function status(level, text, detail) {
     result.append(extra);
   }
   return result;
-}
-
-export function tag(text, level) {
-  return node('span', text, level ? `tag level-${level}` : 'tag');
 }

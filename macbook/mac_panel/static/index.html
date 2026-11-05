@@ -11,13 +11,23 @@
 <body>
 <header>
 <div class="bar">
+<button id="menu" class="menu-button" type="button" aria-controls="nav" aria-expanded="false">Menu</button>
 <h1>Mac Panel</h1>
-<button id="refresh" type="button">Refresh all</button>
-<span id="connection" role="status"></span>
-<label class="theme">Theme <select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+<span id="current-title" class="current-title"></span>
+<div class="search">
+<input id="search" type="search" placeholder="Search sections, settings, actions" aria-label="Search" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list">
+<kbd class="search-hint" aria-hidden="true">⌘K</kbd>
+<div id="search-results" class="search-results" role="listbox" aria-label="Search results" hidden></div>
 </div>
-<div class="tabs" role="tablist" aria-label="Sections"></div>
+<button id="refresh" type="button">Refresh all</button>
+<label class="theme"><span class="theme-text">Theme</span> <select id="theme" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+</div>
+<div id="connection" role="status"></div>
 </header>
+<div class="layout">
+<nav id="nav" aria-label="Sections"></nav>
+<div id="backdrop" class="backdrop" hidden></div>
 <main></main>
+</div>
 </body>
 </html>

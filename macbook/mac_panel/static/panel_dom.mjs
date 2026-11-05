@@ -1,40 +1,12 @@
-// DOM helpers every section shares: elements, tables, armed buttons, notices, times and focus keys.
-import {absoluteText, parseStamp, relativeText} from './relative_time.mjs';
+// DOM helpers every section shares: tables, disclosures, notices and focus keys, plus the lower layers re-exported.
+import {timeNode} from './components.mjs';
+import {PLACEHOLDER, node} from './dom_core.mjs';
 
-export const PLACEHOLDER = '—';
-const ARM_SECONDS = 8;
+export {PLACEHOLDER, armed, button, confirmText, node} from './dom_core.mjs';
+export {anchor, card, emptyState, fieldError, info, kv, kv as keyValues, loadError, refreshTimes, settingRow,
+  tag, timeNode, timeWithAbsolute, toggle} from './components.mjs';
+
 const OK_NOTICE_SECONDS = 20;
-
-export function node(tag, text, className) {
-  const result = document.createElement(tag);
-  if (text !== undefined && text !== null) result.textContent = String(text);
-  if (className) result.className = className;
-  return result;
-}
-
-export function timeNode(value, placeholder = PLACEHOLDER) {
-  const ms = parseStamp(value);
-  if (ms === null) return node('span', value ? String(value) : placeholder, 'muted');
-  const result = node('time', relativeText(ms));
-  result.dateTime = new Date(ms).toISOString();
-  result.dataset.ms = ms;
-  result.title = absoluteText(ms);
-  return result;
-}
-
-export function timeWithAbsolute(value) {
-  const ms = parseStamp(value);
-  const result = node('div');
-  result.append(timeNode(value));
-  if (ms !== null) result.append(node('div', absoluteText(ms), 'muted small'));
-  return result;
-}
-
-export function refreshTimes(root = document) {
-  root.querySelectorAll('time[data-ms]').forEach(element => {
-    element.textContent = relativeText(Number(element.dataset.ms));
-  });
-}
 
 export function details(title, body, key) {
   const result = node('details');
@@ -44,17 +16,6 @@ export function details(title, body, key) {
   if (key) summary.dataset.key = `summary-${key}`;
   result.append(summary, body instanceof Node ? body : node('pre', body));
   return result;
-}
-
-export function keyValues(pairs) {
-  const list = node('dl', null, 'kv');
-  pairs.forEach(([term, value]) => {
-    if (value === undefined) return;
-    const definition = node('dd');
-    definition.append(value instanceof Node ? value : document.createTextNode(String(value ?? PLACEHOLDER)));
-    list.append(node('dt', term), definition);
-  });
-  return list;
 }
 
 export function table(headers, rows) {
@@ -81,41 +42,6 @@ export function table(headers, rows) {
   result.append(body);
   wrapper.append(result);
   return wrapper;
-}
-
-export function button(text, onClick, options = {}) {
-  const {confirm, key, className, disabled = false, title} = options;
-  const result = node('button', text, className);
-  result.type = 'button';
-  if (key) result.dataset.key = key;
-  if (title) result.title = title;
-  result.disabled = disabled;
-  let armed = false;
-  let timer = null;
-  const disarm = () => {
-    if (!armed) return;
-    armed = false;
-    clearTimeout(timer);
-    result.textContent = text;
-    result.classList.remove('armed');
-  };
-  result.addEventListener('click', async () => {
-    if (confirm && !armed) {
-      armed = true;
-      // CSSOM sizing is not an inline style attribute, so the CSP's style-src stays intact.
-      result.style.minWidth = `${result.offsetWidth}px`;
-      result.textContent = confirm;
-      result.classList.add('armed');
-      timer = setTimeout(disarm, ARM_SECONDS * 1000);
-      return;
-    }
-    disarm();
-    result.disabled = true;
-    try { await onClick(); } finally { result.disabled = disabled; }
-  });
-  result.addEventListener('keydown', event => { if (event.key === 'Escape') disarm(); });
-  result.addEventListener('blur', disarm);
-  return result;
 }
 
 const noticeTimers = new Map();

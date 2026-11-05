@@ -1,5 +1,5 @@
 // Host-local controls; remote consumers are telemetry, never editable here.
-import {button, details, node, table, timeNode} from './panel_dom.mjs';
+import {anchor, button, details, node, table, timeNode} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
 import {Level, status} from './status_cell.mjs';
 
@@ -129,7 +129,7 @@ function advanced(data) {
 }
 
 function lowData(data) {
-  const root = node('div', null, 'tool');
+  const root = anchor(node('div', null, 'tool'), 'low-data-mode');
   const enabled = data.low_data_mode.enabled;
   const toggle = button(`Low Data Mode control: ${enabled ? 'On' : 'Off'}`, () => send({
     action: 'low-data-mode', enabled: !enabled, revision: data.low_data_mode.revision, confirmed: true,

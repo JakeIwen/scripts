@@ -1,6 +1,7 @@
-// Section registry plus the two verbs every section uses: refresh (GET) and action (POST then refresh).
+// Section registry, the state registry that Overview and search read, and the two verbs every
+// section uses: refresh (GET) and action (POST then refresh).
 import {api} from './panel_api.mjs';
-import {button, focusKey, isChanged, node, notice, restoreFocus, timeNode} from './panel_dom.mjs';
+import {focusKey, isChanged, loadError, notice, restoreFocus, timeNode} from './panel_dom.mjs';
 import {Level} from './status_cell.mjs';
 
 const registry = new Map();
@@ -32,12 +33,19 @@ export function editingReason(id) {
   return null;
 }
 
-// The tab shows only the state dot; the one-line summary is its hover tooltip.
-function setSummary(id, summary, level) {
-  const tab = document.querySelector(`[role="tab"][aria-controls="${CSS.escape(id)}"]`);
-  if (!tab) return;
-  tab.querySelector('.dot').className = `dot level-${level}`;
-  tab.title = summary || '';
+// state[section] = {payload, summary, level, updatedAt, error}; written on every refresh, read by the
+// nav dots, Overview and search. Subscribers run synchronously after each write.
+export const state = {};
+const listeners = new Set();
+
+export function onState(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function record(id, patch) {
+  state[id] = {payload: null, summary: '', level: Level.UNKNOWN, updatedAt: null, error: null, ...state[id], ...patch};
+  listeners.forEach(listener => listener(id, state[id]));
 }
 
 function setMeta(id, className, ...parts) {
@@ -62,13 +70,14 @@ function markUpdated(id) {
   setMeta(id, '', 'updated ', timeNode(Date.now() / 1000), entry?.auto ? ' · auto' : '');
 }
 
+// An entry with `endpoint: null` has nothing to fetch and renders from the state registry alone.
 export async function refresh(id) {
   if (busy.has(id)) return;
   busy.add(id);
   const entry = registry.get(id);
   const content = sectionPart(id, '.content');
   try {
-    const value = await api(`/api/${id}`);
+    const value = entry.endpoint === null ? null : await api(entry.endpoint ?? `/api/${id}`);
     // Disclosures keep the state the reader gave them; ones new to this render keep the renderer's default.
     const open = new Map([...content.querySelectorAll('details')].map(x => [x.dataset.key, x.open]));
     const focus = focusKey(content);
@@ -76,17 +85,15 @@ export async function refresh(id) {
     content.replaceChildren(result.node);
     content.querySelectorAll('details').forEach(x => { if (open.has(x.dataset.key)) x.open = open.get(x.dataset.key); });
     restoreFocus(content, focus);
-    setSummary(id, result.summary, result.level);
     markUpdated(id);
+    record(id, {payload: value, summary: result.summary, level: result.level, updatedAt: Date.now(), error: null});
     if (failedLoads.delete(id)) notice(id, '');
   } catch (error) {
     failedLoads.add(id);
     notice(id, error.message, 'error');
-    setSummary(id, 'unavailable', Level.ERROR);
-    if (content.querySelector('.loading, .load-failed')) {
-      const failed = node('p', 'Could not load this section. ', 'load-failed');
-      failed.append(button('Retry', () => refresh(id), {key: 'retry'}));
-      content.replaceChildren(failed);
+    record(id, {summary: 'unavailable', level: Level.ERROR, error: error.message});
+    if (content.querySelector('.loading, .load-error')) {
+      content.replaceChildren(loadError('Could not load this section.', () => refresh(id)));
     }
   } finally {
     busy.delete(id);

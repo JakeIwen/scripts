@@ -1,0 +1,35 @@
+/* Chart marks. Colours are tokens only; level classes match the dots so one legend vocabulary serves both. */
+.chart { position: relative; margin: var(--space-2) 0; }
+.chart-plot svg { display: block; max-width: 100%; }
+.chart .hit { fill: transparent; }
+.band { stroke: none; }
+.band:hover, .band:focus { opacity: .8; outline: none; stroke: var(--text); stroke-width: 1; }
+.band.level-ok { fill: var(--good); }
+.band.level-idle { fill: var(--muted); opacity: .55; }
+.band.level-unknown { fill: var(--line-strong); }
+.band.level-warn { fill: var(--warn); }
+.band.level-error { fill: var(--bad); }
+.band.level-nodata { fill: var(--line); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font-size: var(--text-small); color: var(--muted); margin-top: var(--space-1); }
+.legend-item { display: inline-flex; align-items: center; }
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.spark-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.gauge-head { display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--text-small); margin-bottom: 2px; }
+.gauge-value { color: var(--muted); }
+.gauge-track { fill: var(--soft); stroke: var(--line); stroke-width: 1; }
+.gauge-fill.level-ok { fill: var(--accent); }
+.gauge-fill.level-warn { fill: var(--warn); }
+.gauge-fill.level-error { fill: var(--bad); }
+.gauge-marker { fill: var(--text); }
+.lane-label { fill: var(--muted); font: var(--text-small) var(--font); }
+.lane-rule { stroke: var(--line); stroke-width: 1; }
+.tick { fill: var(--accent); }
+.tick.future { fill: var(--panel); stroke: var(--accent); stroke-width: 1; }
+.now-line { stroke: var(--warn); stroke-width: 1; }
+.chart-tip { position: absolute; bottom: calc(100% + 4px); z-index: 10; padding: 4px 8px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-1); box-shadow: var(--shadow); font-size: var(--text-small); white-space: nowrap; pointer-events: none; }
+.chart-tip-value { font-weight: 600; color: var(--text); }
+.chart-tip-detail { color: var(--muted); }
+.range-toggle { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-1); overflow: hidden; }
+.range-choice { border: 0; border-radius: 0; background: none; padding: 2px 10px; font-size: var(--text-small); }
+.range-choice + .range-choice { border-left: 1px solid var(--line-strong); }
+.range-choice[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
