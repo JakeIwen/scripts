@@ -821,6 +821,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   permits only a missing or exact staged live file.
   `pi/tests/backup/test_local_backup_deploy.py` exercises those shell contracts
   against temporary source/live directories and a fixture Git repository.
+  `pi/time_machine_deploy_checks.py` is the Time Machine deployer's Python 3.9+
+  target-test/source manifest: `--files` combines its check dependencies with
+  `local_backup_sources tm`; `--run` runs the four isolated Linux target commands
+  at most three at a time, without caching. `deploy_time_machine_icloud.sh --check`
+  stages and checks only; it exits before the deployment fence or activation.
+  `pi/tests/backup/test_time_machine_deploy_checks.py` exercises those public CLIs
+  through private stages and a fixture SSH transport.
   Real-process lock regressions live in `pi/tests/storage/test_backup_locks.sh`
   and `pi/tests/backup/test_backup_locks.py`. `backup_lock_fixtures.py` owns their
   private registry/admission fixtures; `test_backup_admission.py` tests the
