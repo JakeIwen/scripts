@@ -23,8 +23,9 @@ from typing import Any, Dict, List, Optional, Tuple
 STATUS_LEVELS = ("ok", "idle", "unknown", "warn", "error")
 # Declarations name checkout and home paths this way so they survive a move.
 ARGV_PLACEHOLDERS = ("{repo}", "{home}")
-# Actions run inside the panel's HTTP request, so they must finish promptly.
+# Synchronous commands must finish within the panel HTTP request.
 MAX_TIMEOUT_SECONDS = 120
+MAX_ASYNC_TIMEOUT_SECONDS = 1800
 MAX_FIELDS = 20
 MAX_SUMMARY_CHARS = 200
 MAX_LABEL_CHARS = 60
@@ -36,7 +37,7 @@ _SERVICE_LABEL = re.compile(r"com\.jacobr\.[A-Za-z0-9_.-]+\Z")
 _DECLARATION_FIELDS = frozenset(("tool", "title", "description", "service", "settings", "status", "actions"))
 _REQUIRED_DECLARATION_FIELDS = frozenset(("tool", "title", "description", "status", "actions"))
 _COMMAND_FIELDS = frozenset(("argv", "timeout"))
-_ACTION_FIELDS = frozenset(("name", "label", "description", "argv", "timeout", "confirm"))
+_ACTION_FIELDS = frozenset(("name", "label", "description", "argv", "timeout", "confirm", "async"))
 _REQUIRED_ACTION_FIELDS = frozenset(("name", "label", "description", "argv", "timeout"))
 _STATUS_FIELDS = frozenset(("level", "summary", "fields"))
 _FIELD_FIELDS = frozenset(("label", "value", "time", "level"))
@@ -59,11 +60,12 @@ class Action:
     description: str
     command: Command
     confirm: bool
+    asynchronous: bool = False
 
     def as_dict(self) -> Dict[str, Any]:
         """The page's view: the argv stays on the server."""
         return {"name": self.name, "label": self.label, "description": self.description,
-                "confirm": self.confirm}
+                "confirm": self.confirm, "async": self.asynchronous}
 
 
 @dataclass(frozen=True)
@@ -119,7 +121,7 @@ def _expand(argument: str) -> str:
     return argument.replace("{repo}", str(_repo_root())).replace("{home}", str(Path.home()))
 
 
-def _command(where: str, data: Dict[str, Any]) -> Command:
+def _command(where: str, data: Dict[str, Any], maximum=MAX_TIMEOUT_SECONDS) -> Command:
     argv = data.get("argv")
     if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
         raise _problem(where, "argv must be a non-empty list of non-empty strings")
@@ -127,8 +129,8 @@ def _command(where: str, data: Dict[str, Any]) -> Command:
     if not os.path.isabs(expanded[0]):
         raise _problem(where, "argv must start with an absolute executable path")
     timeout = data.get("timeout")
-    if type(timeout) is not int or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
-        raise _problem(where, "timeout must be an integer from 1 to {}".format(MAX_TIMEOUT_SECONDS))
+    if type(timeout) is not int or not 1 <= timeout <= maximum:
+        raise _problem(where, "timeout must be an integer from 1 to {}".format(maximum))
     return Command(expanded, timeout)
 
 
@@ -136,16 +138,20 @@ def _action(where: str, data: Any) -> Action:
     if not isinstance(data, dict):
         raise _problem(where, "expected an object")
     if not _REQUIRED_ACTION_FIELDS <= data.keys() or data.keys() - _ACTION_FIELDS:
-        raise _problem(where, "fields must be {} plus optional confirm".format(", ".join(sorted(_REQUIRED_ACTION_FIELDS))))
+        raise _problem(where, "fields must be {} plus optional confirm and async".format(", ".join(sorted(_REQUIRED_ACTION_FIELDS))))
     name = data["name"]
     if not isinstance(name, str) or not _ACTION_NAME.fullmatch(name):
         raise _problem(where, "name must be lower-case letters, digits and hyphens")
     confirm = data.get("confirm", False)
     if not isinstance(confirm, bool):
         raise _problem(where, "confirm must be a boolean")
+    asynchronous = data.get("async", False)
+    if not isinstance(asynchronous, bool):
+        raise _problem(where, "async must be a boolean")
+    maximum = MAX_ASYNC_TIMEOUT_SECONDS if asynchronous else MAX_TIMEOUT_SECONDS
     return Action(name, _text(where, data, "label", MAX_LABEL_CHARS),
                   _text(where, data, "description", MAX_VALUE_CHARS),
-                  _command(where, data), confirm)
+                  _command(where, data, maximum), confirm, asynchronous)
 
 
 def _optional_name(where: str, data: Dict[str, Any], key: str, pattern: "re.Pattern[str]") -> Optional[str]:
