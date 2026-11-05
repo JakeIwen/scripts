@@ -323,9 +323,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   or a venv, never `/opt/homebrew/bin/python3`: Homebrew repoints that link on
   each Python install, and macOS re-posts its background-activity notice for
   every job using it (`macbook/tests/test_launchagent_interpreters.py`).
-  `macbook/launchagents/com.jacobr.dictation-key-f13.plist` remaps the F5
-  dictation key to F13 with `hidutil` at login; castit's Van TV extension binds
-  F13 to its sidebar toggle. Setting `UserKeyMapping` replaces the whole list,
+  `macbook/launchagents/com.jacobr.dictation-key-f16.plist` remaps the F5
+  dictation key to F16 with `hidutil` at login; castit's Van TV extension binds
+  F16 to its sidebar toggle (Firefox on macOS reads F13–F15 as other keys). Setting `UserKeyMapping` replaces the whole list,
   so any other key remap joins that plist rather than getting its own agent.
   `macbook/mac_panel/` is the Mac Panel, `http://127.0.0.1:8769/` (port 8769;
   `macpanel` alias in `~/.zshrc`; BTT menu-bar icon and ctrl+opt+cmd+P from
@@ -372,7 +372,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
 - Custom Mac keyboard mappings: BTT shortcuts and `repair_key_sequences.py`,
-  plus `macbook/launchagents/com.jacobr.dictation-key-f13.plist`, are
+  plus `macbook/launchagents/com.jacobr.dictation-key-f16.plist`, are
   documented in `~/dev/visual-guides/static/reference/keyboard-shortcuts.json`.
   The Keyboard Shortcuts guide and shell `keys` command share that catalog.
   When changing these mappings, update it in the same task, preserve scope,
