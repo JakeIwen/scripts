@@ -11,6 +11,9 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
+import signal
+import time
 import shlex
 import stat
 import subprocess
@@ -31,6 +34,9 @@ VARIABLE = re.compile(r'\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]
 JOB_ID = re.compile(r'^[0-9a-f]{12}$')
 MANAGED_SWITCHES = {'llm-restore': 'llmrestore --cron'}
 BACKUP_LIMIT = 20
+RUN_TIMEOUT = 900
+RUN_OUTPUT_LIMIT = 8192
+RUN_PATH = '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
 
 REPO_ENV = 'CRONTAB_SYNC_FILE'
 STATE_ENV = 'CRONTAB_SYNC_STATE_DIR'
@@ -390,13 +396,70 @@ def install(repo, state, binary, expected_revision):
             'uncommitted': git_uncommitted(repo)}
 
 
+def run_environment(text, home):
+    variables = {'HOME': str(home), 'PATH': RUN_PATH}
+    for line in text.splitlines():
+        match = ASSIGNMENT.fullmatch(line)
+        if not match:
+            continue
+        value = match[2]
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        variables[match[1]] = expand_value(value, variables, home)
+    return variables
+
+
+def capture_run(command, home, environment, timeout=RUN_TIMEOUT):
+    output, timed_out = b'', False
+    deadline = time.monotonic() + timeout
+    with subprocess.Popen(('/bin/sh', '-c', command), cwd=home, env=environment,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, start_new_session=True) as process:
+        with selectors.DefaultSelector() as selector:
+            os.set_blocking(process.stdout.fileno(), False)
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    os.killpg(process.pid, signal.SIGKILL)
+                    break
+                for key, _ in selector.select(min(remaining, 0.2)):
+                    chunk = os.read(key.fileobj.fileno(), RUN_OUTPUT_LIMIT)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    output = (output + chunk)[-RUN_OUTPUT_LIMIT:]
+            try:
+                process.wait(timeout=max(0.01, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+        return process.returncode, output.decode('utf-8', errors='replace'), timed_out
+
+
+def run_job(repo, job_id, expected_revision):
+    raw = repo.read_bytes()
+    require_revision(raw, expected_revision)
+    text = decode(raw)
+    job = select_job(parse_jobs(text), job_id)
+    home = Path.home()
+    environment = run_environment(text, home)
+    started = datetime.now(timezone.utc).isoformat()
+    code, output, timed_out = capture_run(job['command'], home, environment)
+    return {'id': job_id, 'exit': code, 'started': started,
+            'finished': datetime.now(timezone.utc).isoformat(),
+            'output': output, 'timed_out': timed_out}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     status = commands.add_parser('status', help='show tracked jobs and live drift')
     status.add_argument('--json', action='store_true')
-    for name in ('pause', 'resume'):
-        command = commands.add_parser(name, help=f'{name} one tracked job and install')
+    for name in ('pause', 'resume', 'run'):
+        command = commands.add_parser(name, help='run one tracked job without editing or installing' if name == 'run'
+                                      else f'{name} one tracked job and install')
         command.add_argument('job')
         command.add_argument('--revision', required=True)
         command.add_argument('--json', action='store_true')
@@ -407,6 +470,10 @@ def build_parser():
 
 
 def print_plain(command, value):
+    if command == 'run':
+        print(value['output'], end='')
+        print(f"Job {value['id']} exited {value['exit']}")
+        return
     if command != 'status':
         print(value['message'])
         return
@@ -440,9 +507,11 @@ def main(argv=None):
     repo, state, binary = configuration()
     try:
         # Status only reads, so a running edit never turns the panel's poll into an error.
-        with nullcontext() if args.command == 'status' else sync_lock(state):
+        with nullcontext() if args.command in ('status', 'run') else sync_lock(state):
             if args.command == 'status':
                 value = status_payload(repo, binary)
+            elif args.command == 'run':
+                value = run_job(repo, args.job, args.revision)
             elif args.command == 'install':
                 value = install(repo, state, binary, args.revision)
             else:
