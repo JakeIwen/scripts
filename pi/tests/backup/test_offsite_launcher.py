@@ -18,6 +18,8 @@ import tempfile
 import time
 import unittest
 
+from pi.tests.backup.admission_gate import admission_gate
+
 
 SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
 COPIED = ('backup/offsite_backup.sh', 'backup/backup_conf.sh', 'backup/backup_deploy_state.sh',
@@ -311,6 +313,16 @@ class OffsiteLauncherTests(unittest.TestCase):
         (self.deploy_state / 'pending').unlink()
         result = self.run_launcher('backup', '--label', 'FORT-MPLS-5TB', STUB_EXIT='7')
         self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_deployment_between_precheck_and_flock_refuses_before_snapshot(self):
+        with admission_gate(self.root) as (env, interrupt):
+            process = self.launch('backup', '--label', 'FORT-MPLS-5TB', **env)
+            interrupt(self.legacy, self.deploy_state)
+            out, err = process.communicate(timeout=20)
+        self.assertNotEqual(process.returncode, 0, out)
+        self.assertIn('did not finish; backup jobs refuse', err)
+        self.assertFalse((self.records / 'snapshot.json').exists())
+        self.assertTrue(self.free(self.legacy) and self.free(self.job_lock))
 
     def test_exclusive_legacy_holder_refuses_before_snapshot(self):
         self.hold(self.legacy)

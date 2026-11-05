@@ -38,8 +38,8 @@ class DeploymentPlanTests(DeploymentTestCase):
                     ('offsite_backup.py', 'offsite_backup.sh')]:
                 names = [Path(name).name for name in sources]
                 self.assertLess(names.index(dependency), names.index(consumer))
-            # Interrupted, the first deployment of the journal must already
-            # have a live recovery trigger before it changes anything else.
+            # Keep runtime dependencies early; initial-rollout safety is proved
+            # through the independent bootstrap, not this structural assertion.
             names = [Path(name).name for name in sources]
             self.assertEqual(names[:3], ['backup_deploy_state.sh', 'backup_deploy_trigger.sh', 'backup_window.sh'])
             self.assertIn('backup_deploy_recovery.sh', names)
@@ -106,7 +106,7 @@ class DeploymentPreflightTests(DeploymentFixture):
                 self.assertNotEqual(self.preflight(fixture).returncode, 0)
                 path.write_bytes(snapshots[destination][0])
         self.assertFalse((root / 'events').exists())
-        self.assertFalse(self.state_dir(fixture).exists())
+        self.assertFalse((self.state_dir(fixture) / 'pending').exists())
 
 
     def test_absent_predecessor_accepts_missing_or_exact_staged_only(self):
@@ -284,7 +284,7 @@ class RegistryShrinkGuardTests(DeploymentFixture):
         events = (root / 'events').read_text() if (root / 'events').exists() else ''
         self.assertNotIn('publish:', events)
         self.assertNotIn('systemctl:stop', events)
-        self.assertFalse(self.state_dir(fixture).exists())
+        self.assertFalse((self.state_dir(fixture) / 'pending').exists())
         for destination, (old, _mode) in snapshots.items():
             self.assertEqual((live / destination.lstrip('/')).read_bytes(), old, destination)
 

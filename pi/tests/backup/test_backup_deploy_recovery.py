@@ -1,10 +1,10 @@
 """Interrupted backup deployments: durable journal, job refusal, automatic recovery.
 
 Real processes throughout. The sudo shim SIGKILLs the installer helper after a
-chosen number of publications, so no trap runs; the recovery trigger is a copy
-of the checkout's backup_window.sh with only the two deployment-state modules beside it (the
-fixture's live tree holds placeholders, so recovery can only use the copy
-journaled with the transaction); drains run the checkout's abort_backup.sh.
+chosen number of publications, so no trap runs. These focused recovery fixtures
+have guarded admission but placeholder transaction libraries; the independent
+bootstrap/real-predecessor rollout is covered in test_backup_bootstrap.py.
+Drains run the checkout's unchanged abort_backup.sh.
 """
 import os
 from pathlib import Path
@@ -171,8 +171,10 @@ class InterruptedPublicationTests(RecoveryCase):
     def test_kill_after_commit_keeps_the_new_cohort(self):
         result = self.apply(self.fx, tail='local_backup_commit; kill -KILL $$')
         self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr)
-        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.marker_fields()['phase'], 'committed')
         self.assertEqual(self.window().returncode, 0)
+        self.assertFalse(self.marker.exists())
+        self.assert_started_exactly_active_timers()
         self.assertNotIn('rollback:', self.events())
         for source, destination, *_ in self.published():
             self.assertEqual((self.fx[2] / destination.lstrip('/')).read_bytes(), (self.fx[1] / source).read_bytes())
@@ -242,7 +244,7 @@ class InterruptedPublicationTests(RecoveryCase):
 
     def test_finished_transactions_are_pruned_and_unsafe_records_refused(self):
         state = self.state_dir(self.fx)
-        state.mkdir(mode=0o755)
+        state.mkdir(mode=0o755, exist_ok=True)
         old = [state / f'2026010{day}T000000Z-{100 + day}' for day in range(1, 6)]
         for path in old:
             path.mkdir(mode=0o700)
@@ -259,7 +261,7 @@ class InterruptedPublicationTests(RecoveryCase):
                              'backup_lock_registry.sh')))
         self.fx = self.fixture()
         state = self.state_dir(self.fx)
-        state.mkdir(mode=0o755)
+        state.mkdir(mode=0o755, exist_ok=True)
         (state / '20260101T000000Z-1').mkdir(mode=0o770)
         (state / '20260101T000000Z-1').chmod(0o770)
         result = self.apply(self.fx)
@@ -281,12 +283,12 @@ class DeployOrderTests(RecoveryCase):
         for call in JOB_ENTRIES.values():
             self.assertEqual(self.admit(call).returncode, 0, call)
 
-    def test_new_helper_recovers_with_no_journal_aware_code_live(self):
-        # Every live cohort file is a placeholder, including the state module the
-        # first record publishes, so the trigger can only use the journaled copy.
+    def test_recorded_recoverer_does_not_depend_on_live_transaction_libraries(self):
+        # Admission is guarded, but live transaction/recovery libraries are
+        # placeholders. Recovery must execute the journaled closure instead.
         self.kill_after(1)
         published = self.fx[2] / self.published()[0][1].lstrip('/')
-        self.assertTrue(published.read_text().startswith('new '))
+        self.assertEqual(published.read_bytes(), (BACKUP / published.name).read_bytes())
         result = self.window()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_recovered()

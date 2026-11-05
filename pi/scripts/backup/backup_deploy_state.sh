@@ -16,7 +16,9 @@ BACKUP_DEPLOY_MARKER=$BACKUP_DEPLOY_STATE_DIR/pending
 # When the last recovery warning went out; cleared with the marker.
 BACKUP_DEPLOY_ALERTED=$BACKUP_DEPLOY_STATE_DIR/alerted
 BACKUP_DEPLOY_ID_PATTERN='^[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*$'
-BACKUP_DEPLOY_MARKER_VERSION=1
+BACKUP_DEPLOY_MARKER_VERSION=2
+BACKUP_DEPLOY_MAINTENANCE=$BACKUP_DEPLOY_STATE_DIR/maintenance
+BACKUP_DEPLOY_BOOTSTRAP_DIR=${VANPI_BACKUP_DEPLOY_BOOTSTRAP_DIR:-/usr/local/lib/vanpi-backup-deploy}
 
 backup_deploy_pending() { # 0 while a transaction is recorded or the state cannot be inspected
   [[ -e "$BACKUP_DEPLOY_STATE_DIR" || -L "$BACKUP_DEPLOY_STATE_DIR" ]] || return 1
@@ -56,7 +58,7 @@ backup_deploy_marker_read() { # 0 sets BACKUP_DEPLOY_{ID,PHASE,PROFILE,TEMP_ID,R
   done < "$BACKUP_DEPLOY_MARKER"
   [[ "$version" == "$BACKUP_DEPLOY_MARKER_VERSION" && -n ${seen[root]:-} &&
      "$BACKUP_DEPLOY_ID" =~ $BACKUP_DEPLOY_ID_PATTERN &&
-     ( "$BACKUP_DEPLOY_PHASE" == preparing || "$BACKUP_DEPLOY_PHASE" == publishing ) &&
+     ( "$BACKUP_DEPLOY_PHASE" == preparing || "$BACKUP_DEPLOY_PHASE" == publishing || "$BACKUP_DEPLOY_PHASE" == committed ) &&
      ( "$BACKUP_DEPLOY_PROFILE" == pi || "$BACKUP_DEPLOY_PROFILE" == tm ) &&
      "$BACKUP_DEPLOY_TEMP_ID" =~ ^[1-9][0-9]*$ &&
      ( -z "$BACKUP_DEPLOY_ROOT" || ( "$BACKUP_DEPLOY_ROOT" == /* && "$BACKUP_DEPLOY_ROOT" != / ) ) ]] || return 2
@@ -64,6 +66,10 @@ backup_deploy_marker_read() { # 0 sets BACKUP_DEPLOY_{ID,PHASE,PROFILE,TEMP_ID,R
 
 backup_deploy_refuse_jobs() { # job admission: refuse while a deployment may have left mixed code
   local id
+  if [[ -e "$BACKUP_DEPLOY_MAINTENANCE" || -L "$BACKUP_DEPLOY_MAINTENANCE" ]]; then
+    echo 'Backup deployment bootstrap maintenance is held; verify and explicitly release it before starting backups.' >&2
+    return 1
+  fi
   backup_deploy_pending || return 0
   id=$(backup_deploy_marker_id 2>/dev/null) || id='(unreadable record)'
   echo "Backup deployment $id did not finish; backup jobs refuse until its automatic recovery restores the previous cohort (hourly, ahead of the backup window, or at the next installer run). State: $BACKUP_DEPLOY_STATE_DIR" >&2

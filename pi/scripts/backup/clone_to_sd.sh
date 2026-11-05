@@ -12,6 +12,7 @@ notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 init=0
 [ "${1:-}" = "--init" ] && { init=1; shift; }
 label=${1:?usage: /home/pi/scripts/backup/clone_to_sd.sh [--init] <label> [sdX]}
+ensure_clone_admission || exit 1
 
 if [ $init = 1 ]; then
   disk=${2:?--init needs the target device, e.g. sda}

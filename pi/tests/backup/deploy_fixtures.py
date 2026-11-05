@@ -13,6 +13,8 @@ import tempfile
 import unittest
 
 import backup_locks
+import backup_bootstrap_plan
+from pi.tests.backup.bootstrap_fixtures import seed_bootstrap
 
 HELPER = Path(__file__).resolve().parents[2] / 'backup_local_deploy.sh'
 POLICIES_WITH_HASHES = {'revision', 'conf', 'cloud', 'status'}
@@ -31,7 +33,7 @@ class DeploymentTestCase(unittest.TestCase):
         self.root = Path(temporary.name)
         self.env = dict(os.environ)
         for key in tuple(self.env):
-            if key.startswith(('VANPI_BACKUP_', 'VANPI_TM_PREVIOUS_', 'LOCAL_BACKUP_')) or key in {
+            if key.startswith(('VANPI_BACKUP_', 'VANPI_BOOTSTRAP_', 'VANPI_TM_PREVIOUS_', 'LOCAL_BACKUP_')) or key in {
                     'BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS'}:
                 self.env.pop(key, None)
 
@@ -140,6 +142,11 @@ if [[ "$command" == /usr/bin/mv ]]; then
       /bin/sleep 0.05
     fi
     [[ "${TEST_FAIL_ROLLBACK:-0}" != 1 ]] || exit 43
+    if [[ -n "${TEST_KILL_ROLLBACK_SUFFIX:-}" && "$last" == *"$TEST_KILL_ROLLBACK_SUFFIX" ]]; then
+      "$command" "$@"
+      kill -KILL "$PPID"
+      exit 0
+    fi
   fi
 fi
 exec "$command" "$@"
@@ -156,6 +163,7 @@ if [[ "$1" == show ]]; then
   exit 0
 fi
 echo "systemctl:$*" >> "$TEST_ROOT/events"
+if [[ "$1" == start && "${TEST_KILL_TIMER_START:-0}" == 1 ]]; then kill -KILL "$PPID"; fi
 if [[ "$1" == daemon-reload && "${TEST_FAIL_RELOAD:-0}" == 1 && -e "$TEST_ROOT/failed" ]]; then exit 44; fi
 exit 0
 '''
@@ -175,6 +183,9 @@ class DeploymentFixture(DeploymentTestCase):
             old, new = f'old {source}\n'.encode(), f'new {source}\n'.encode()
             if policy in ('preserve', 'defaults'):
                 old, new = b'{"setting": 1}\n', b'{"setting": 0, "new_default": 2}\n'
+            elif Path(source).name in backup_bootstrap_plan.GUARDS:
+                new = (HELPER.parent.parent / source).read_bytes()
+                old = new + b'\n# fixture predecessor\n'
             elif source == REGISTRY_SOURCE:
                 # The fence reads the staged registry; keep it real.
                 new = (HELPER.parent.parent / source).read_bytes()
@@ -207,6 +218,7 @@ class DeploymentFixture(DeploymentTestCase):
                         VANPI_BACKUP_JOB_LOCK=str(lock), VANPI_BACKUP_JOB_LOCK_OWNER=owner,
                         VANPI_BACKUP_JOB_LOCK_GROUP=group, VANPI_BACKUP_JOB_LOCK_MODE='660',
                         VANPI_BACKUP_LOCK_DIR=str(registry), VANPI_BACKUP_LOCK_DIR_MODE='770')
+        seed_bootstrap(root, live, self.env)
         return root, stage, live, records, previous, snapshots
 
 

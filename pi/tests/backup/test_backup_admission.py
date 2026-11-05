@@ -73,6 +73,14 @@ class AdmissionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 locks.require_cloud_slot()
 
+    def test_pending_deployment_refuses_even_with_valid_inherited_cloud_descriptors(self):
+        with self.registry.admitted(locks.PI_CLOUD):
+            state = Path(os.environ['VANPI_BACKUP_DEPLOY_STATE_DIR'])
+            state.mkdir(exist_ok=True)
+            (state / 'pending').write_text('id=20261104T000000Z-42\n')
+            with self.assertRaisesRegex(RuntimeError, 'did not finish; backup jobs refuse'):
+                admission.from_environment(locks.PI_CLOUD)
+
     def test_latched_bundle_and_checked_repository_hold_reach_real_client(self):
         with self.registry.admitted(locks.PI_CLOUD) as bundle, admission.use(bundle):
             with locks.held(locks.LockClass.DATA, 'borg-repo') as repository:

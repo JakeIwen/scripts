@@ -40,6 +40,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi.apps.metered` | `vanpi-metered.service`, independently of the dashboard | `pi/apps/metered/`; unit/package owned by `pi/deploy_python.py` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
+| `/usr/local/lib/vanpi-backup-deploy/recover` | independent root cron `/etc/cron.d/vanpi-backup-deploy` | `pi/backup_deploy_bootstrap.py` and `pi/scripts/backup/backup_bootstrap_*.py`; outside cohort rollback |
 | `pi/scripts/smart_watch.sh` | `vanpi-smart-watch.timer`; alerts on the `NTFY_WARNING_URL` topic | the script; see `pi/docs/monitoring/SMART.md` |
 | `pi/scripts/alias_media.sh` | Pi `am`/`an` functions and qBittorrent's completion command (`alias_media.sh new`) | thin wrapper; `pi/apps/media_organizer/alias_main.py` in the package release |
 | `python3 -P -m pi.apps.media_organizer mirror-sync` | `pi/scripts/backup/pi_backup.sh`, as `pi`, right before the media rsync | `pi/apps/media_organizer/mirror_sync.py` in the package release |
@@ -783,14 +784,28 @@ compare it with this checkout. Deployed files may differ from the repository.
   verifies attempted replacements under the fence on failure. Incomplete
   restoration or unit reload leaves timers stopped. The transaction is journaled
   in `/var/lib/vanpi-backup-deploy/` (`/tmp` is emptied at boot):
-  `backup_deploy_state.sh` owns its vocabulary and the job-admission guard
-  (`validate_job_lock_file` refuses every job while its `pending` marker exists),
-  `backup_deploy_trigger.sh` runs a recorded transaction's own journaled copy of
-  `backup_deploy_recovery.sh` (hourly from `backup_window.sh`, and from every
-  installer before its fence), and the recoverer restores, restarts the recorded
-  timers and clears the marker, or warns once a day and keeps refusing. The
-  installer records its PID in the legacy lock so drains TERM it first; the
-  emergency grace is unchanged. Details: CONCURRENCY.md "Interrupted deployments".
+  `backup_deploy_state.sh` owns the marker vocabulary and admission guard;
+  shell admissions recheck under their acquired legacy hold, and Python cloud
+  admission rechecks after descriptor validation. Direct `clone_to_sd.sh` joins
+  admission or verifies and preserves an inherited shared/exclusive legacy hold.
+  `backup_deploy_trigger.sh` dispatches the transaction's own journaled recoverer.
+  `backup_deploy_recovery.sh` restores preparing/publishing transactions but only
+  finalizes a committed transaction (cleanup and recorded timers, never rollback).
+  Contents and affected directories are flushed before commit/clear; pending stays
+  until timer restoration succeeds. The independent bootstrap dispatcher, the
+  hourly window and subsequent installers retry recovery. The installer records
+  its PID so drains TERM first; the emergency grace remains unchanged.
+  `pi/backup_deploy_bootstrap.py` stages and explicitly applies/verifies/releases
+  one-time maintenance. `backup_bootstrap_plan.py` owns minimal edits and hashes
+  for the actual reviewed predecessor; `backup_bootstrap_host.py` owns durable
+  cron/service launch holds and the independent dispatcher; `backup_bootstrap_files.py`
+  owns no-follow reads and durable files for that separately installed runtime
+  (it intentionally has no shared/python import root). Staging supports Python
+  3.9+; host execution requires Linux/Python 3.11+. All live/staged predecessors
+  must retain guards. Old installers, unguarded rollback and broad-sync backup
+  publication are unsupported. Bootstrap cannot revoke already-running old shells:
+  an interrupted initial bootstrap retains maintenance until explicit rerun/release.
+  Commands and operator boundary: `pi/docs/backup/DEPLOY_BOOTSTRAP.md`.
   `VANPI_BACKUP_PREVIOUS_REVISION` names
   the previously deployed commit when installing a newly committed change.
   `VANPI_BACKUP_PREVIOUS_CONF_SHA256` accepts an explicitly reviewed config hash
@@ -1256,22 +1271,24 @@ both content and owner/mode, removes only verified newly introduced files,
 and reloads restored systemd units before restarting any prior active timer.
 An incomplete restore/reload prints `ROLLBACK INCOMPLETE`, exits nonzero and
 leaves timers stopped. The rollback directory is retained. From before the first
-live change until commit or a verified restore, `/var/lib/vanpi-backup-deploy/pending`
-names the transaction and every backup job refuses. A KILLed installer (the
-emergency drain's, after its unchanged grace) or an incomplete restore leaves it
-for automatic recovery: the hourly `backup_window.sh --scheduled` and the next
-installer run that transaction's `recovery/backup_deploy_recovery.sh` under the
-fence, which restores every record, reloads units, restarts the recorded timers
-and removes the marker, or keeps it, leaves timers stopped and sends one
-`NTFY_WARNING_URL` warning a day; the next installer then refuses to publish.
-To clear a failed recovery, fix what it reports (usually a live file edited
-since, matching neither its saved nor its published version), then wait for the
-hour or run `sudo /bin/bash /var/lib/vanpi-backup-deploy/<id>/recovery/backup_deploy_recovery.sh <id>`.
+live change through commit/restoration **and timer finalization**, pending names
+its transaction and admission refuses. The independent bootstrap dispatcher at
+`/usr/local/lib/vanpi-backup-deploy/recover` survives every cohort rollback and
+runs hourly; the window and next installer also retry. Preparing/publishing
+transactions restore the guarded predecessor and reload units; committed records
+verify the new cohort and finish cleanup/timers without reverting it. Both paths
+flush affected files/directories before clearing pending. A failed attempt retains
+pending and warns daily; some timers may already have restarted, but their jobs
+still refuse. To retry after repairing a reported conflict, run
+`sudo /bin/bash /usr/local/lib/vanpi-backup-deploy/recover`.
 Never delete `pending` by hand: jobs would then run a mixed cohort. Activation actions
 (including Time Machine capture requests) occur only after the cohort commits;
 their failure reports a committed cohort with incomplete activation.
 
-For a later manual rollback, first pause both cloud jobs with the existing
+Prefer a guard-aware targeted installer for a later intentional rollback. The
+manual tree procedure below is not journaled and needs separately arranged
+durable launch holds plus the operator maintenance boundary until verification;
+it is not covered by automatic recovery. First pause both cloud jobs with the existing
 controls, preserve independent holds and let local jobs finish. Inspect the
 saved manifest, private tree and current hashes before writing. Use the staged
 `pi/backup_local_deploy.sh` contract, not a newer installed helper, and source
@@ -1286,9 +1303,10 @@ transaction directory and `LOCAL_BACKUP_TEMP_ID` to your shell's PID, initialize
 records and reloads units; `local_backup_cleanup_temporaries` removes its
 staging files. Do not restart timers or release the fence before restoration
 is verified. Restore only the previously active timers, then resume the
-selected cloud job through its control entry point. The journaled recoverer
-handles only uncommitted transactions; a committed cohort has no standalone
-rollback executable.
+selected cloud job through its control entry point. Never restore a predecessor
+without the bootstrap admission guards or remove the independent dispatcher,
+cron entry or readiness record. The journaled recoverer finalizes committed
+records but never intentionally rolls back a committed cohort.
 
 Never remove or replace `/run/lock` inodes during recovery. The tmpfiles
 configuration is in the cohort; created registry inodes remain in place.

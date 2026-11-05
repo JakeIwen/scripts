@@ -19,7 +19,7 @@ for library in backup_deploy_trigger.sh backup_deploy_plan.sh backup_deploy_tran
 done
 
 recovery_fail() { # <message>
-  backup_deploy_alert "RECOVERY INCOMPLETE for backup deployment ${BACKUP_DEPLOY_ID:-$1}: $2 Backup jobs keep refusing and its timers stay stopped; it is retried hourly. Journal: $BACKUP_DEPLOY_STATE_DIR/${BACKUP_DEPLOY_ID:-$1}"
+  backup_deploy_alert "RECOVERY INCOMPLETE for backup deployment ${BACKUP_DEPLOY_ID:-$1}: $2 Backup jobs keep refusing until finalization succeeds; it is retried hourly. Journal: $BACKUP_DEPLOY_STATE_DIR/${BACKUP_DEPLOY_ID:-$1}"
   exit 70
 }
 
@@ -70,7 +70,7 @@ recovery_load() { # validated timers, stale temporaries and (once publishing beg
     LOCAL_BACKUP_TEMPORARIES+=("$LOCAL_BACKUP_ROOT$destination.deploy.$LOCAL_BACKUP_TEMP_ID"
       "$LOCAL_BACKUP_ROOT$destination.rollback.$LOCAL_BACKUP_TEMP_ID")
   done <<< "$plan"
-  [[ "$BACKUP_DEPLOY_PHASE" == publishing ]] || return 0
+  [[ "$BACKUP_DEPLOY_PHASE" != preparing ]] || return 0
   while IFS= read -r record; do
     recovery_record_ok "$record" || return 1
   done < <($LOCAL_BACKUP_SUDO /bin/cat -- "$LOCAL_BACKUP_TXN/previous/manifest" || echo '!unreadable')
@@ -94,11 +94,15 @@ main() { # <transaction id>
   recovery_load || recovery_fail "$id" 'its journal is incomplete or names paths outside the deployment plan.'
   local_backup_cleanup_temporaries || recovery_fail "$id" 'a leftover temporary file is not a regular file.'
   LOCAL_BACKUP_TEMPORARIES=()
-  local_backup_rollback || recovery_fail "$id" 'a live file matches neither its previous nor its published version, or systemd could not reload.'
+  if [[ "$BACKUP_DEPLOY_PHASE" == committed ]]; then
+    local_backup_verify_published || recovery_fail "$id" 'a committed destination no longer matches the published cohort.'
+  else
+    local_backup_rollback || recovery_fail "$id" 'a live file matches neither its previous nor its published version, or systemd could not reload.'
+  fi
   local_backup_cleanup_temporaries || recovery_fail "$id" 'a rollback temporary could not be removed.'
-  local_backup_restart_timers || recovery_fail "$id" 'the previous cohort is restored but a timer did not start.'
-  local_backup_journal_close || recovery_fail "$id" 'the previous cohort is restored but its marker could not be removed.'
-  echo "Recovered interrupted backup deployment $id: previous cohort restored and verified; timers restarted."
+  local_backup_restart_timers || recovery_fail "$id" 'the selected cohort is verified but a timer did not start.'
+  local_backup_journal_close || recovery_fail "$id" 'the selected cohort is verified but its marker could not be cleared durably.'
+  echo "Recovered interrupted backup deployment $id: $BACKUP_DEPLOY_PHASE cohort verified; timers restarted."
 }
 
 main "$@"

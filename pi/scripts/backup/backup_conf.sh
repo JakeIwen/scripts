@@ -211,6 +211,8 @@ acquire_job_lock() {
   exec 9<&"$fd"
   exec {fd}<&-
   "$JOB_LOCK_FLOCK" -n 9 || return 1
+  # Check under the hold: an installer may have died after the pre-open check.
+  backup_deploy_refuse_jobs || { exec 9<&-; return 1; }
   if ! hold_offsite_exclusion; then
     exec 9>&-
     return 1

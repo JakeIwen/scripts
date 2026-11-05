@@ -32,7 +32,7 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh pi/generate_backup_lock_registry.py \
   pi/deploy_icloud_backup.sh pi/deploy_time_machine_icloud.sh \
   "${payload[@]}" \
-  pi/tests/backup/test_backup_locks.py pi/tests/backup/test_backup_settings.py pi/tests/backup/test_cloud_backup_requests.py pi/tests/backup/test_hotspare_rotation.py pi/tests/backup/test_time_machine_runtime.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/deploy_fixtures.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
+  pi/tests/backup/test_backup_locks.py pi/tests/backup/test_backup_settings.py pi/tests/backup/test_cloud_backup_requests.py pi/tests/backup/test_hotspare_rotation.py pi/tests/backup/test_time_machine_runtime.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/deploy_fixtures.py pi/tests/backup/bootstrap_fixtures.py pi/scripts/backup/backup_bootstrap_host.py pi/scripts/backup/backup_bootstrap_plan.py pi/scripts/backup/backup_bootstrap_files.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
   pi/tests/backup/backup_lock_fixtures.py pi/tests/backup/test_backup_admission.py \
   pi/tests/backup/priority_fixtures.py pi/tests/backup/metered_fixtures.py pi/tests/backup/test_backup_priority.py \
   pi/tests/storage/test_backup_job_lock.sh pi/tests/storage/test_backup_locks.sh \

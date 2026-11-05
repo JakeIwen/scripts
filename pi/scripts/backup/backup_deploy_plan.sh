@@ -5,9 +5,9 @@
 # "new" permits a missing live file only when the previous tree lacked it;
 # even then an existing file must equal the staged source. "required" forbids
 # first install. "replace" retains the installers' managed document/unit policy.
-# The deployment state and trigger modules go first and the hourly trigger
-# next: when a deployment that introduces them is interrupted, every later
-# prefix then has a live recovery trigger (pi/docs/backup/CONCURRENCY.md).
+# Runtime dependencies go before their consumers. First-rollout safety comes
+# from the separately verified bootstrap, not from any publication prefix:
+# its independent recovery trigger is never a record in this rollback plan.
 BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/backup_deploy_state.sh|/home/pi/scripts/backup/backup_deploy_state.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_deploy_trigger.sh|/home/pi/scripts/backup/backup_deploy_trigger.sh|revision|pi:pi|750|new'

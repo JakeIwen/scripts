@@ -34,15 +34,23 @@ local_backup_metadata() {
   $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_STAT" -c '%U:%G|%a' -- "$1"
 }
 
+local_backup_regular() { # Private journal descendants must be inspected as the state owner.
+  $LOCAL_BACKUP_SUDO /usr/bin/test -f "$1" && ! $LOCAL_BACKUP_SUDO /usr/bin/test -L "$1"
+}
+
+local_backup_exists() {
+  $LOCAL_BACKUP_SUDO /usr/bin/test -e "$1" || $LOCAL_BACKUP_SUDO /usr/bin/test -L "$1"
+}
+
 local_backup_snapshot_matches() { # <path> <sha256|absent> <owner:group> <mode>
   local path=$1 expected=$2 owner=$3 mode=$4 actual metadata
   if [[ "$expected" == absent ]]; then
     # An argument-less return during EXIT cleanup can reuse the trapped exit
     # status. Report the absence check explicitly, including after removal.
-    [[ ! -e "$path" && ! -L "$path" ]] || return 1
+    ! local_backup_exists "$path" || return 1
     return 0
   fi
-  [[ -f "$path" && ! -L "$path" ]] || return 1
+  local_backup_regular "$path" || return 1
   actual=$(local_backup_hash "$path") || return 1
   metadata=$(local_backup_metadata "$path") || return 1
   [[ "$actual" == "$expected" && "$metadata" == "$owner|$mode" ]]
@@ -291,6 +299,29 @@ local_backup_cleanup_temporaries() {
   (( failed == 0 ))
 }
 
+local_backup_flush_destinations() { # Persist live inodes AND their directory entries before a decision.
+  local records source destination rest live
+  [[ -n "$LOCAL_BACKUP_TXN" ]] || return 0
+  local_backup_exists "$LOCAL_BACKUP_TXN/previous/manifest" || return 0
+  records=$($LOCAL_BACKUP_SUDO /bin/cat -- "$LOCAL_BACKUP_TXN/previous/manifest") || return 1
+  while IFS='|' read -r source destination rest; do
+    live=$LOCAL_BACKUP_ROOT$destination
+    if local_backup_exists "$live"; then
+      local_backup_regular "$live" || return 1
+      $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$live" || return 1
+    fi
+    $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "${live%/*}" || return 1
+  done <<< "$records"
+}
+
+local_backup_verify_published() {
+  local records source destination old_hash old_owner old_mode new_hash owner mode rest
+  records=$($LOCAL_BACKUP_SUDO /bin/cat -- "$LOCAL_BACKUP_TXN/previous/manifest") || return 1
+  while IFS='|' read -r source destination old_hash old_owner old_mode new_hash owner mode rest; do
+    local_backup_snapshot_matches "$LOCAL_BACKUP_ROOT$destination" "$new_hash" "$owner" "$mode" || return 1
+  done <<< "$records"
+}
+
 local_backup_restart_timers() { # every timer active before the fence; tries them all
   local timer failed=0
   for timer in "${LOCAL_BACKUP_ACTIVE_TIMERS[@]}"; do
@@ -350,7 +381,7 @@ local_backup_journal_open() { # <pi|tm>: durable transaction record before any l
   local_backup_marker_write preparing
 }
 
-local_backup_marker_write() { # <preparing|publishing>: everything journaled so far is durable first
+local_backup_marker_write() { # <preparing|publishing|committed>: journal durable before the decision
   local working=$LOCAL_BACKUP_STAGE/transaction/marker temporary=$BACKUP_DEPLOY_MARKER.$LOCAL_BACKUP_TEMP_ID
   printf 'version=%s\nid=%s\nphase=%s\nprofile=%s\ntemp=%s\nroot=%s\n' "$BACKUP_DEPLOY_MARKER_VERSION" \
     "${LOCAL_BACKUP_TXN##*/}" "$1" "$LOCAL_BACKUP_PROFILE" "$LOCAL_BACKUP_TEMP_ID" "$LOCAL_BACKUP_ROOT" \
@@ -362,6 +393,9 @@ local_backup_marker_write() { # <preparing|publishing>: everything journaled so 
   # syncfs: the journal, its previous tree and this marker reach the disk before the rename.
   $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -f -- "$temporary" || return 1
   $LOCAL_BACKUP_SUDO /usr/bin/mv -Tf -- "$temporary" "$BACKUP_DEPLOY_MARKER" || return 1
+  # Once the commit decision is visible, even a failed fsync must not make the
+  # EXIT trap roll back a cohort the recorded recoverer will instead finalize.
+  [[ "$1" != committed ]] || LOCAL_BACKUP_STATE=committed
   $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$BACKUP_DEPLOY_STATE_DIR"
 }
 
@@ -372,6 +406,7 @@ local_backup_journal_close() { # remove this transaction's marker durably; never
   status=$?
   (( status != 1 )) || return 0
   (( status == 0 )) && [[ "$BACKUP_DEPLOY_STATE_DIR/$BACKUP_DEPLOY_ID" == "$LOCAL_BACKUP_TXN" ]] || return 1
+  local_backup_flush_destinations || return 1
   $LOCAL_BACKUP_SUDO /usr/bin/rm -- "$BACKUP_DEPLOY_MARKER" || return 1
   $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$BACKUP_DEPLOY_STATE_DIR" || return 1
   # A later transaction's failure deserves its own alert; a stale stamp only delays one.

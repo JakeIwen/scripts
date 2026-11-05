@@ -5,7 +5,17 @@ local_backup_helper_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$local_backup_helper_dir/scripts/backup/backup_deploy_transaction.sh"
 
 local_backup_expected_hash() { # <source:hash,...> <checkout-source>
-  printf '%s' "$1" | /usr/bin/tr ',' '\n' | /usr/bin/awk -F: -v name="$2" '$1 == name {print $2}'
+  local expected source before after
+  expected=$(printf '%s' "$1" | /usr/bin/tr ',' '\n' | /usr/bin/awk -F: -v name="$2" '$1 == name {print $2}') || return 1
+  # The reviewed predecessor's minimal bootstrap edits are recorded separately;
+  # this never substitutes an unrelated deployed or provider revision's hash.
+  while IFS=: read -r source before after; do
+    if [[ "$source" == "$2" && "$expected" == "$before" ]]; then
+      expected=$after
+      break
+    fi
+  done <<< "${LOCAL_BACKUP_BOOTSTRAP_HASHES:-}"
+  printf '%s\n' "$expected"
 }
 
 local_backup_previous_hashes() { # <repo> <pi|tm>: reviewed provenance for the whole plan
@@ -76,6 +86,11 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
     echo 'A backup deployment transaction is still recorded; refusing to publish over it.' >&2
     return 1
   fi
+  LOCAL_BACKUP_BOOTSTRAP_HASHES=$($LOCAL_BACKUP_SUDO /usr/bin/python3 -B \
+    "$BACKUP_DEPLOY_BOOTSTRAP_DIR/backup_bootstrap_host.py" verify --stage "$stage") || {
+    echo 'A verified guarded bootstrap is required before any cohort transaction; see CONCURRENCY.md.' >&2
+    return 1
+  }
   local_backup_preflight "$stage" "$profile" "$previous" || return 1
   local_backup_registry_guard "$stage" || return 1
   for timer in "${LOCAL_BACKUP_TIMERS[@]}"; do
@@ -96,8 +111,11 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
 
 local_backup_commit() { # Call only after publication and platform checks succeed.
   [[ "$LOCAL_BACKUP_STATE" == published ]] || return 1
-  # Recovery rolls back whatever the marker names, so it goes before the commit.
-  local_backup_journal_close || return 1
+  local_backup_verify_published || return 1
+  local_backup_flush_destinations || return 1
+  # A committed decision keeps its journal until timer restoration succeeds.
+  # Recovery finishes it without reverting the verified new cohort.
+  local_backup_marker_write committed || return 1
   LOCAL_BACKUP_STATE=committed
   printf 'Cohort committed. Rollback tree and manifest: %s/previous\n' "$LOCAL_BACKUP_TXN"
 }
@@ -127,7 +145,7 @@ local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 
   fi
   # Anything short of a clean restore keeps the marker, so jobs keep refusing
   # and the hourly recovery finishes the job.
-  if [[ "$LOCAL_BACKUP_STATE" == restored ]] && (( cleanup_failed == 0 )); then
+  if [[ "$LOCAL_BACKUP_STATE" == committed || "$LOCAL_BACKUP_STATE" == restored ]] && (( cleanup_failed == 0 )); then
     local_backup_journal_close || cleanup_failed=1
   fi
   (( cleanup_failed == 0 )) || { echo 'Deployment cleanup or timer restoration failed; automatic recovery retries it.' >&2; (( status != 0 )) || status=1; }

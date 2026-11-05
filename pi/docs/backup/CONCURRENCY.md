@@ -202,47 +202,46 @@ leave old and new files mixed, so every transaction is journaled durably:
   `pending` names the open transaction. It is written with fsync and an
   atomic rename before the first live change (`phase=preparing`, before any
   timer stops), switched to `phase=publishing` only once the whole manifest
-  and tree are durable, and removed on commit or after a verified restore.
-  Temporaries carry the installer's PID, so recovery finds even ones a killed
-  run never recorded. The newest five transactions are kept for manual
-  rollback.
-- **Jobs refuse.** While `pending` exists (or the state cannot be inspected),
-  `validate_job_lock_file` refuses, which every job admission uses:
+  and tree are durable. After destination files and directory entries have been
+  flushed and platform checks succeed, `phase=committed` records the decision
+  without removing the marker. Finalization restores recorded timers and only
+  then clears pending. Temporaries carry the installer's PID, so recovery finds
+  even ones a killed run never recorded. The newest five transactions are kept
+  for manual rollback.
+- **Jobs refuse.** Admission checks pending and bootstrap maintenance before
+  opening the legacy lock and again **under the acquired hold**. This covers
   `acquire_backup_job` (Borg, EXFAT, both cloud workers, clones),
-  `acquire_job_lock` (restore, hotspare init, `prepare-disk`) and the offsite
-  launcher. Python workers cannot start without their shell admission. The
-  fence and the disk lifecycle (`abort_backup.sh`, `hold_backup_disks_exclusive`)
-  never consult it, so a drain or unmount never waits on a transaction.
-- **Recovery.** The hourly root cron `backup_window.sh --scheduled` (ahead of
-  its window check) and each installer (before it takes its own fence) run
-  `backup_deploy_recover_pending`. After checking ownership it runs the
-  recorded transaction's own journaled recoverer as root, so the code reading
-  a journal is the code that wrote it, whatever mix the live tree holds. The
-  recoverer takes the legacy lock exclusively without waiting (busy: retry
-  next hour), writes its PID, removes leftover temporaries, restores every
-  manifest record with the same content, owner and mode checks as
-  `local_backup_rollback` (a file still at its original is left alone), reloads
-  systemd, restarts exactly the recorded timers and clears the marker. Each
-  step is idempotent, so a drain may TERM or KILL it. A recovery that cannot
-  finish (a live file edited since, matching neither version) keeps the marker,
-  leaves timers stopped, sends one `NTFY_WARNING_URL` warning a day, and the
-  next installer refuses to publish over it.
+  `acquire_job_lock` (restore, hotspare init, `prepare-disk`) and offsite snapshot
+  startup. Python cloud admission rechecks after validating inherited descriptors.
+  Direct `clone_to_sd.sh` joins admission; children validate and retain their
+  parent's shared or exclusive hold rather than reacquiring it. The fence and
+  disk lifecycle never consult the job guard, so a drain or unmount never waits
+  on a transaction.
+- **Recovery.** The independent root-owned dispatcher at
+  `/usr/local/lib/vanpi-backup-deploy/recover` runs hourly from
+  `/etc/cron.d/vanpi-backup-deploy`, outside cohort rollback. The window and
+  each installer also check pending before proceeding. After checking ownership
+  the dispatcher runs the transaction's own journaled recoverer as root. It takes
+  the legacy fence without waiting and records its PID. Preparing/publishing
+  transactions restore the guarded predecessor and reload systemd; committed
+  transactions verify the new cohort and **never roll it back**. Both paths
+  clean temporaries, restore exactly the recorded active timers and clear pending
+  only after destination contents/directory entries are durable. A failure retains
+  pending and warns at most daily. A timer already restarted before interruption
+  can fire, but job admission still refuses until finalization succeeds.
 - **Emergency path.** Unchanged in time: `abort_backup.sh --emergency` TERMs
   the installer through the legacy lock's PID record, waits its 8-second
   grace for the in-process rollback, then KILLs every holder of the lock
   file and moves on to the disks. Whatever the rollback did not finish is
   recovered later, before any job runs, never in the drain.
-- **First deployment.** The installer runs its own staged helper while job
-  admission and the trigger run the live cohort, so the first deployment of
-  this mechanism publishes `backup_deploy_state.sh`, `backup_deploy_trigger.sh`
-  and `backup_window.sh` first: killed after those three, the hourly trigger
-  is live (the guard follows with `backup_conf.sh`). Killed earlier, the old
-  cohort runs beside one or two inert new modules, with timers stopped as
-  before this change, until the next installer run recovers it. A publisher without a
-  journal (an older installer or the broad sync) leaves no marker, so jobs
-  run as before; it is also unprotected. Never deploy a revision older than
-  the journal while a transaction is recorded: it would publish over it, and
-  the newer recoverer would then refuse the unrecognized live files.
+- **First deployment.** Requires the separately verified maintenance/bootstrap
+  phase in [DEPLOY_BOOTSTRAP.md](DEPLOY_BOOTSTRAP.md). Publication ordering alone
+  cannot protect old admission functions. The bootstrap minimally guards the
+  actual reviewed predecessor and installs the independent trigger before any
+  transaction may stop timers. Its launch holds survive interruption and remain
+  until explicitly released; it cannot revoke arbitrary already-running old
+  shells. Every supported saved predecessor stays guarded. Old installers,
+  unguarded rollback targets and broad-sync backup publication are unsupported.
 
 ## Offsite code snapshot and its limits
 
