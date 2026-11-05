@@ -1,11 +1,11 @@
 """Remote CLI fixture: real subprocess boundary, synthetic admission evidence only."""
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
-import sys
 
 from offsite_remote import remote_commands
-from pi.tests.backup.offsite_fixtures import BOOTSTRAP, OffsiteFixture
+from pi.tests.backup.offsite_fixtures import BOOTSTRAP, FAKE_SHEBANG, OffsiteFixture, command_double
 
 SECRET = 'fixture-transport-secret-' + 'x' * 40
 GUARD_COMMAND = '''
@@ -16,6 +16,8 @@ root=Path(os.environ['OFFSITE_FIXTURE']).parent
 if name == 'metered':
     if sys.argv[1:] != ['admit','pi.offsite_backup']:
         raise SystemExit(2)
+    # The real admit CLI reads evidence to EOF; exiting first races the parent's pipe write.
+    json.load(sys.stdin)
     print(json.dumps({'allowed': not (root/'denied').exists(), 'reason':'fixture'}))
 elif name == 'route':
     print(json.dumps([{'dev':'eth0' if (root/'wrong-route').exists() else 'tailscale0'}]))
@@ -42,10 +44,10 @@ class RemoteFixture(OffsiteFixture):
 
     def __init__(self):
         super().__init__()
+        guard = command_double(GUARD_COMMAND)
         for name in remote_commands():
             path = self.bin / name
-            path.write_text('#!' + sys.executable + '\n' + GUARD_COMMAND)
-            path.chmod(0o700)
+            os.link(guard, path)
             self.cfg.commands[name] = str(path)
         self.config_file.write_text(json.dumps(asdict(self.cfg), default=str))
         self.remote_config = self.cfg.state / 'remote.json'
@@ -58,8 +60,8 @@ class RemoteFixture(OffsiteFixture):
         """Replace the live tree's device-facing helpers with the command double before a snapshot."""
         fake = Path(__file__).with_name('offsite_fake_command.py').read_text()
         for relative in SNAPSHOT_HELPERS:
-            (self.live / relative).write_text('#!' + sys.executable + '\n' + fake)
-        (self.live / 'backup' / 'icloud_uplink.py').write_text('#!' + sys.executable + '\n' + LOG_EXECUTION
+            (self.live / relative).write_text(FAKE_SHEBANG + fake)
+        (self.live / 'backup' / 'icloud_uplink.py').write_text(FAKE_SHEBANG + LOG_EXECUTION
                                                                 + GUARD_COMMAND)
         for relative in (*SNAPSHOT_HELPERS, 'backup/icloud_uplink.py'):
             (self.live / relative).chmod(0o755)

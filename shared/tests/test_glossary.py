@@ -81,11 +81,14 @@ class GlossaryTests(unittest.TestCase):
                     'PATH': f"{bin_dir}:{os.environ['PATH']}",
                     'PYTHONDONTWRITEBYTECODE': '1', 'FAKE_PEER_HOME': str(self.peer_home)}
 
-    def run_script(self, *args, stdin='', peer='', pi=False):
+    def run_script(self, *args, stdin='', peer='', pi=False, mac=False):
         command = [sys.executable, str(SCRIPT)]
-        if pi:
+        if pi or mac:
+            # The host is read from sys.platform, so pin it where a test needs one.
+            platform = 'linux' if pi else 'darwin'
             command = [sys.executable, '-c',
-                       "import runpy, sys; sys.platform = 'linux'; runpy.run_path(sys.argv.pop(1), run_name='__main__')",
+                       f"import runpy, sys; sys.platform = {platform!r}; "
+                       "runpy.run_path(sys.argv.pop(1), run_name='__main__')",
                        str(SCRIPT)]
         return subprocess.run([*command, '--file', str(self.file), '--peer', peer,
                                '--known-file', str(self.known_file), '--page', str(self.page), *args],
@@ -224,7 +227,12 @@ Some other prose.
 
     def test_terms_hook_blocks_with_count_url_and_encoded_search(self):
         self.stop('**Terms**\n- **Hash map:** Keyed storage.')
-        reply = self.hook('UserPromptSubmit', prompt='  +terms hash map / O(n²)  ')
+        # On the Mac the page opens where it was written (the Pi's is mapped to
+        # the Mac's mount; see test_pi_url_uses_mac_mount_and_default_paths).
+        result = self.run_script('--hook', mac=True, stdin=json.dumps({
+            'hook_event_name': 'UserPromptSubmit', 'prompt': '  +terms hash map / O(n²)  '}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reply = json.loads(result.stdout)
         self.assertEqual(reply['decision'], 'block')
         self.assertIn('1 term.', reply['reason'])
         url = reply['reason'].splitlines()[0].split(' ', 2)[2]

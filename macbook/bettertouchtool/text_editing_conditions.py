@@ -35,7 +35,7 @@ def selection_condition(length_pattern):
 
 
 WRAP_CONDITION = selection_condition('[1-9][0-9]*')
-CUT_CONDITION = selection_condition('0')
+CARET_CONDITION = selection_condition('0')
 
 
 class ConditionCase(NamedTuple):
@@ -43,7 +43,7 @@ class ConditionCase(NamedTuple):
     app: str
     details: str
     wrap: bool
-    cut: bool
+    caret: bool
 
 
 def _focused(selected_text, selected_range):
@@ -56,8 +56,8 @@ SELECTION = _focused('AXSelectedText (W):  "beta"', 'AXSelectedTextRange (W):  "
 CARET = _focused('AXSelectedText (W):  ""', 'AXSelectedTextRange (W):  "pos=8 len=0"')
 # focused_element_details shapes copied from live dumps (TextEdit, Chrome, Signal, iTerm).
 CASES = (
-    ConditionCase('selection', 'com.apple.TextEdit', SELECTION, wrap=True, cut=False),
-    ConditionCase('caret', 'com.apple.TextEdit', CARET, wrap=False, cut=True),
+    ConditionCase('selection', 'com.apple.TextEdit', SELECTION, wrap=True, caret=False),
+    ConditionCase('caret', 'com.apple.TextEdit', CARET, wrap=False, caret=True),
     ConditionCase('selection starting with a quote', 'com.google.Chrome',
                   _focused('AXSelectedText (W):  ""hi""', 'AXSelectedTextRange (W):  "pos=3 len=4"'), True, False),
     ConditionCase('multi-line selection', 'org.mozilla.firefox',
@@ -94,7 +94,7 @@ def truth_table_errors():
     variables = [{'BTTActiveAppBundleIdentifier': case.app, 'focused_element_details': case.details}
                  for case in CASES]
     errors = []
-    for key, predicate in (('wrap', WRAP_CONDITION), ('cut', CUT_CONDITION)):
+    for key, predicate in (('wrap', WRAP_CONDITION), ('caret', CARET_CONDITION)):
         for case, fired in zip(CASES, evaluate(predicate, variables)['results']):
             if fired != getattr(case, key):
                 errors.append('%s condition %s on: %s' % (key, 'fires' if fired else 'misses', case.name))

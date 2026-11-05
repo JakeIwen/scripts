@@ -45,6 +45,18 @@ function textMarkerSelection(element, attribute) {
         const a = endpoints(first), b = endpoints(second);
         return samePoint(a.start, b.start) && samePoint(a.end, b.end);
     }
+    function collapsed(range) {
+        const {start, end} = endpoints(range);
+        return samePoint(start, end);
+    }
+    function paragraph(marker) {
+        // Firefox resolves the paragraph from the marker's native node, and it
+        // runs to the next paragraph's start, so it carries the break.
+        return parameter('AXParagraphTextMarkerRangeForTextMarker', marker);
+    }
+    function paragraphAt(range) {
+        return paragraph(endpoints(range).start);
+    }
     function text(range) {
         return ObjC.unwrap(parameter('AXStringForTextMarkerRange', range));
     }
@@ -60,7 +72,6 @@ function textMarkerSelection(element, attribute) {
         // Firefox resolves each endpoint's paragraph from its native node, which
         // also covers an endpoint sitting on the far side of a paragraph break.
         const {start, end} = endpoints(range);
-        const paragraph = marker => parameter('AXParagraphTextMarkerRangeForTextMarker', marker);
         if (!same(paragraph(start), paragraph(end)))
             throw new Error('The selection spans a paragraph break; select text within one paragraph. Nothing pasted.');
     }
@@ -88,6 +99,8 @@ function textMarkerSelection(element, attribute) {
         read: () => attribute(element, 'AXSelectedTextMarkerRange'),
         text,
         same,
+        collapsed,
+        paragraphAt,
         validate,
         endingAt,
         select: function (range) {

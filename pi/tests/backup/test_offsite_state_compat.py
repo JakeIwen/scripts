@@ -66,6 +66,20 @@ class StateCompatibilityTests(unittest.TestCase):
         subprocess.run(['tar', '-x', '-C', str(cls.v2)], input=archive, check=True, timeout=60)
         # v2 runs these same write steps through its own fixture and code.
         shutil.copy2(Path(__file__).with_name('offsite_state_writes.py'), cls.v2 / 'pi/tests/backup')
+        # Repair only the old doubles' discarded stdin, which races the parent's
+        # pipe write. Every historical production writer/reader stays untouched.
+        repairs = (
+            ('offsite_remote_fixtures.py', "    print(json.dumps({'allowed':",
+             "    json.load(sys.stdin)\n    print(json.dumps({'allowed':"),
+            ('offsite_fake_command.py', 'def partition(state, args):\n',
+             'def partition(state, args):\n    sys.stdin.read()\n'),
+        )
+        for filename, before, after in repairs:
+            path = cls.v2 / 'pi/tests/backup' / filename
+            text = path.read_text()
+            if text.count(before) != 1:
+                raise AssertionError(f'Expected exactly one historical stdin repair site in {filename}')
+            path.write_text(text.replace(before, after, 1))
 
     @classmethod
     def tearDownClass(cls):
@@ -89,6 +103,17 @@ class StateCompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         f.sources()
         return f
+
+    def test_v2_command_doubles_wait_for_input(self):
+        self.v2_python(V2_WRITER + '''
+from pi.tests.backup.offsite_state_writes import assert_stdin_consumed
+f = RemoteFixture()
+try:
+    for name in ('metered', 'sfdisk'):
+        assert_stdin_consumed(f, name)
+finally:
+    f.close()
+''')
 
     def test_newest_readers_parse_state_written_by_v2(self):
         output = Path(self.temporary.name) / 'v2-state'

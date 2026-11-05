@@ -189,6 +189,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   network changes); flags set without its record are native and left alone. `mac_panel/metered_adapter.py` and
   `static/section_metered.mjs` expose the CLI without bypassing request guards.
   Install/test commands and lease limitations: `pi/docs/networking/METERED_CONNECTIONS.md`.
+- `macbook/linux_test_lane/`: the opt-in Linux test lane (Python 3.9+, CLI
+  `macbook/linux_test_lane/linux-test-lane`), a Lima `vz` Debian 12 arm64 VM
+  on the Mac that runs the Linux/Pi tests off the Pi. `pins.env` is the one
+  record of the image (dated URL + digest), Pi-matching tool versions and VM
+  size; `provision.sh` runs as root in the VM and refuses drift from those
+  versions (restic comes from `pi/scripts/backup/install_restic.sh`, rest-server
+  from `synology/offsite/binaries.py`, reusing their verified release pins);
+  `requirements.txt` mirrors `.local/test-venv`. `lima.py` renders the template
+  and wraps `limactl`; `sync.py` copies exactly the files `run_tests.py`
+  discovers, plus Git state (a worktree's own HEAD/index), through a read-only
+  mount of the main checkout onto VM-local `/home/pi/linux-test-lane/checkout`,
+  keeping the VM's own venv and `.git/run_tests/` cache. Usage under
+  [Repository test suite](#repository-test-suite).
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` function;
   it saves clipboard PNGs into the Pi `agent-shared` folder under
@@ -259,13 +272,24 @@ compare it with this checkout. Deployed files may differ from the repository.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
   `install_text_editing_keys.py` (`btt.py text-keys`) owns the system-wide editing
-  keys (Cmd-X line cut, quote/bracket wrapping): conditional pass-through triggers
-  that fire only on a settable focused selection outside `EXCLUDED_APPS`;
-  `text_editing_conditions.py` owns those conditions and the truth table checked
-  through `text_editing_conditions.js` before install, and `text_editing_keys.js`
-  is their runtime on top of `text_selection.js`.
-  BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the line cut presses
-  Edit > Cut through Accessibility instead.
+  keys (Cmd-X line cut, Cmd-C line copy, quote/bracket
+  wrapping): conditional pass-through triggers that fire only on a settable
+  focused selection outside `EXCLUDED_APPS`; `text_editing_conditions.py` owns
+  those conditions and the truth table checked through `text_editing_conditions.js`
+  before install, and `text_editing_keys.js` is their runtime on top of
+  `text_selection.js`. A line is the caret's logical line with its break
+  (numeric range over `AXValue`; Firefox's marker paragraph). Cmd-X selects it
+  through Accessibility only while the caret is as first read, acts only on an
+  exact readback with the text unchanged and focus checked last, and presses
+  Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
+  trigger; Firefox blank lines are not cut. Cmd-C never touches the field: it
+  writes the line's text plus `\n` to the clipboard with `text_menu_paste.js`'s
+  `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
+  read, and a failed write puts the previous clipboard back. Never select by
+  posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
+  Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
+  shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the
+  in-memory pasteboard shared with `menu_paste.test.cjs`.
   `install_finder_paste.py` (`btt.py finder-paste`) owns Cmd-V in Finder: one global
   conditional pass-through trigger (Finder frontmost, no settable text focus) whose
   runtime `finder_paste.js` presses Finder's Edit > Paste for files and text and
@@ -346,6 +370,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
+- Custom Mac keyboard mappings: BTT shortcuts and `repair_key_sequences.py`,
+  plus `macbook/launchagents/com.jacobr.dictation-key-f13.plist`, are
+  documented in `~/dev/visual-guides/static/reference/keyboard-shortcuts.json`.
+  The Keyboard Shortcuts guide and shell `keys` command share that catalog.
+  When changing these mappings, update it in the same task, preserve scope,
+  conditions and enabled state, and check `keys --all` plus `npm test` in
+  Visual Guides. Keep private expansion text and executable payloads out
+  of the public catalog; its verification date records an inventory check,
+  not proof that the shortcut was exercised live.
 - `shared/`: code imported or deployed on more than one host.
 - `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper that
   types `continue` (with backoff) after an interactive Codex turn fails with
@@ -813,6 +846,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   permits only a missing or exact staged live file.
   `pi/tests/backup/test_local_backup_deploy.py` exercises those shell contracts
   against temporary source/live directories and a fixture Git repository.
+  `pi/time_machine_deploy_checks.py` is the Time Machine deployer's Python 3.9+
+  target-test/source manifest: `--files` combines its check dependencies with
+  `local_backup_sources tm`; `--run` runs the four isolated Linux target commands
+  at most three at a time, without caching. `deploy_time_machine_icloud.sh --check`
+  stages and checks only; it exits before the deployment fence or activation.
+  `pi/tests/backup/test_time_machine_deploy_checks.py` exercises those public CLIs
+  through private stages and a fixture SSH transport.
   Real-process lock regressions live in `pi/tests/storage/test_backup_locks.sh`
   and `pi/tests/backup/test_backup_locks.py`. `backup_lock_fixtures.py` owns their
   private registry/admission fixtures; `test_backup_admission.py` tests the
@@ -1076,6 +1116,7 @@ Claude mod tests. Missing interpreters/dependencies
 are errors; executable availability is checked before suite commands start.
 Tests needing specific OS features or hardware must state their skip reason.
 Shell tests run under macOS `/bin/bash` 3.2, where `set -e` ignores a failing `[[ ]]` or `(( ))`, so assertions must fail explicitly (`[[ ... ]] || fail ...`).
+macOS checks each newly written executable on its first run (about 70 ms, more under suite load). Fixtures that start many command doubles hard-link one copy per process (`command_double` in `pi/tests/backup/offsite_fixtures.py`) or run scripts through their interpreter, and never start a freshly written executable inside a short timeout.
 Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
 Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
 `.local/test-venv/bin/python`).
@@ -1098,8 +1139,9 @@ extend that registry instead of adding per-test `sys.path` patches.
   metadata for tracked/unignored inputs (never trusting Git's stat cache),
   symlink targets, submodule contents, `.local/test-venv`, the active venv,
   and `node_modules` beside package manifests. It also covers the
-  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH` and
-  `BTT_LIVE_TESTS`. `.claude/worktrees/` belongs to other runners
+  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH`,
+  `BTT_LIVE_TESTS`, `OFFSITE_RESTIC` and `OFFSITE_REST_SERVER` (including their
+  resolved executable bytes). `.claude/worktrees/` belongs to other runners
   and is excluded from both discovery and fingerprints.
   A pass within 6 hours prints `PASS: all N suite commands completed
   (cached: ...)` and exits 0; `--force` reruns and revokes the earlier pass
@@ -1115,6 +1157,62 @@ extend that registry instead of adding per-test `sys.path` patches.
   `passes.json`, `lock`): untracked and shared by all worktrees. Corrupt
   JSON is discarded; writes replace files atomically. The runner's CLI
   regression tests are `tests/test_run_tests.py`.
+- Selection: `--path PREFIX` (repeatable) runs only tests under those
+  repository paths and `--exclude-path PREFIX` drops some; both match whole
+  path components, a prefix that matches no repository path is an error, and
+  output lines name the selection. A selected pass has its own cache key, so it
+  never certifies the whole suite (whose key is unchanged).
+
+### Linux test lane
+
+Mac skips are not Linux passes: Linux-only cases (fdinfo/flock lock evidence,
+Bash 4+ backup shell, real Borg/rclone, user namespaces, GNU tools) run in a
+Debian bookworm VM on the Mac (`macbook/linux_test_lane/`), never on the Pi.
+It is opt-in: plain `run_tests.py` never starts it and no deployer calls it.
+Setup is `brew install lima`; from the checkout root:
+
+- `macbook/linux_test_lane/linux-test-lane up` creates, starts and provisions
+  the VM (8 CPUs, 8 GiB, 40 GiB) when needed; reprovisions when
+  `provision.sh`, `pins.env`, `requirements.txt` or either upstream binary
+  installer changes.
+- `... test` runs `up`, syncs this working tree (tracked plus unignored files,
+  deletions included) and runs the VM's `run_tests.py --path pi --path shared
+  --path synology --path tests --path macbook/tests/test_linux_test_lane.py
+  --exclude-path shared/claude-mods`, ending
+  with the runner's PASS/FAILED line and exit status; the VM keeps its own pass
+  cache. Every invocation checks required tools and their pinned versions,
+  including both offsite binaries, even with a current provisioning stamp;
+  missing/drifted tools fail before cache lookup. To restore the checked-in
+  pins, run `macbook/linux_test_lane/linux-test-lane up --repair`: it retains
+  the destination guard, reinstalls distro packages, reruns the pinned
+  installers and recreates the test venv, then verifies everything before
+  writing the stamp. Plain `up` with a current stamp only verifies; it does
+  not repair. Change `pins.env` only for a deliberate runtime upgrade, never
+  to hide a missing tool. Source and Git copies use rsync checksums,
+  not size/mtime guesses. Before provisioning (including a stale/missing stamp)
+  and each rsync the guest rejects redirected, symlinked or non-owned
+  checkout/`.git` ancestors outside its fixed lane root.
+  `--path`/`--exclude-path` replace that selection; `--force`, `-j`
+  and `--timeout` pass through. shared/claude-mods is left out because its
+  suites run through the Mac's `claude plugin test` and its codexclean build
+  needs Node >= 22.13; the Pi only receives built copies.
+- `status`, `shell` (a shell in the VM checkout), `stop` (it otherwise stays
+  running) and `destroy` (deletes the VM and disk, for a clean start).
+
+Lane tests always set `OFFSITE_RESTIC` and `OFFSITE_REST_SERVER` to
+`/home/pi/linux-test-lane/venv/bin/offsite-restic` and `offsite-rest-server`.
+The first is a symlink to the VM's verified restic 0.19.1; the second is the
+archive-verified rest-server 0.14.0, installed only in the test venv. Receiver
+and REST acceptance tests therefore execute rather than skip. Host overrides
+are not forwarded: these values are fixed by the tracked lane code, and the
+runner fingerprints both environment values and resolved binaries (also through
+its active venv), following symlinks.
+Provisioning also installs rsyslog for the separate privileged spool check.
+
+Lane commands serialize on `~/.local/state/linux-test-lane/lock`, since every
+worktree shares the VM's one checkout. The VM user is `pi` (uid 1000) with
+passwordless sudo, like the Pi; tests still run unprivileged, so root-only
+cases (`test_time_machine_runtime`, the rsyslog spool test) skip there too.
 
 ## Deployment commits
 

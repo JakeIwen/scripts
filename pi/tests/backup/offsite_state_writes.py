@@ -4,6 +4,53 @@ Stdlib only and duck-typed on the fixture, so the same steps run through the
 current fixture and, copied into an extracted older release, through its own.
 """
 import json
+import os
+import select
+import subprocess
+import sys
+
+
+OBSERVE_STDIN_READ = '''
+import os, runpy, sys
+ready = int(sys.argv.pop(1))
+original = sys.stdin
+class ObservedInput:
+    def read(self, *args, **kwargs):
+        os.write(ready, b'R')
+        return original.read(*args, **kwargs)
+sys.stdin = ObservedInput()
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+'''
+
+
+def assert_stdin_consumed(f, name):
+    """Observe a real read entry before sending input, not a sleep during interpreter startup."""
+    requests = {'metered': ('metered', ['admit', 'pi.offsite_backup'], '{}'),
+                'sfdisk': ('fake-sfdisk', ['--wipe', 'always', str(f.device)], 'label: gpt\n, , L\n')}
+    executable, args, payload = requests[name]
+    read_fd, write_fd = os.pipe()
+    try:
+        with subprocess.Popen([sys.executable, '-S', '-c', OBSERVE_STDIN_READ, str(write_fd),
+                               str(f.bin / executable), *args], env=f.env, cwd=f.root,
+                              pass_fds=(write_fd,), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True) as child:
+            os.close(write_fd)
+            write_fd = None
+            try:
+                assert select.select([read_fd], [], [], 5)[0], f'{name} never reached stdin'
+                assert os.read(read_fd, 1) == b'R', f'{name} exited without reading stdin'
+                assert child.poll() is None, f'{name} exited before input/EOF'
+                out, err = child.communicate(input=payload, timeout=5)
+                assert child.returncode == 0, out + err
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.communicate(timeout=5)
+    finally:
+        os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)
 
 
 def writes(f, now):

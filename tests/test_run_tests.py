@@ -57,7 +57,8 @@ class RunnerCase(unittest.TestCase):
 
     def start(self, *args, cwd=None, **extra_env):
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith('GIT_') and key != 'PYTHONPATH'}
+               if not key.startswith('GIT_') and key not in
+               ('PYTHONPATH', 'OFFSITE_RESTIC', 'OFFSITE_REST_SERVER')}
         env.update(FAKE_COUNTER=str(self.counter), PYTHONDONTWRITEBYTECODE='1', BTT_LIVE_TESTS='')
         env.update(extra_env)
         process = subprocess.Popen([sys.executable, str(self.repo / 'run_tests.py'), *args],
@@ -156,6 +157,46 @@ class RunnerTests(RunnerCase):
         code, output = self.run_suite()
         self.assertEqual(code, 0, output)
         self.assertEqual(len(self.executions()), 2, output)
+
+    def test_offsite_opt_ins_and_external_binary_contents_invalidate_cache(self):
+        (self.repo / 'tests/test_offsite.py').write_text('''\
+import os, subprocess, unittest
+class T(unittest.TestCase):
+    def test_it(self):
+        with open(os.environ['FAKE_COUNTER'], 'a') as log:
+            log.write('offsite\\n')
+        for key in ('OFFSITE_RESTIC', 'OFFSITE_REST_SERVER'):
+            if not os.environ.get(key):
+                self.skipTest('offsite binary not enabled')
+        for key in ('OFFSITE_RESTIC', 'OFFSITE_REST_SERVER'):
+            result = subprocess.check_output([os.environ[key]], text=True)
+            self.assertEqual(result.strip(), 'good')
+''')
+        binaries = {}
+        for key in ('OFFSITE_RESTIC', 'OFFSITE_REST_SERVER'):
+            path = self.repo.parent / key.lower()
+            path.write_text('#!/bin/sh\nprintf good\n')
+            path.chmod(0o755)
+            binaries[key] = str(path)
+        self.assertIn('skipped=1', self.assert_uncached())
+        self.assertIn('(cached:', self.run_suite()[1])
+        self.assertIn('skipped=1', self.assert_uncached(OFFSITE_RESTIC=binaries['OFFSITE_RESTIC']))
+        self.assertNotIn('skipped=', self.assert_uncached(**binaries))
+        self.assertIn('(cached:', self.run_suite(**binaries)[1])
+        for key, filename in binaries.items():
+            with self.subTest(binary=key):
+                path = Path(filename)
+                saved, content = path.stat(), path.read_text()
+                path.write_text(content.replace('good', 'fail'))
+                os.utime(path, ns=(saved.st_atime_ns, saved.st_mtime_ns))
+                self.assertEqual(path.stat().st_size, saved.st_size)
+                code, output = self.run_suite(**binaries)
+                self.assertEqual(code, 1, output)
+                self.assertNotIn('(cached:', output)
+                path.write_text(content)
+                os.utime(path, ns=(saved.st_atime_ns, saved.st_mtime_ns))
+                self.assert_uncached(**binaries)
+                self.assertIn('(cached:', self.run_suite(**binaries)[1])
 
     def test_bad_json_shapes_are_discarded(self):
         self.add_tests(a=(0, False))
@@ -361,6 +402,49 @@ class RunnerTests(RunnerCase):
         self.assertEqual([first.returncode, second.returncode], [0, 0])
         self.assertEqual(sorted(self.executions()), ['a', 'b'])
         self.assertTrue(any('cached' in output for output in outputs))
+
+    def add_other_test(self, name):
+        directory = self.repo / 'other'
+        directory.mkdir(exist_ok=True)
+        (directory / f'test_{name}.py').write_text(FAKE_TEST.format(name=name, sleep=0, fail=False))
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'other tests')
+
+    def test_path_selection_runs_subset_and_never_certifies_whole_suite(self):
+        self.add_tests(a=(0, False))
+        self.add_other_test('b')
+        code, output = self.run_suite('--path', 'tests')
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.executions(), ['a'])
+        self.assertIn('PASS: all 1 suite commands under tests completed.', output)
+        # The whole suite has its own key, so the subset's pass doesn't cover it.
+        code, output = self.run_suite()
+        self.assertEqual(code, 0, output)
+        self.assertIn('PASS: all 2 suite commands completed.', output)
+        self.assertEqual(sorted(self.executions()), ['a', 'a', 'b'])
+        code, output = self.run_suite('--path', 'tests/')
+        self.assertEqual(code, 0, output)
+        self.assertIn('PASS: all 1 suite commands under tests/ completed (cached', output)
+        code, output = self.run_suite('--exclude-path', 'other')
+        self.assertEqual(code, 0, output)
+        self.assertIn('Discovered 1 test files excluding other;', output)
+        self.assertEqual(self.executions().count('b'), 1)
+
+    def test_path_selection_rejects_unknown_and_outside_paths(self):
+        self.add_tests(a=(0, False))
+        for args, message in ((('--path', 'nope'), '--path nope matches no repository path'),
+                              (('--exclude-path', 'tests/x'), 'matches no repository path'),
+                              (('--path', '../repo'), 'must be a path inside the repository'),
+                              (('--path', '.'), 'must be a path inside the repository'),
+                              (('--path', str(self.repo)), 'must be a path inside the repository')):
+            with self.subTest(args=args):
+                code, output = self.run_suite(*args)
+                self.assertEqual(code, 1, output)
+                self.assertIn(message, output)
+        code, output = self.run_suite('--path', 'data.txt')
+        self.assertEqual(code, 1, output)
+        self.assertIn('No tests discovered', output)
+        self.assertEqual(self.executions(), [])
 
     def test_edit_during_run_is_not_cached(self):
         self.add_tests(a=(0, False))
