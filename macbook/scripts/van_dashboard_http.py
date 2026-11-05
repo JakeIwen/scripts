@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from urllib import error, request
 
-DASHBOARD_URL = "http://vanpi.lan:8788"
+DASHBOARD_URL = "http://vanpi:8788"  # bare vanpi resolves on and off the LAN; .lan only on it
 
 
 class DashboardError(RuntimeError):
