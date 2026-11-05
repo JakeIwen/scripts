@@ -89,8 +89,10 @@ local_backup_check_record() { # <source> <live> <policy> <owner> <mode> <first> 
     preserve|defaults)
       [[ "$expected" == managed ]] || return 1
       if [[ "$actual" != absent ]]; then
-        [[ "${old_owner%%:*}" == "${LOCAL_BACKUP_ROOT_OWNER%%:*}" ]] &&
-          (( (8#$old_mode & 022) == 0 )) || return 1
+        if [[ "$old_owner" != "$owner" || "$old_mode" != "$mode" ]]; then
+          echo "Refusing config metadata for $live: expected $owner $mode, found $old_owner $old_mode; review it explicitly (no automatic chmod)." >&2
+          return 1
+        fi
       fi
       ;;
     replace) [[ "$expected" == managed ]] || return 1 ;;
@@ -397,6 +399,40 @@ local_backup_marker_write() { # <preparing|publishing|committed>: journal durabl
   # EXIT trap roll back a cohort the recorded recoverer will instead finalize.
   [[ "$1" != committed ]] || LOCAL_BACKUP_STATE=committed
   $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$BACKUP_DEPLOY_STATE_DIR"
+}
+
+local_backup_exit_phase() { # Read the authoritative decision as its owner, under our fence.
+  [[ -n "$LOCAL_BACKUP_TXN" ]] || { printf 'unstarted\n'; return 0; }
+  $LOCAL_BACKUP_SUDO /bin/bash -c '
+    . "$1/backup_deploy_trigger.sh" || exit 2
+    backup_deploy_owned "$BACKUP_DEPLOY_STATE_DIR" d || exit 2
+    if [[ ! -e "$BACKUP_DEPLOY_MARKER" && ! -L "$BACKUP_DEPLOY_MARKER" ]]; then
+      printf "absent\n"; exit 0
+    fi
+    backup_deploy_owned "$BACKUP_DEPLOY_MARKER" f || exit 2
+    backup_deploy_marker_read || exit 2
+    [[ "$BACKUP_DEPLOY_ID" == "$2" && "$BACKUP_DEPLOY_ROOT" == "$3" &&
+       "$BACKUP_DEPLOY_TEMP_ID" == "$4" && "$BACKUP_DEPLOY_PROFILE" == "$5" ]] || exit 2
+    printf "%s\n" "$BACKUP_DEPLOY_PHASE"
+  ' backup-deploy-decision "$LOCAL_BACKUP_CODE_DIR" "${LOCAL_BACKUP_TXN##*/}" \
+    "$LOCAL_BACKUP_ROOT" "$LOCAL_BACKUP_TEMP_ID" "${LOCAL_BACKUP_PROFILE:-}"
+}
+
+local_backup_reconcile_exit_decision() {
+  local phase
+  phase=$(local_backup_exit_phase) || return 1
+  case "$phase" in
+    committed)
+      # TERM may run immediately after sudo mv returns, before *any* following
+      # shell assignment. Never infer this decision from LOCAL_BACKUP_STATE.
+      LOCAL_BACKUP_STATE=committed
+      $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$BACKUP_DEPLOY_STATE_DIR" || return 1
+      local_backup_verify_published ;;
+    preparing|publishing) [[ "$LOCAL_BACKUP_STATE" != committed ]] ;;
+    unstarted|absent)
+      [[ "$LOCAL_BACKUP_STATE" == preparing && ${#LOCAL_BACKUP_PUBLISHED[@]} == 0 ]] ;;
+    *) return 1 ;;
+  esac
 }
 
 local_backup_journal_close() { # remove this transaction's marker durably; never another's

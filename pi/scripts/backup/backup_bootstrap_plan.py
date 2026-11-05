@@ -12,6 +12,7 @@ import subprocess
 STATE_DIR = '/var/lib/vanpi-backup-deploy'
 BOOTSTRAP_DIR = '/usr/local/lib/vanpi-backup-deploy'
 CRON_PATH = '/etc/cron.d/vanpi-backup-deploy'
+CRON_STORAGE = '/var/spool/cron/crontabs'
 MAINTENANCE = STATE_DIR + '/maintenance'
 HOLD_PREFIX = '# vanpi-deploy-bootstrap-held '
 SERVICES = ('vanpi-icloud-backup.service', 'vanpi-time-machine-icloud.service',

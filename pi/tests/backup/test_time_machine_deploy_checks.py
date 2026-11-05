@@ -239,6 +239,10 @@ print(('0' * 64 if os.environ.get('FAIL_EVENT') == 'hash' else
 ''', python=True)
         (self.repo / 'pi/backup_local_deploy.sh').write_text('''
 local_backup_previous_hashes() { echo reviewed; }
+local_backup_check_bootstrap() {
+  echo bootstrap-check >> "$TEST_ROOT/events"
+  [[ ${FAIL_EVENT:-} != bootstrap ]] || return 45
+}
 local_backup_begin() { echo begin >> "$TEST_ROOT/events"; }
 local_backup_publish() { echo publish >> "$TEST_ROOT/events"; }
 local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
@@ -260,6 +264,7 @@ local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
         events = self.events()
         self.assertIn('local-suite', events)
         self.assertIn('schedule:--check', events)
+        self.assertIn('bootstrap-check', events)
         self.assertTrue(any(event.startswith('metered:admit ') for event in events))
         self.assertTrue(any(event.startswith('systemd-analyze:verify ') for event in events))
         self.assertEqual(sum(event.startswith('testparm:') for event in events), 2)
@@ -268,6 +273,15 @@ local_backup_commit() { echo commit >> "$TEST_ROOT/events"; }
         staged_tests = {str(path.relative_to(self.root / 'stage'))
                         for path in (self.root / 'stage/pi/tests').rglob('test_*')}
         self.assertEqual(staged_tests, {source for source, _prefix in checks.TARGET_TESTS})
+
+    def test_check_requires_bootstrap_readiness_without_attempting_recovery(self):
+        self.deploy_fixture()
+        self.env['FAIL_EVENT'] = 'bootstrap'
+        result = self.deploy('--check')
+        self.assertEqual(result.returncode, 45, result.stdout + result.stderr)
+        self.assertIn('bootstrap-check', self.events())
+        self.assertNotIn('Target checks passed', result.stdout)
+        self.assertFalse(set(self.events()) & {'begin', 'publish', 'commit', 'capture-request'})
 
     def test_check_flag_accepts_target_before_or_after_it(self):
         self.deploy_fixture()

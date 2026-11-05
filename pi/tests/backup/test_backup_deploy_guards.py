@@ -45,6 +45,74 @@ class AdmissionAndFinalizeTests(RecoveryCase):
         self.assertFalse(self.marker.exists())
         self.assert_started_exactly_active_timers()
 
+    def test_term_at_committed_rename_then_kill_never_rolls_back(self):
+        self.env.update(TEST_TERM_COMMIT='1', TEST_KILL_TIMER_START='1',
+                        TEST_KILL_ROLLBACK_SUFFIX='.timer')
+        result = self.apply(self.fx)
+        for key in ('TEST_TERM_COMMIT', 'TEST_KILL_TIMER_START', 'TEST_KILL_ROLLBACK_SUFFIX'):
+            self.env.pop(key)
+        self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr)
+        self.assertIn('commit-rename', self.events())
+        self.assertNotIn('rollback:', self.events())
+        self.assertEqual(self.marker_fields()['phase'], 'committed')
+        new = {p: p.read_bytes() for p in self.fx[2].rglob('*') if p.is_file()}
+        result = self.window()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(new, {p: p.read_bytes() for p in new})
+        self.assertFalse(self.marker.exists())
+
+    def test_term_before_commit_restores_predecessor(self):
+        self.env.update(TEST_FAIL_STEP='3', TEST_FAIL_WHEN='signal')
+        result = self.apply(self.fx)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assert_restored(self.fx, active=2)
+
+    def test_ambiguous_commit_decision_preserves_files_and_timers(self):
+        for decision in ('invalid', 'foreign'):
+            with self.subTest(decision=decision):
+                fx = self.fixture()
+                self.env.update(TEST_TERM_COMMIT='1', TEST_COMMIT_DECISION=decision)
+                result = self.apply(fx)
+                self.assertEqual(result.returncode, 70, result.stderr)
+                self.assertIn('decision is unreadable', result.stderr)
+                events = (fx[0] / 'events').read_text()
+                self.assertNotIn('rollback:', events)
+                self.assertNotIn('systemctl:start', events)
+                self.assertTrue((self.state_dir(fx) / 'pending').exists())
+
+    def test_kept_config_metadata_refuses_before_timer_changes(self):
+        target = self.fx[2] / 'etc/vanpi-time-machine-icloud.json'
+        original = target.read_bytes()
+        target.chmod(0o640)
+        result = self.apply(self.fx)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Refusing config metadata', result.stderr)
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+        self.assertFalse(self.marker.exists())
+        self.assertNotIn('systemctl:stop', self.events())
+
+    def test_read_only_bootstrap_check_refuses_unready_or_unguarded_cohort(self):
+        root, stage, live, *_ = self.fx
+        check = lambda: self.shell('local_backup_check_bootstrap "$1"', stage)
+        self.assertEqual(check().returncode, 0)
+        for name in ('maintenance', 'pending'):
+            marker = self.state_dir(self.fx) / name
+            marker.write_text('held\n')
+            result = check()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(marker.exists())
+            marker.unlink()
+        guard = stage / 'pi/scripts/backup/backup_conf.sh'
+        guard.write_text(guard.read_text().replace('backup_deploy_refuse_jobs', 'removed_guard'))
+        result = check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Unsupported unguarded cohort', result.stderr)
+        (self.state_dir(self.fx) / 'bootstrap-ready.json').unlink()
+        self.assertNotEqual(check().returncode, 0)
+        self.assertFalse((root / 'events').exists())
+        self.assertFalse((stage / 'transaction').exists())
+
     def test_failed_destination_fsync_keeps_recovery_intent(self):
         sync = self.fx[0] / 'sync'
         sync.write_text('#!/bin/bash\n'

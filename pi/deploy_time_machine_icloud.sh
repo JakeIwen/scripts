@@ -54,6 +54,7 @@ close=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name='
 /usr/bin/systemd-analyze verify pi/services/vanpi-*icloud*.service pi/services/vanpi-*icloud*.timer
 sudo -n /usr/bin/python3 pi/scripts/backup/backup_schedule.py --check
 if [[ "$4" == 1 ]]; then
+  local_backup_check_bootstrap "$stage"
   printf 'Target checks passed; no publication or activation. Stage: %s\n' "$stage"
   exit 0
 fi

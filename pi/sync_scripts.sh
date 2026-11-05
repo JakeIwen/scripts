@@ -46,6 +46,14 @@ check_dashboard_cut_over() {
   }
 }
 
+check_backup_bootstrap_allows_sync() {
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
+    /bin/bash -s -- --check-backup-bootstrap < "$dsc/pi/scripts/update_services.sh" || {
+    echo 'Backup bootstrap/broad-sync preflight failed; no upload was made.' >&2
+    return 1
+  }
+}
+
 sync_preflight() {
   (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
   # sync_compute runs this installer last; refuse before any upload if it is missing.
@@ -55,6 +63,7 @@ sync_preflight() {
     return 1
   fi
 
+  check_backup_bootstrap_allows_sync || return 1
   check_pi_bashrc_known || return 1
   check_dashboard_cut_over || return 1
 

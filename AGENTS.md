@@ -825,7 +825,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `backup_deploy_recovery.sh` restores preparing/publishing transactions but only
   finalizes a committed transaction (cleanup and recorded timers, never rollback).
   Contents and affected directories are flushed before commit/clear; pending stays
-  until timer restoration succeeds. The independent bootstrap dispatcher, the
+  until timer restoration succeeds. EXIT rereads and validates the privileged
+  transaction marker, so deferred TERM after the commit rename cannot choose
+  rollback from stale shell state; ambiguity leaves files and timers untouched.
+  The independent bootstrap dispatcher, the
   hourly window and subsequent installers retry recovery. The installer records
   its PID so drains TERM first; the emergency grace remains unchanged.
   `pi/backup_deploy_bootstrap.py` stages and explicitly applies/verifies/releases
@@ -835,9 +838,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   owns no-follow reads and durable files for that separately installed runtime
   (it intentionally has no shared/python import root). Staging supports Python
   3.9+; host execution requires Linux/Python 3.11+. All live/staged predecessors
-  must retain guards. Old installers, unguarded rollback and broad-sync backup
-  publication are unsupported. Bootstrap cannot revoke already-running old shells:
-  an interrupted initial bootstrap retains maintenance until explicit rerun/release.
+  must retain guards. Current broad sync refuses any bootstrap state before
+  uploads and again in its receiver; older publishers and unguarded rollback
+  remain unsupported. Bootstrap cannot revoke already-running old shells.
+  Read-only preflight precedes holds and repeats under the fence. `abandon`
+  archives only provably unpublished attempts after restoring/flushing crontabs;
+  published attempts retain maintenance until same-bundle rerun/release. Cron
+  holds/restores flush `/var/spool/cron/crontabs` before admission reopens.
+  Exact admission snippets constrain upgrades; see the documented maintenance
+  upgrade limit rather than removing readiness records. Time Machine `--check`
+  checks installed bootstrap readiness and staged guards without recovery.
   Commands and operator boundary: `pi/docs/backup/DEPLOY_BOOTSTRAP.md`.
   `VANPI_BACKUP_PREVIOUS_REVISION` names
   the previously deployed commit when installing a newly committed change.

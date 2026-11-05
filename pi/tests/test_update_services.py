@@ -51,6 +51,7 @@ class UpdateServicesTests(unittest.TestCase):
             os.environ,
             PATH=f"{bin_dir}:/usr/bin:/bin",
             FAKE_LOG=str(self.log),
+            VANPI_BACKUP_DEPLOY_STATE_DIR=str(self.root / 'backup-deploy-state'),
             UPDATE_SERVICES_LIVE_SERVICES=str(self.live["services"]),
             UPDATE_SERVICES_LIVE_SCRIPTS=str(self.live["scripts"]),
             UPDATE_SERVICES_LIVE_TMPFILES=str(self.live["tmpfiles"]),
@@ -96,6 +97,25 @@ class UpdateServicesTests(unittest.TestCase):
     def run_updater(self):
         return subprocess.run(["/bin/bash", str(UPDATE_SERVICES), str(self.stage)],
                               env=self.env, capture_output=True, text=True, timeout=60)
+
+    def test_bootstrap_state_refuses_receiver_before_any_live_write(self):
+        state = Path(self.env['VANPI_BACKUP_DEPLOY_STATE_DIR'])
+        for kind in ('directory', 'dangling-symlink'):
+            with self.subTest(kind=kind):
+                if kind == 'directory':
+                    state.mkdir()
+                else:
+                    state.symlink_to(self.root / 'absent')
+                result = self.run_updater()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Broad sync refuses', result.stderr)
+                self.assertFalse(self.log.exists())
+                self.assertEqual((self.live['scripts'] / 'tool.sh').read_text(), '# old tool.sh\n')
+                self.assertTrue(self.stage.exists())
+                if kind == 'directory':
+                    state.rmdir()
+                else:
+                    state.unlink()
 
     def test_successful_update_makes_only_staged_top_level_scripts_executable(self):
         result = self.run_updater()

@@ -17,15 +17,15 @@ def remote(args):
         raise ValueError('Invalid SSH target')
     ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', args.target]
     command = ['/usr/bin/sudo', '-n', '/usr/bin/python3', '-B', BOOTSTRAP_DIR + '/backup_bootstrap_host.py']
-    if args.action == 'apply':
+    if args.action in ('apply', 'abandon'):
         if not args.maintenance_confirmed:
-            raise ValueError('Apply requires --maintenance-confirmed; read the maintenance runbook first')
+            raise ValueError(args.action + ' requires --maintenance-confirmed; read the maintenance runbook first')
         stage = subprocess.check_output(ssh + ['/usr/bin/mktemp', '-d', '/tmp/vanpi-backup-bootstrap.XXXXXX'], text=True).strip()
         if not re.fullmatch(r'/tmp/vanpi-backup-bootstrap\.[A-Za-z0-9]{6}', stage):
             raise ValueError('Unexpected remote stage path')
         subprocess.run(['scp', '-rq', str(args.bundle) + '/.', args.target + ':' + stage + '/'], check=True)
         command[4] = stage + '/runner/backup_bootstrap_host.py'
-        command += ['--maintenance-confirmed', 'apply', stage]
+        command += ['--maintenance-confirmed', args.action, stage]
     elif args.action == 'release':
         if not args.maintenance_confirmed:
             raise ValueError('Release requires --maintenance-confirmed')
@@ -41,12 +41,12 @@ def main(argv=None):
     stage = commands.add_parser('stage')
     stage.add_argument('revision', help='reviewed ACTUAL deployed predecessor, not a hardcoded historical cohort')
     stage.add_argument('output', type=Path)
-    for action in ('apply', 'verify', 'release'):
+    for action in ('apply', 'abandon', 'verify', 'release'):
         command = commands.add_parser(action)
         command.add_argument('--target', default='pi@vanpi.lan')
-        if action in ('apply', 'release'):
+        if action in ('apply', 'abandon', 'release'):
             command.add_argument('--maintenance-confirmed', action='store_true')
-        if action == 'apply':
+        if action in ('apply', 'abandon'):
             command.add_argument('bundle', type=Path)
     args = parser.parse_args(argv)
     try:

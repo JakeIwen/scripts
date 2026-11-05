@@ -70,6 +70,45 @@ run_sync_workflow
                 if status:
                     self.assertIn("activation preflight failed", result.stderr)
 
+    def test_bootstrap_sender_executes_receiver_gate_before_uploads(self):
+        definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
+        with tempfile.TemporaryDirectory(prefix='sync-bootstrap-') as directory:
+            root = Path(directory)
+            installer = root / 'macbook/scripts/install_van_compute_worker.zsh'
+            installer.parent.mkdir(parents=True)
+            installer.write_text('#!/bin/sh\nexit 0\n')
+            installer.chmod(0o700)
+            state = root / 'deploy-state'
+            harness = definitions + f'''
+export VANPI_BACKUP_DEPLOY_STATE_DIR={shlex.quote(str(state))}
+dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
+VAN_COMPUTE_CHECKOUT={shlex.quote(str(root))}
+ssh() {{
+  if [[ "$*" == *--check-backup-bootstrap* ]]; then
+    /bin/bash -s -- --check-backup-bootstrap
+  elif [[ "$*" == *'git hash-object'* ]]; then
+    git -C "$dsc" hash-object pi/.bashrc
+  fi
+}}
+python3() {{ [[ "$*" != *--list-units* ]] || printf 'video-library.service\\n'; }}
+sync_non_python() {{ printf 'non-python-write\\n'; }}
+sync_python_packages() {{ printf 'package-write\\n'; }}
+sync_compute() {{ printf 'compute-write\\n'; }}
+source {shlex.quote(str(WORKFLOW))}
+run_sync_workflow
+'''
+            for present in (False, True):
+                if present:
+                    state.mkdir()
+                result = subprocess.run(['/bin/bash', '-c', harness], capture_output=True, text=True)
+                self.assertEqual(result.returncode, int(present), result.stderr)
+                if present:
+                    self.assertEqual(result.stdout, '')
+                    self.assertIn('no upload was made', result.stderr)
+                else:
+                    self.assertEqual(result.stdout.splitlines(),
+                                     ['non-python-write', 'package-write', 'compute-write'])
+
     def test_missing_compute_installer_stops_before_any_remote_probe(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         with tempfile.TemporaryDirectory(prefix="sync-missing-compute-") as directory:

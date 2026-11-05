@@ -101,6 +101,17 @@ if [[ "$command" == /usr/bin/install && "$last" == *.deploy.* ]]; then
 fi
 if [[ "$command" == /usr/bin/mv ]]; then
   source_path=${@: -2:1}
+  if [[ "$last" == "$VANPI_BACKUP_DEPLOY_STATE_DIR/pending" && ${TEST_TERM_COMMIT:-0} == 1 ]] &&
+     grep -qx 'phase=committed' "$source_path"; then
+    "$command" "$@"
+    case "${TEST_COMMIT_DECISION:-valid}" in
+      invalid) printf 'invalid\\n' > "$last" ;;
+      foreign) /usr/bin/sed -i 's/^id=.*/id=20261104T000000Z-999999/' "$last" ;;
+    esac
+    echo 'commit-rename' >> "$TEST_ROOT/events"
+    kill -TERM "$PPID"
+    exit 0
+  fi
   if [[ "$source_path" == *.deploy.* || "$source_path" == *.rollback.* ]]; then
     exec 7<"$VANPI_BACKUP_JOB_LOCK"
     if /usr/bin/flock -n 7; then echo 'mutation without fence' >&2; exit 97; fi

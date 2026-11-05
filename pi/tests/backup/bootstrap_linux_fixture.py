@@ -39,8 +39,16 @@ else:
     print(json.dumps({'type': 'o', 'data': ['/org/freedesktop/systemd1/unit/fixture']}))
 '''
 SYSTEMCTL = '''#!/bin/bash
-if [[ "$1" == show ]]; then printf 'no\\n'; exit 0; fi
+if [[ "$1" == show ]]; then
+    if [[ "$*" == *LoadState* ]]; then printf '%s\\n' "${TEST_LOAD_STATE:-loaded}"; else printf 'no\\n'; fi
+    exit 0
+fi
 printf '%s\\n' "$*" >> "$BOOTSTRAP_TEST_ROOT/systemctl-events"
+'''
+SYNC = '''#!/bin/bash
+printf '%s\\n' "$*" >> "$BOOTSTRAP_TEST_ROOT/cron-sync-events"
+[[ -z ${FAIL_CRON_SYNC:-} ]] || exit 1
+exec /usr/bin/sync "$@"
 '''
 
 # Call the real primitive, then kill the process. This exposes interruptions at
@@ -98,13 +106,14 @@ def bootstrap_commands(case, fixture, bundle):
     root, _stage, live, *_ = fixture
     root.joinpath('cron-root').write_text('scripts=/home/pi/scripts\n0 * * * * "$scripts/backup/backup_window.sh" --scheduled\n')
     root.joinpath('cron-pi').write_text('# unrelated jobs remain untouched\n')
-    for name, text in (('crontab', CRONTAB), ('bootstrap-systemctl', SYSTEMCTL), ('busctl', BUSCTL)):
+    for name, text in (('crontab', CRONTAB), ('bootstrap-systemctl', SYSTEMCTL), ('busctl', BUSCTL), ('cron-sync', SYNC)):
         path = root / name
         path.write_text(text)
         path.chmod(0o755)
     case.env.update(BOOTSTRAP_TEST_ROOT=str(root), VANPI_BOOTSTRAP_CRONTAB=str(root / 'crontab'),
                     VANPI_BOOTSTRAP_SYSTEMCTL=str(root / 'bootstrap-systemctl'),
                     VANPI_BOOTSTRAP_BUSCTL=str(root / 'busctl'),
+                    VANPI_BOOTSTRAP_CRON_STORAGE=str(root), VANPI_BOOTSTRAP_SYNC=str(root / 'cron-sync'),
                     VANPI_BOOTSTRAP_PI_USER=case.env['VANPI_BACKUP_JOB_LOCK_OWNER'],
                     VANPI_BOOTSTRAP_PI_GROUP=case.env['VANPI_BACKUP_JOB_LOCK_GROUP'])
     driver = root / 'fault-driver.py'

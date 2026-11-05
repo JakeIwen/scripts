@@ -49,6 +49,14 @@ local_backup_previous_hashes() { # <repo> <pi|tm>: reviewed provenance for the w
   done <<< "$plan"
 }
 
+local_backup_check_bootstrap() { # <stage>: read-only readiness, repeated under begin's fence
+  LOCAL_BACKUP_BOOTSTRAP_HASHES=$($LOCAL_BACKUP_SUDO /usr/bin/python3 -B \
+    "$BACKUP_DEPLOY_BOOTSTRAP_DIR/backup_bootstrap_host.py" verify --stage "$1") || {
+    echo 'A verified guarded bootstrap is required before any cohort transaction; see CONCURRENCY.md.' >&2
+    return 1
+  }
+}
+
 local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight before publication
   local stage=$1 profile=$2 previous=$3 fd timer state
   . "$local_backup_helper_dir/scripts/backup/backup_locks.sh" || return 1
@@ -86,11 +94,7 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
     echo 'A backup deployment transaction is still recorded; refusing to publish over it.' >&2
     return 1
   fi
-  LOCAL_BACKUP_BOOTSTRAP_HASHES=$($LOCAL_BACKUP_SUDO /usr/bin/python3 -B \
-    "$BACKUP_DEPLOY_BOOTSTRAP_DIR/backup_bootstrap_host.py" verify --stage "$stage") || {
-    echo 'A verified guarded bootstrap is required before any cohort transaction; see CONCURRENCY.md.' >&2
-    return 1
-  }
+  local_backup_check_bootstrap "$stage" || return 1
   local_backup_preflight "$stage" "$profile" "$previous" || return 1
   local_backup_registry_guard "$stage" || return 1
   for timer in "${LOCAL_BACKUP_TIMERS[@]}"; do
@@ -126,6 +130,11 @@ local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 
   trap '' INT TERM HUP
   local status=$1 cleanup_failed=0
   trap - EXIT
+  if ! local_backup_reconcile_exit_decision; then
+    echo 'Deployment decision is unreadable, inconsistent or belongs to another transaction; leaving files, timers and recovery intent untouched.' >&2
+    exec 9<&-
+    exit 70
+  fi
   if [[ "$LOCAL_BACKUP_STATE" != committed ]]; then
     (( status != 0 )) || status=1
     if local_backup_rollback; then

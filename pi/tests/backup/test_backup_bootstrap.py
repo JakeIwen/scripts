@@ -1,4 +1,5 @@
 """Bootstrap the actual reviewed predecessor; never inject a pre-updated trigger."""
+import json
 import os
 from pathlib import Path
 import signal
@@ -43,7 +44,7 @@ class BootstrapTests(DeploymentFixture):
         self.command = bootstrap_commands(self, self.fx, self.bundle)
 
     def run_host(self, action, **fault):
-        args = [action, str(self.bundle)] if action == 'apply' else [action]
+        args = [action, str(self.bundle)] if action in ('apply', 'abandon') else [action]
         return run_bootstrap(self, self.command, *args, **fault)
 
     def assert_held(self):
@@ -129,7 +130,86 @@ class BootstrapTests(DeploymentFixture):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Predecessor drift', result.stderr)
         self.assertEqual(changed.read_bytes(), provider)
+        self.assert_unstarted()
+
+    def assert_unstarted(self):
+        self.assertFalse(self.state_dir(self.fx).exists())
+        self.assertNotIn(plan.HOLD_PREFIX, (self.fx[0] / 'cron-root').read_text())
+        self.assertFalse((self.fx[0] / 'systemctl-events').exists())
+
+    def test_unknown_cron_and_unloadable_unit_refuse_before_holds(self):
+        cron = self.fx[0] / 'cron-root'
+        original = cron.read_text()
+        cron.write_text(original + '0 * * * * /home/pi/scripts/backup/unknown.sh\n')
+        result = self.run_host('apply')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Unrecognized backup cron', result.stderr)
+        self.assert_unstarted()
+        cron.write_text(original)
+        result = self.run_host('apply', TEST_LOAD_STATE='not-found')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('not loadable', result.stderr)
+        self.assert_unstarted()
+
+    def test_unpublished_attempt_can_be_abandoned_then_rebound(self):
+        result = self.run_host('apply', TEST_MISSING_CONDITION='1')
+        self.assertNotEqual(result.returncode, 0)
         self.assert_held()
+        self.assertFalse((self.state_dir(self.fx) / 'bootstrap-publishing').exists())
+        result = self.run_host('abandon', FAIL_CRON_SYNC='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.state_dir(self.fx) / 'maintenance').exists())
+        result = self.run_host('abandon')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.state_dir(self.fx).exists())
+        archives = list(self.state_dir(self.fx).parent.glob('*.abandoned.*'))
+        self.assertEqual(len(archives), 1)
+        self.assertTrue((archives[0] / 'bootstrap.json').is_file())
+        self.assertNotIn(plan.HOLD_PREFIX, (self.fx[0] / 'cron-root').read_text())
+        # Rebind to a separately reviewed, different plan after safe abandonment.
+        manifest = self.bundle / 'plan.json'
+        data = json.loads(manifest.read_text())
+        data['revision'] = 'reviewed-again'
+        manifest.write_text(json.dumps(data))
+        self.assertEqual(self.run_host('apply').returncode, 0)
+        self.assert_held()
+
+    def test_prepublication_kills_preserve_originals_and_allow_safe_abandon(self):
+        original = (self.fx[0] / 'cron-root').read_bytes()
+        for suffix in ('/bootstrap-inputs/backup_conf.sh', '/maintenance'):
+            with self.subTest(suffix=suffix):
+                result = self.run_host('apply', KILL_REPLACE_SUFFIX=suffix)
+                self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr)
+                self.assertFalse((self.state_dir(self.fx) / 'bootstrap-publishing').exists())
+                self.assertEqual((self.fx[0] / 'cron-root').read_bytes(), original)
+                result = self.run_host('abandon')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(self.state_dir(self.fx).exists())
+        self.assertEqual(self.run_host('apply').returncode, 0)
+        self.assert_held()
+
+    def test_started_publication_cannot_be_abandoned(self):
+        result = self.run_host('apply', KILL_REPLACE_SUFFIX='/home/pi/scripts/backup/backup_deploy_state.sh')
+        self.assertEqual(result.returncode, -signal.SIGKILL, result.stderr)
+        result = self.run_host('abandon')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Publication may have started', result.stderr)
+        self.assert_held()
+        self.assertEqual(self.run_host('apply').returncode, 0)
+
+    def test_cron_flush_failure_never_releases_maintenance(self):
+        result = self.run_host('apply', FAIL_CRON_SYNC='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_held()
+        self.assertFalse((self.state_dir(self.fx) / 'bootstrap-publishing').exists())
+        self.assertEqual(self.run_host('apply').returncode, 0)
+        result = self.run_host('release', FAIL_CRON_SYNC='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.state_dir(self.fx) / 'maintenance').exists())
+        self.assertEqual(self.run_host('release').returncode, 0)
+        self.assertFalse((self.state_dir(self.fx) / 'maintenance').exists())
+        syncs = (self.fx[0] / 'cron-sync-events').read_text().splitlines()
+        self.assertEqual(syncs, ['-f ' + str(self.fx[0])] * 4)
 
     def test_unbootstrapped_installer_refuses_before_stopping_timers(self):
         result = self.apply(self.fx)

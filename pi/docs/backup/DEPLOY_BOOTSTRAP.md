@@ -23,9 +23,12 @@ Coordinate with other deployment sessions: their provider changes must be in the
 reviewed predecessor and desired next cohort. No other publisher may run during
 bootstrap or a pending transaction.
 
-`apply --maintenance-confirmed` records durable maintenance first. It saves both
-root/pi crontabs before changing either, comments only recognized backup-start
-entries, and refuses unknown `/backup/` cron commands rather than guessing.
+`apply --maintenance-confirmed` first checks the bundle, predecessor hashes,
+crontabs, destination paths/ownership and loadable service metadata read-only.
+It repeats those checks under the existing non-blocking legacy fence, then saves
+and flushes both root/pi crontab originals **before** recording maintenance or
+changing either crontab. It comments only recognized backup-start entries and
+refuses unknown `/backup/` commands rather than guessing.
 Watchdog and disk/ignition jobs remain alone. Four cloud service drop-ins add
 `ConditionPathExists=!/var/lib/vanpi-backup-deploy/maintenance`; timers need not be
 stopped or masked, and a reboot does not remove the condition. Existing active
@@ -35,9 +38,9 @@ non-triggering negated maintenance condition on each cloud service. Merely findi
 its own drop-in file or a successful reload is insufficient; missing units or
 an overriding condition reset refuse before guard edits.
 
-The tool then takes the existing legacy lock non-blocking, installs its
-independent recovery closure and cron entry, and applies minimal guard edits to
-an explicitly selected predecessor. All live hashes must match that reviewed
+Still holding the same fence, the tool records durable `bootstrap-publishing`
+intent before installing its independent recovery closure/cron or any guard.
+It applies minimal guard edits to an explicitly selected predecessor. All live hashes must match that reviewed
 predecessor or this bootstrap's exact already-applied replacement. Unrelated
 provider additions are retained; changed patch anchors or live hashes refuse.
 It never overwrites the host with a historical `fdf473d` cohort.
@@ -88,7 +91,27 @@ Do not delete `maintenance`, manually uncomment held jobs, remove the condition
 drop-ins or use a different bundle to conceal partial work. Drift produces an
 explicit refusal; review the conflicting file/crontab rather than replacing it.
 If release is interrupted while restoring crontabs, maintenance still makes the
-new admission paths refuse; rerun `release --maintenance-confirmed`.
+new admission paths refuse; rerun `release --maintenance-confirmed`. Both hold
+installation and release flush crontab's actual Debian persistence filesystem
+with `sync -f /var/spool/cron/crontabs`. A failed flush retains maintenance;
+release never removes it merely because crontab readback matched.
+
+A failed attempt that provably never published may instead be abandoned with
+its **original** bundle, while the operator maintenance boundary remains held:
+
+```sh
+python3 -m pi.backup_deploy_bootstrap abandon --maintenance-confirmed "$BUNDLE"
+```
+
+This refuses any pending/ready/publishing intent, installed recovery closure,
+or changed guard predecessor. It restores the recorded crontabs, flushes their
+storage, and atomically archives the state directory beside itself as
+`vanpi-backup-deploy.abandoned.<id>` (including private evidence). It never
+recursively deletes it. The fixed condition drop-ins remain inert because the
+maintenance pathname is gone. A corrected, separately reviewed bundle may then
+be applied. Once publication may have started, abandonment/rebinding is forbidden:
+retain holds and resume the same bundle. An attempt without a durable receipt
+may be archived only if it also has no maintenance or publication evidence.
 
 The permanent recovery entry is:
 
@@ -114,7 +137,13 @@ VANPI_BACKUP_PREVIOUS_REVISION="$PREVIOUS" bash pi/deploy_icloud_backup.sh
 
 The helper checks bootstrap readiness, independent trigger/closure integrity,
 and guarded live/staged admission before starting a transaction or stopping
-its timers. Every saved predecessor therefore retains the admission guard.
+its timers. Time Machine `--check` uses this same read-only readiness check,
+including pending/maintenance refusal and staged guards, but never recovers or
+publishes; normal deployment repeats it under its fence after recovery. The
+verifier is the installed independent bootstrap runtime, not a stage dependency.
+Every saved predecessor therefore retains the admission guard.
+Existing preserved/defaulted configuration must already have the plan's exact
+owner and mode; a mismatch refuses before stopping timers, with no automatic chmod.
 Scheduled jobs, direct clone and offsite snapshot startup recheck pending under
 their legacy hold; Python cloud admission also checks after verifying its
 inherited descriptor. A clone child verifies and preserves either inherited
@@ -135,6 +164,10 @@ from timer restoration; a failed activation is reported, not silently replayed.
 Files and affected destination directories are flushed before the commit
 transition or clearing pending after restoration. Marker replacement/removal
 also flushes its parent directory. A flush failure retains recovery intent.
+EXIT cleanup rereads the owned marker under privilege and validates its transaction
+identity before choosing rollback or finalization. Thus a deferred TERM immediately
+after the committed rename cannot override the durable decision with stale shell
+state. An unreadable, malformed or foreign decision leaves files and timers alone.
 
 ## Rollback and compatibility limits
 
@@ -153,11 +186,22 @@ unbootstrapped predecessor. Preserve
 condition drop-ins. The bootstrap guard rejects old payloads through supported
 installers, but an old installer cannot be retroactively made to obey it.
 
-Older installers, broad `pi/sync_scripts.sh` publication and arbitrary direct
-file restoration are unsupported once this bootstrap is installed. They could
-remove admission checks without leaving a transaction. Do not use them to
-roll back or publish backup-cohort files. Updating the bootstrap itself requires
-another explicitly reviewed maintenance operation, not ordinary cohort rollback.
+Current broad `pi/sync_scripts.sh` refuses any deployment-state pathname before
+uploads; its receiver repeats that refusal before live writes. Use targeted
+installers once bootstrap exists, including for non-backup broad-sync requests.
+Older/in-flight publishers and arbitrary direct restoration cannot be retroactively
+fenced: excluding them remains part of the initial operator maintenance boundary.
+Never use them to remove guards or roll back backup-cohort files.
+
+**Constrained upgrades:** readiness deliberately pins exact admission snippets,
+including the Python lock CLI tail, clone helper and offsite admission context.
+Even a harmless rewrite of these snippets is unsupported by the installed
+bootstrap and fails closed. Ordinary cohort upgrades must retain them. Changing
+them or the stable bootstrap runtime requires a separately designed, reviewed
+maintenance upgrade that preserves existing records and holds; `apply` will not
+rebind an already published bootstrap. No generalized migration mechanism is
+included in this release. Do not weaken the checks or remove records to force
+an upgrade.
 
 ## Regression coverage
 

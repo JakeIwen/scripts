@@ -1,6 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
+check_backup_bootstrap_allows_broad_sync() {
+  local state=${VANPI_BACKUP_DEPLOY_STATE_DIR:-/var/lib/vanpi-backup-deploy}
+  if [[ -e "$state" || -L "$state" ]]; then
+    echo 'Broad sync refuses backup deployment state (including unfinished bootstrap); use the guarded targeted installers. No live files were changed.' >&2
+    return 1
+  fi
+}
+
+# The Mac streams this same read-only boundary before any upload; repeat it in
+# the receiver before unrelated writes too. Old in-flight publishers still
+# belong to the explicit initial-bootstrap operator maintenance boundary.
+check_backup_bootstrap_allows_broad_sync || exit 1
+if [[ "$#" == 1 && "$1" == --check-backup-bootstrap ]]; then
+  exit 0
+fi
+
 stage="${1:-/tmp/systemd-tmp}"
 if [[ ! "$stage" =~ ^/tmp/systemd-tmp(\.[0-9]+)?$ ]]; then
   echo "refusing unsafe service update staging path: $stage" >&2
