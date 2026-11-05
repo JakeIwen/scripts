@@ -27,4 +27,4 @@ def field(value, key, kind, nullable=False, status=502):
 
 def confirm(body):
     if body.get('confirmed') is not True:
-        raise ApiError(400, 'Explicit confirmation is required')
+        raise ApiError(400, 'confirmation required')

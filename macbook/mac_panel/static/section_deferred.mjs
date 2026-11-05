@@ -85,7 +85,7 @@ function jobActions(job) {
     notice(SECTION, `Running ${job.name} from the panel…`, 'working');
     watchTask(result.id);
   };
-  cell.append(button('Run now', () => apply(job, 'run-now', {}, {after: started}),
+  cell.append(button('Run now', () => apply(job, 'run-now', {confirmed: true}, {after: started}),
     {confirm: 'Confirm run now', key: `run-${job.id}`}));
   if (job.state === 'failed') cell.append(button('Retry', () => apply(job, 'retry'), {key: `retry-${job.id}`}));
   cell.append(button('Reschedule…', () => rescheduleEditor(job, cell), {key: `reschedule-${job.id}`}));

@@ -96,7 +96,7 @@ function toolForm(tool) {
   reload.hidden = true;
   const defaults = Object.fromEntries(declaration.settings.map(s => [s.name, s.default]));
   const reset = button('Reset to defaults', () => action(SECTION, '/api/settings',
-    {tool: declaration.tool, values: defaults, revision: state.revision}),
+    {tool: declaration.tool, action: 'reset', values: defaults, revision: state.revision, confirmed: true}),
   {confirm: 'Confirm reset to defaults', key: `${declaration.tool}-reset`});
   buttons.append(save, reset, reload, node('span', state.path, 'muted small'));
   form.append(buttons);

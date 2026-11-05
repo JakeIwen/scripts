@@ -2,6 +2,7 @@
 from amphetamine_adapter import AmphetamineAdapter
 from automations_adapter import AutomationsAdapter
 from cli_runner import CliRunner
+from background_tasks import BackgroundTasks
 from crontab_adapter import CrontabAdapter
 from deferred_adapter import DeferredAdapter
 from guard_adapter import GuardAdapter
@@ -16,8 +17,9 @@ from settings_adapter import SettingsAdapter
 class PanelRoutes:
     def __init__(self, runner=None, settings=None):
         runner = runner or CliRunner()
-        self.automations = AutomationsAdapter(runner)
-        self.deferred = DeferredAdapter(runner)
+        self.tasks = BackgroundTasks()
+        self.automations = AutomationsAdapter(runner, tasks=self.tasks)
+        self.deferred = DeferredAdapter(runner, tasks=self.tasks)
         self.guard = GuardAdapter(runner)
         self.services = ServicesAdapter(runner)
         self.adapters = {
@@ -27,7 +29,7 @@ class PanelRoutes:
             Section.AUTOMATIONS: self.automations,
             Section.DEFERRED: self.deferred,
             Section.SERVICES: self.services,
-            Section.CRONTAB: CrontabAdapter(runner),
+            Section.CRONTAB: CrontabAdapter(runner, tasks=self.tasks),
             Section.RESTORE: RestoreAdapter(runner),
             Section.GUARD: self.guard,
             Section.NTFY: NtfyAdapter(),
@@ -40,6 +42,7 @@ class PanelRoutes:
             '/api/automations': self.automations.action,
             '/api/deferred': self.deferred.mutate,
             '/api/crontab': self.adapters[Section.CRONTAB].mutate,
+            '/api/services': self.services.mutate,
             '/api/services/restart': self.adapters[Section.SERVICES].restart,
             '/api/llm-restore': self.adapters[Section.RESTORE].toggle,
             '/api/guard': self.guard.action,
@@ -47,13 +50,15 @@ class PanelRoutes:
         }
 
     def notify_test(self, body):
+        from wire_validation import confirm
+        confirm(body)
         if set(body) != {'confirmed'}:
             raise ApiError(400, 'Only explicit confirmation is accepted')
         return self.guard.action({'action': 'notify-test', **body})
 
     def dispatch(self, method, path, body=None):
         if method == 'GET' and path.startswith('/api/tasks/'):
-            return Reply(self.deferred.tasks.get(path.removeprefix('/api/tasks/')))
+            return Reply(self.tasks.get(path.removeprefix('/api/tasks/')))
         if method == 'GET' and path.startswith('/api/services/logs/'):
             return Reply(self.services.logs(path.removeprefix('/api/services/logs/')))
         routes = self.reads if method == 'GET' else self.writes
@@ -63,4 +68,4 @@ class PanelRoutes:
         return value if isinstance(value, Reply) else Reply(value)
 
     def close(self):
-        self.deferred.tasks.close()
+        self.tasks.close()
