@@ -1,5 +1,5 @@
 // Logs: every log the Mac's jobs write, its size and growth, and the rotator's policy. Sizes and paths only.
-import {sparkline} from './charts.mjs';
+import {lineChart} from './line_chart.mjs';
 import {historyPanel} from './history_panel.mjs';
 import {anchor, button, card, details, emptyState, fieldError, info, node, table, tag} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
@@ -7,7 +7,7 @@ import {LOGS_COPY as COPY} from './section_copy.mjs';
 import {ignoredBlock, logAnchor, logRow, rotateAllDue, SECTION, stageRotate} from './section_logs_table.mjs';
 import {goTo} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
-import {basename, bySize, formatBytes, validateAddPath} from './logs_format.mjs';
+import {basename, bySize, formatBytes, formatMegabytes, megabytePoints, validateAddPath} from './logs_format.mjs';
 
 const HEADERS = ['Log', 'Source', 'Size', 'Archives', 'Growth', 'Policy', 'State', ''];
 const HISTORY_MAX_GAP = 7200;
@@ -37,9 +37,12 @@ function helpRow() {
   return row;
 }
 
+// The recorder stores one series, live + archived bytes, so there is one line rather than a Live/Archived pair.
 function drawHistory(series, window) {
-  const points = (series.total ?? []).filter(point => point.value !== null);
-  return points.length ? [sparkline({points, ...window, min: 0, format: formatBytes, maxGap: HISTORY_MAX_GAP})] : [];
+  const points = megabytePoints(series.total ?? []);
+  if (!points.length) return [];
+  return [lineChart({series: [{key: 'total', label: COPY.historySeries, color: 'accent', points}], ...window,
+    yMin: 0, yFormat: formatMegabytes, maxGap: HISTORY_MAX_GAP})];
 }
 
 function historyCard() {

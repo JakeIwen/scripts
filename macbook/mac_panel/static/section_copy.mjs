@@ -160,8 +160,9 @@ export const USAGE_COPY = {
 };
 
 export const LOGS_COPY = {
-  historyTitle: 'Total live size',
-  historyInfo: 'Bytes in live log files, sampled every 15 minutes while the panel runs. A steady climb with no drops means rotation is not keeping up.',
+  historyTitle: 'Log footprint',
+  historySeries: 'Live + archived',
+  historyInfo: 'Megabytes in live log files plus their archives (one combined line: the history records only the total), sampled every 15 minutes while the panel runs. A steady climb with no drops means rotation is not keeping up.',
   noHistory: 'No log history recorded for this range yet',
   logsTitle: 'Logs',
   whatCounts: 'A log is a file a LaunchAgent or cron job redirects its output to, a .log, .out or .err file found under the scanned state folders, or a path you add. Symlinks, files outside your home folder and files you do not own are never rotated.',

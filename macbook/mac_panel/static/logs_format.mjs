@@ -20,6 +20,14 @@ export function formatBytes(bytes) {
   return `${bytes} B`;
 }
 
+/** History samples in bytes -> megabytes (the chart's unit), dropping gaps; ticks then land on 0/25/50/75/100 MB. */
+export function megabytePoints(points) {
+  return points.filter(point => point.value !== null).map(point => ({ts: point.ts, value: point.value / BYTES_PER_MB}));
+}
+
+/** A chart tick or end label given in megabytes: 25 -> "25 MB", 1024 -> "1 GB". */
+export const formatMegabytes = mb => (mb === 0 ? '0 MB' : formatBytes(Math.round(mb * BYTES_PER_MB)));
+
 /** Growth per day from the rotator (MB/day); null means it has no earlier size to compare with. */
 export function formatGrowth(mbPerDay) {
   if (mbPerDay === null || mbPerDay === undefined) return '—';
