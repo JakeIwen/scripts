@@ -153,7 +153,13 @@ class ServicesAdapter:
         declared, error = plist_logs(path, label)
         if error:
             raise ApiError(502, redact(error))
-        return {'label': label, 'logs': [log_tail(value, stream) for stream, value in declared]}
+        if label == 'com.jacobr.metered':
+            # Free-text Wi-Fi names cannot be identified reliably by structured-field redaction.
+            logs = [dict(log_stat(value, stream), text='Metered log tail withheld to protect network identifiers')
+                    for stream, value in declared]
+        else:
+            logs = [log_tail(value, stream) for stream, value in declared]
+        return {'label': label, 'logs': logs}
 
     def daemon_permission(self, label):
         with self.sudo_lock:

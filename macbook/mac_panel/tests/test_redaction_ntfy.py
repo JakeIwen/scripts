@@ -18,6 +18,30 @@ class RedactionTests(unittest.TestCase):
             self.assertNotIn(secret, result)
         self.assertNotIn('topsecret', json.dumps(redact_data({'nested': ['token=topsecret']})))
 
+    def test_network_identifiers_in_every_field_shape_and_free_mac_addresses(self):
+        lines = [
+            'ssid=PrivatePlace', 'ssid: PrivatePlace', '"ssid": "PrivatePlace"',
+            "ssid='Private Place'", 'SSID: Private Place with spaces',
+            'bssid=12:34:56:78:9a:bc', 'bssid: 12:34:56:78:9a:bc',
+            '"bssid": "12:34:56:78:9a:bc"',
+            'network=PrivatePlace', 'network: Private Place', '"network": "PrivatePlace"',
+            'current_ssid="Private Place"', 'selected_network: PrivatePlace',
+            'associated with 12:34:56:78:9A:BC',
+            'ssid: Private, Place with commas',
+            '"ssid": ' + json.dumps('Private "Place"'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'log'
+            for line in lines:
+                with self.subTest(line=line):
+                    path.write_text('ordinary log message\n' + line)
+                    result = log_tail(str(path))['text']
+                    self.assertIn('ordinary log message', result)
+                    self.assertNotIn('Private', result)
+                    self.assertNotIn('Place', result)
+                    self.assertNotIn('12:34:56:78:9', result)
+                    self.assertIn('hidden', result)
+
     def test_bounded_log_tail_and_forbidden_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
