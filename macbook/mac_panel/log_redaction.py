@@ -11,7 +11,7 @@ AUTH = re.compile(r'(?i)\b(authorization\s*[:=]\s*)([^\r\n]+)')
 BEARER = re.compile(r'(?i)\bbearer\s+[a-z0-9._~+/=-]+')
 PAIR = re.compile(r'''(?ix)(["']?\b(?:[a-z0-9_]*(?:token|password|passwd|secret|api_key|ntfy_warning_url))["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)''')
 
-MAC_ADDRESS = re.compile(r'(?i)(?<![0-9a-f])(?:[0-9a-f]{2}:){5}[0-9a-f]{2}(?![0-9a-f])')
+MAC_ADDRESS = re.compile(r'(?i)(?<![0-9a-f])(?:[0-9a-f]{1,2}[:-]){5}[0-9a-f]{1,2}(?![0-9a-f])')
 NETWORK_FIELD = re.compile(r'''(?ix)(["']?\b(?:[a-z0-9_]*(?:ssid|bssid|network))\b["']?\s*[:=]\s*)(?:"(?:\\[^\r\n]|[^"\\\r\n])*"|'(?:\\[^\r\n]|[^'\\\r\n])*'|[^\r\n]+)''')
 
 

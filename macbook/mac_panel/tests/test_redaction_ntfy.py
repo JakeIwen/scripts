@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from log_redaction import log_tail, redact, redact_data
+from log_redaction import log_tail, redact, redact_data, redact_log
 from ntfy_adapter import NtfyAdapter
 
 
@@ -41,6 +41,10 @@ class RedactionTests(unittest.TestCase):
                     self.assertNotIn('Place', result)
                     self.assertNotIn('12:34:56:78:9', result)
                     self.assertIn('hidden', result)
+
+    def test_unpadded_and_dash_macs_without_masking_times_or_versions(self):
+        text = '0:1a:2b:3:4:5 00-1a-2b-3c-4d-5e 12:34:56 1.2.3'
+        self.assertEqual(redact_log(text), '[MAC hidden] [MAC hidden] 12:34:56 1.2.3')
 
     def test_bounded_log_tail_and_forbidden_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
