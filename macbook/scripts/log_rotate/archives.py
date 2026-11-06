@@ -49,9 +49,9 @@ def scan_directory(directory: str) -> Dict[str, List[Archive]]:
     return found
 
 
-def identity(path: str) -> dict:
+def identity(path: str, info: os.stat_result = None) -> dict:
     """lstat never follows an archive symlink, even if its target was once ours."""
-    info = os.lstat(path)
+    info = os.lstat(path) if info is None else info
     if not stat.S_ISREG(info.st_mode):
         raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
     return {"path": path, "st_dev": info.st_dev, "st_ino": info.st_ino, "size": info.st_size,
@@ -78,14 +78,15 @@ def rotation_plan(directory: str, base: str, keep: int, compress: bool, ledger: 
         path = os.path.join(directory, name)
         require_owned(path, ledger)
         existing.append(Archive(int(match[1]), match[2] is not None, path, os.lstat(path).st_size))
-    destinations = [archive_path(directory, base, item.index + 1, item.gzipped)
-                    for item in existing if item.index + 1 <= keep]
+    existing.sort(key=lambda item: item.index)
+    destinations = [archive_path(directory, base, position + 1, item.gzipped)
+                    for position, item in enumerate(existing, 1) if position + 1 <= keep]
     if keep:
         destinations.append(archive_path(directory, base, 1, compress))
     for path in destinations:
         if os.path.lexists(path):
             require_owned(path, ledger)
-    return sorted(existing, key=lambda item: -item.index)
+    return existing
 
 
 def publish(source: str, destination: str) -> None:

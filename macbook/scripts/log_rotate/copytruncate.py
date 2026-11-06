@@ -80,12 +80,15 @@ def _write_archive(source: int, descriptor: int, compress: bool) -> int:
 
 def _shift_archives(existing: list, directory: str, base: str, keep: int,
                     ledger: dict, home: str) -> None:
-    for item in existing:
+    # Position closes gaps left by an interrupted shift without aging survivors twice.
+    for position, item in reversed(list(enumerate(existing, 1))):
         archives.require_owned(item.path, ledger)
-        if item.index + 1 > keep:
+        if position + 1 > keep:
             os.unlink(item.path)
         else:
-            destination = archive_path(directory, base, item.index + 1, item.gzipped)
+            destination = archive_path(directory, base, position + 1, item.gzipped)
+            if destination == item.path:
+                continue
             _publish_recorded(item.path, destination, ledger, home)
         ledger.pop(item.path, None)
         state.write_json(home, state.ARCHIVES_FILE, ledger)
@@ -109,12 +112,22 @@ def _check_source(path: str, descriptor: int, original: os.stat_result, copied: 
         raise _fail("grows faster than it can be copied")
 
 
-def _catch_up(source: int, destination: int, copied: int, compress: bool) -> None:
-    # After shifting, never reject late growth: add one more member before truncating.
+def _catch_up(source: int, destination: int, copied: int, compress: bool) -> int:
+    # A failed member must not corrupt an already published, recorded archive.
     size = os.fstat(source).st_size
-    if size > copied:
+    if size <= copied:
+        return copied
+    recorded_size = os.fstat(destination).st_size
+    try:
         with os.fdopen(destination, "ab", closefd=False) as output:
-            _copy_pass(source, output, copied, size, compress)
+            offset = _copy_pass(source, output, copied, size, compress)
+            if offset != size:
+                raise _fail("grows faster than it can be copied")
+        return offset
+    except Exception:
+        os.ftruncate(destination, recorded_size)
+        os.fsync(destination)
+        raise
 
 
 def _sync_directory(directory: str) -> None:
@@ -148,6 +161,7 @@ def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, O
     temporary = None
     temporary_fd = None
     archive = None
+    final_append = False
     try:
         ledger = archives.prune(home)
         existing = archives.rotation_plan(directory, base, keep, compress, ledger)
@@ -166,14 +180,20 @@ def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, O
             except OSError as error:
                 raise _fail("archive failed: {}".format(error.strerror or error)) from None
             _sync_directory(directory)
-            _catch_up(descriptor, temporary_fd, copied, compress)
-            ledger[archive] = archives.identity(archive)
+            copied = _catch_up(descriptor, temporary_fd, copied, compress)
+            ledger[archive] = archives.identity(archive, os.fstat(temporary_fd))
             state.write_json(home, state.ARCHIVES_FILE, ledger)
+            # One bounded pass catches writes during the record update; truncate next.
+            final_append = _catch_up(descriptor, temporary_fd, copied, compress) > copied
         else:
             _check_source(path, descriptor, info, None)
             _shift_archives(existing, directory, base, 0, ledger, home)
         os.ftruncate(descriptor, 0)
         os.fsync(descriptor)
+        if final_append:
+            # Persist after truncation so another record write cannot reopen the loss window.
+            ledger[archive] = archives.identity(archive, os.fstat(temporary_fd))
+            state.write_json(home, state.ARCHIVES_FILE, ledger)
         return info.st_size, archive
     except OSError as error:
         raise _fail("rotation failed: {}".format(error.strerror or error)) from None

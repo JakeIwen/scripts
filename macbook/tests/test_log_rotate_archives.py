@@ -1,6 +1,7 @@
 """Archive recovery and late writers against real files in an isolated HOME."""
 import gzip
 import os
+import subprocess
 from pathlib import Path
 import types
 from unittest import mock
@@ -128,9 +129,9 @@ class ArchiveRecoveryTests(LogRotateCase):
         self.assertFalse(Path(path + '.1.gz').exists())
         self.assertEqual(self.read(path + '.2.gz'), original)
         self.rotate(path)
-        self.assertEqual(self.read(path + '.3.gz'), original)
+        self.assertEqual(self.read(path + '.2.gz'), original)
         self.assertEqual(set(state.read_json(self.home, state.ARCHIVES_FILE)),
-                         {path + '.1.gz', path + '.3.gz'})
+                         {path + '.1.gz', path + '.2.gz'})
 
     def test_failed_postpublication_size_record_can_be_adopted(self):
         path = self.make_log()
@@ -223,6 +224,98 @@ class ArchiveRecoveryTests(LogRotateCase):
         os.unlink(archive)
         self.run_cli('rotate', '--json')
         self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE), {})
+
+
+    def test_failed_late_member_is_rolled_back_to_the_recorded_archive_size(self):
+        path = self.make_log()
+        original, late = self.read(path), b'late append\n' * 1000
+        real_sync, real_copy = copytruncate._sync_directory, copytruncate._copy_pass
+        def sync(directory):
+            real_sync(directory)
+            with open(path, 'ab') as writer:
+                writer.write(late)
+        def fail_late(source, output, start, end, compress):
+            if start:
+                with gzip.GzipFile(fileobj=output, mode='wb', mtime=0) as member:
+                    member.write(os.pread(source, 100, start))
+                    member.flush()
+                    output.flush()
+                    raise OSError(28, 'fixture partial-member failure')
+            return real_copy(source, output, start, end, compress)
+        with mock.patch.object(copytruncate, '_sync_directory', side_effect=sync), \
+                mock.patch.object(copytruncate, '_copy_pass', side_effect=fail_late):
+            code, value, _ = self.run_cli('rotate', '--only', path, '--json')
+        self.assertEqual(code, 1)
+        self.assertIn('fixture partial-member failure', value['errors'][0]['error'])
+        self.assertEqual(self.read(path), original + late)
+        archive = path + '.1.gz'
+        archives.require_owned(archive, state.read_json(self.home, state.ARCHIVES_FILE))
+        result = subprocess.run(['/usr/bin/gunzip', '-t', archive], capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with gzip.open(archive, 'rb') as source:
+            self.assertEqual(source.read(), original)
+        self.rotate(path)
+
+    def test_record_write_appends_are_copied_once_more_before_immediate_truncation(self):
+        for compress in (True, False):
+            with self.subTest(compress=compress):
+                path = self.make_log(compress)
+                original, writes = self.read(path), []
+                real_write = state.write_json
+                def append_during_record(home, name, value):
+                    real_write(home, name, value)
+                    if name == state.ARCHIVES_FILE:
+                        data = b'during record %d\n' % (len(writes) + 1)
+                        writes.append(data)
+                        with open(path, 'ab') as output:
+                            output.write(data)
+                with mock.patch.object(state, 'write_json', side_effect=append_during_record):
+                    self.rotate(path)
+                self.assertEqual(len(writes), 3)  # Publication, final record, post-truncate size.
+                archive = path + ('.1.gz' if compress else '.1')
+                with (gzip.open(archive, 'rb') if compress else open(archive, 'rb')) as source:
+                    self.assertEqual(source.read(), original + b''.join(writes[:2]))
+                self.assertEqual(self.read(path), writes[2])
+                archives.require_owned(archive, state.read_json(self.home, state.ARCHIVES_FILE))
+                os.unlink(archive)
+                archives.prune(self.home)
+
+    def test_final_record_uses_the_open_archive_even_if_its_path_is_replaced(self):
+        path = self.make_log()
+        real_sync = copytruncate._sync_directory
+        saved = path + '.saved'
+        def replace_archive(directory):
+            real_sync(directory)
+            os.rename(path + '.1.gz', saved)
+            Path(path + '.1.gz').write_bytes(b'foreign replacement')
+        with mock.patch.object(copytruncate, '_sync_directory', side_effect=replace_archive):
+            self.rotate(path)
+        record = state.read_json(self.home, state.ARCHIVES_FILE)[path + '.1.gz']
+        self.assertEqual(record, {**archives.identity(saved), 'path': path + '.1.gz'})
+        self.assertEqual(self.read(path + '.1.gz'), b'foreign replacement')
+        self.assertEqual(self.entry(path)['reason'], 'unrecorded_archives')
+
+    def test_interrupted_shift_with_keep_three_retains_the_two_newest_survivors(self):
+        path = self.make_log()
+        generations = [self.read(path)]
+        self.rotate(path)
+        for number in range(2, 4):
+            generations.append(payload(str(number)))
+            Path(path).write_bytes(generations[-1])
+            self.rotate(path)
+        Path(path).write_bytes(payload('four'))
+        real_publish = archives.publish
+        def interrupted(source, destination):
+            real_publish(source, destination)
+            raise OSError(28, 'fixture interrupted shift')
+        with mock.patch.object(archives, 'publish', side_effect=interrupted):
+            self.assertEqual(self.run_cli('rotate', '--only', path, '--json')[0], 1)
+        self.assertFalse(Path(path + '.2.gz').exists())
+        self.rotate(path)
+        for index, expected in ((1, payload('four')), (2, generations[2]), (3, generations[1])):
+            with gzip.open(path + '.%d.gz' % index, 'rb') as source:
+                self.assertEqual(source.read(), expected)
+            archives.require_owned(path + '.%d.gz' % index, state.read_json(self.home, state.ARCHIVES_FILE))
 
 
 class InventoryIsolationTests(LogRotateCase):
