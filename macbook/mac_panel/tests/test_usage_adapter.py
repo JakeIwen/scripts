@@ -39,6 +39,44 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(result, facts())
         self.assertEqual(runner.calls, [(COMMAND, 20)])
 
+    def test_identity_keys_are_stripped_recursively(self):
+        value = copy.deepcopy(LIVE)
+        private = dict(email='private', account_id='private', org='private')
+        for obj in (value, value['route'], value['positions']['claude']):
+            obj.update(private)
+        result = UsageAdapter(FakeRunner([json_command(value)])).read()
+
+        def check(obj):
+            if isinstance(obj, dict):
+                self.assertTrue(private.keys().isdisjoint(obj))
+                for child in obj.values():
+                    check(child)
+            elif isinstance(obj, list):
+                for child in obj:
+                    check(child)
+
+        check(result)
+
+    def test_invalid_availability_returns_502(self):
+        for bad in ([], {'state': []}, {'state': {}}):
+            value = copy.deepcopy(LIVE)
+            value['availability']['claude'] = bad
+            routes = PanelRoutes(runner=FakeRunner([json_command(value)]))
+            self.addCleanup(routes.close)
+            with self.subTest(bad=bad), running_server(routes) as server:
+                code, _, _ = request(server, '/api/usage', headers=auth(server))
+                self.assertEqual(code, 502)
+
+    def test_nonfinite_availability_detail_returns_502(self):
+        value = copy.deepcopy(LIVE)
+        value['codex_session'] = None
+        value['availability']['gpt'] = dict(state='ok', window_left=float('inf'))
+        routes = PanelRoutes(runner=FakeRunner([json_command(value)]))
+        self.addCleanup(routes.close)
+        with running_server(routes) as server:
+            code, _, _ = request(server, '/api/usage', headers=auth(server))
+        self.assertEqual(code, 502)
+
     def test_bad_wire_values_fail_closed(self):
         for key, bad in [('age_minutes', True), ('age_minutes', float('nan')),
                          ('age_minutes', -1), ('fetched_at', 'not a timestamp'),
