@@ -1,11 +1,13 @@
 """Log inventory and rotation relayed to macbook/scripts/log_rotate.py; sizes and paths only, never contents."""
 import json
 from pathlib import Path
+import threading
+import time
 
-from cli_runner import checked, json_result
+from cli_runner import CommandResult, checked, json_result
 from crontab_adapter import cli_error
 from log_redaction import redact
-from panel_contracts import ApiError, Level, LogsPayload, Reply
+from panel_contracts import ApiError, Level, LogsPayload, Reply, Section
 from panel_paths import LOG_ROTATE, LOG_ROTATE_ENV, LOG_ROTATE_LABEL
 from wire_validation import confirm, field, object_fields
 
@@ -14,6 +16,8 @@ PATH_ACTIONS = ('policy', 'add', 'ignore', 'unignore')
 # Exit codes of the rotator CLI beyond 0 (ok) and 1 (error).
 EXIT_CONFLICT, EXIT_BUSY = 3, 75
 READ_TIMEOUT, ROTATE_TIMEOUT = 60, 600
+REFRESH_TIMEOUT = 30
+BYTES_PER_MB = 1024 * 1024
 MAX_PATH = 4096
 MAX_REVISION = 128
 STATES = frozenset(('ok', 'due', 'disabled', 'missing', 'refused'))
@@ -93,11 +97,13 @@ def agent_problems(service):
 
 
 def log_samples(payload):
-    """Total live bytes as the value; the text is the worst problem, else the file count."""
+    """Live plus archived bytes, with both sizes after any worst-problem text."""
     problems = payload['problems']
     worst = next((item for item in problems if item['level'] == Level.ERROR.value), problems[0] if problems else None)
     level = Level.ERROR if worst and worst['level'] == Level.ERROR.value else Level.WARN if worst else Level.OK
-    return [('total', level, payload['totals']['bytes'], worst['text'] if worst else f"{payload['totals']['files']} logs")]
+    live, archived = payload['totals']['bytes'], payload['totals']['archived_bytes']
+    sizes = f"{live / BYTES_PER_MB:g} MB live, {archived / BYTES_PER_MB:g} MB archived"
+    return [('total', level, live + archived, f"{worst['text']}; {sizes}" if worst else sizes)]
 
 
 def rotate_result(result):
@@ -130,9 +136,14 @@ def failure(result):
 
 
 class LogsAdapter:
-    def __init__(self, runner, services):
+    def __init__(self, runner, services, tasks=None, clock=time.monotonic):
         self.runner = runner
         self.services = services
+        self.tasks, self.clock = tasks, clock
+        self.cache_lock = threading.Lock()
+        self.cached = None
+        self.cached_at = None
+        self.refreshing = False
 
     def run(self, argv, timeout):
         return self.runner.run(tuple(argv), timeout=timeout, env=LOG_ROTATE_ENV)
@@ -143,13 +154,40 @@ class LogsAdapter:
         except ApiError:
             return {'label': LOG_ROTATE_LABEL, 'installed': None, 'loaded': None, 'pid': None, 'last_exit': None}
 
-    def read(self) -> LogsPayload:
-        value = validate_inventory(json_result(self.run((*LOG_ROTATE, 'inventory', '--json'), READ_TIMEOUT)))
+    def read(self, timeout=READ_TIMEOUT) -> LogsPayload:
+        value = validate_inventory(json_result(self.run((*LOG_ROTATE, 'inventory', '--json'), timeout)))
         service = self.service_state()
-        return LogsPayload(generated_at=value.get('generated_at'), revision=value['revision'],
+        payload = LogsPayload(generated_at=value.get('generated_at'), revision=value['revision'],
                            defaults=value['defaults'], totals=value['totals'], logs=value['logs'],
                            ignored=ignored_paths(field(value, 'ignored', list)), service=service,
                            problems=[*agent_problems(service), *value['problems']])
+        with self.cache_lock:
+            self.cached, self.cached_at = payload, self.clock()
+        return payload
+
+    def sample(self, cadence):
+        """The shared sampler never inventories: use a fresh cache or queue one refresh."""
+        with self.cache_lock:
+            if self.cached is not None and self.clock() - self.cached_at < 2 * cadence:
+                return self.cached
+            if self.refreshing or self.tasks is None:
+                return None
+            self.refreshing = True
+        try:
+            self.tasks.start(Section.LOGS, 'inventory', self.refresh_inventory)
+        except Exception:
+            with self.cache_lock:
+                self.refreshing = False
+            raise
+        return None
+
+    def refresh_inventory(self):
+        try:
+            self.read(timeout=REFRESH_TIMEOUT)
+            return CommandResult(0, 'Log inventory refreshed', '')
+        finally:
+            with self.cache_lock:
+                self.refreshing = False
 
     def mutate(self, body):
         action = field(body, 'action', str, status=400) if isinstance(body, dict) else None

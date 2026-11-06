@@ -136,8 +136,10 @@ class Sampler:
                 if now < due[section]:
                     continue
                 try:
-                    payload = self.adapters[section].read()
-                    self.store.record(samples(section, payload, self.wall_clock()))
+                    adapter = self.adapters[section]
+                    payload = adapter.sample(interval) if section == Section.LOGS else adapter.read()
+                    if payload is not None:
+                        self.store.record(samples(section, payload, self.wall_clock()))
                 except Exception:
                     LOG.exception('History sampling failed for %s', section.value)
                 due[section] = self.clock() + interval

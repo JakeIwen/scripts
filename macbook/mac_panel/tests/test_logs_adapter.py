@@ -1,6 +1,9 @@
 """Logs adapter against a fake rotator CLI: wire decoding, argv identity, confirmation and 409 mapping."""
 import json
 import unittest
+import threading
+
+from background_tasks import BackgroundTasks
 
 from cli_runner import CliRunner, CommandResult
 from logs_adapter import LogsAdapter, agent_problems, log_samples
@@ -8,7 +11,7 @@ from panel_contracts import ApiError, Level, Section
 from panel_paths import LOG_ROTATE, LOG_ROTATE_ENV, LOG_ROTATE_LABEL, ROOT
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, json_command
-from sampler import CADENCES, samples
+from sampler import CADENCES, Sampler, samples
 
 MB = 1024 * 1024
 PATH = '/Users/x/.local/state/metered/launchd.stdout.log'
@@ -160,6 +163,7 @@ class LogsActionTests(unittest.TestCase):
                                               '--keep', '3', '--compress', 'off', '--enabled', 'on', PATH))
         self.assertEqual(runner.calls[1][0], (*LOG_ROTATE, 'policy', '--json', '--revision', REVISION, '--clear', PATH))
 
+
     def test_edit_replies_decode_the_whole_inventory_and_the_touched_entry(self):
         body = {'action': 'ignore', 'revision': REVISION, 'path': PATH}
         for edited in ({'revision': 'rev-2', 'log': None}, inventory(entry(), revision='rev-2') | {'log': {'path': PATH}},
@@ -219,24 +223,97 @@ class LogsActionTests(unittest.TestCase):
         try:
             self.assertIn('/api/logs', routes.reads)
             self.assertIn('/api/logs', routes.writes)
+            self.assertIs(routes.logs.tasks, routes.tasks)
         finally:
             routes.close()
+
+
 
 
 class LogsSamplingTests(unittest.TestCase):
     def payload(self, *logs, problems=(), **over):
         return {**inventory(*logs, problems=problems), 'service': {'installed': True, 'loaded': True}, **over}
 
+    def test_cache_is_used_until_stale_with_one_refresh_in_flight(self):
+        class Tasks:
+            def __init__(self):
+                self.operations = []
+            def start(self, section, job, operation):
+                self.operations.append(operation)
+        tasks, now = Tasks(), [100]
+        runner = FakeRunner([json_command(inventory(entry()))] * 2)
+        logs = LogsAdapter(runner, FakeServices(), tasks=tasks, clock=lambda: now[0])
+        payload = logs.read()
+        now[0] = 1899
+        self.assertEqual(logs.sample(900), payload)
+        self.assertEqual(len(runner.calls), 1)
+        now[0] = 1900
+        self.assertIsNone(logs.sample(900))
+        self.assertIsNone(logs.sample(900))
+        self.assertEqual(len(tasks.operations), 1)
+        tasks.operations[0]()
+        self.assertEqual(runner.calls[-1][1], 30)
+        self.assertEqual(logs.sample(900), payload)
+        self.assertEqual(len(tasks.operations), 1)
+
+    def test_slow_inventory_does_not_delay_another_sections_sample(self):
+        entered, release, sampled = threading.Event(), threading.Event(), threading.Event()
+        recorded = []
+        def slow_inventory():
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('fixture inventory never released')
+            return json_command(inventory(entry()))
+        class OtherAdapter:
+            def read(self):
+                return {'sessions_open': 2, 'last_snapshot': 42}
+        class Store:
+            def record(self, rows):
+                recorded.extend(rows)
+                sampled.set()
+            def prune(self):
+                pass
+        tasks = BackgroundTasks()
+        logs = LogsAdapter(FakeRunner([slow_inventory]), FakeServices(), tasks=tasks)
+        sampler = Sampler({Section.LOGS: logs, Section.RESTORE: OtherAdapter()}, Store(),
+                          {Section.LOGS: 900, Section.RESTORE: 60})
+        sampler.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertTrue(sampled.wait(1), 'slow logs inventory blocked the shared sampler')
+            self.assertEqual({row['section'] for row in recorded}, {Section.RESTORE})
+            self.assertIsNone(logs.sample(900))
+            self.assertEqual(len(tasks.list(Section.LOGS)), 1)
+        finally:
+            release.set()
+            sampler.stop()
+            tasks.executor.shutdown(wait=True)
+        self.assertIsNotNone(logs.sample(900))
+
+    def test_failed_refresh_can_be_retried_without_stale_samples(self):
+        class Tasks:
+            def start(self, section, job, operation):
+                self.operation = operation
+        tasks = Tasks()
+        logs = LogsAdapter(FakeRunner([CommandResult(1, '', 'unavailable'), json_command(inventory())]),
+                           FakeServices(), tasks=tasks)
+        self.assertIsNone(logs.sample(900))
+        with self.assertRaises(ApiError):
+            tasks.operation()
+        self.assertIsNone(logs.sample(900))
+        tasks.operation()
+        self.assertEqual(logs.sample(900)['totals']['files'], 0)
+
     def test_cadence_value_and_text(self):
         self.assertEqual(CADENCES[Section.LOGS], 900)
         row, = samples(Section.LOGS, self.payload(entry(bytes=15 * MB, archived_bytes=5 * MB, state='ok')), 10)
-        self.assertEqual((row['key'], row['value'], row['text'], row['level']), ('total', 15 * MB, '1 logs', Level.OK))
+        self.assertEqual((row['key'], row['value'], row['text'], row['level']), ('total', 20 * MB, '15 MB live, 5 MB archived', Level.OK))
 
     def test_level_and_text_follow_the_worst_problem(self):
         warn = {'level': 'warn', 'text': 'total is high'}
         error = {'level': 'error', 'text': 'a.log is failing', 'path': PATH}
-        self.assertEqual(log_samples(self.payload(entry(), problems=[warn]))[0][1:], (Level.WARN, 35 * MB, 'total is high'))
-        self.assertEqual(log_samples(self.payload(entry(), problems=[warn, error]))[0][1:], (Level.ERROR, 35 * MB, 'a.log is failing'))
+        self.assertEqual(log_samples(self.payload(entry(), problems=[warn]))[0][1:], (Level.WARN, 39 * MB, 'total is high; 35 MB live, 4 MB archived'))
+        self.assertEqual(log_samples(self.payload(entry(), problems=[warn, error]))[0][1:], (Level.ERROR, 39 * MB, 'a.log is failing; 35 MB live, 4 MB archived'))
 
 
 if __name__ == '__main__':
