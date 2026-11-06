@@ -131,13 +131,14 @@ export function revealAnchor(id, anchorId, {focus = false} = {}) {
   return true;
 }
 
-// The row may not exist until the section finishes its first load, so wait for its next render once.
+// Opening a cached section starts a refresh too; keep the landing highlight on its replacement row.
 function revealWhenRendered(id, anchorId, options) {
-  if (revealAnchor(id, anchorId, options)) return;
+  const initial = document.querySelector(`#${CSS.escape(id)} [data-anchor="${CSS.escape(anchorId)}"]`);
+  revealAnchor(id, anchorId, options);
   const stop = onState(changed => {
     if (changed !== id) return;
     stop();
-    revealAnchor(id, anchorId, options);
+    if (currentSection() === id && !initial?.isConnected) revealAnchor(id, anchorId, options);
   });
   setTimeout(stop, REVEAL_WAIT_MS);
 }

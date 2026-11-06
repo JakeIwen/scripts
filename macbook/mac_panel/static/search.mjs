@@ -92,6 +92,7 @@ function sectionRows(sections, payloadOf) {
     try {
       return entry.searchItems(payload).map((item, index) => ({
         kind: 'item', id: `${entry.id}:${index}:${item.title}`, ...item, section: item.section ?? entry.id,
+        keywords: [...(item.keywords ?? []), ...(item.actions ?? []).map(action => action.label)],
       }));
     } catch {
       return [];

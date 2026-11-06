@@ -81,3 +81,19 @@ test('buildIndex lists sections, multi-section groups, settings and each section
   const unloaded = buildIndex({sections, groups, payloadOf: () => undefined});
   assert.equal(search(unloaded, 'restart').length, 0);
 });
+
+
+test('section action labels are searchable without running the action', () => {
+  let ran = false;
+  const index = buildIndex({
+    sections: [{id: 'services', title: 'Services', searchItems: () => [{
+      title: 'com.jacobr.mac-panel', keywords: ['launchd'], anchor: 'panel',
+      actions: [{label: 'Restart', run: () => { ran = true; }}],
+    }]}],
+    groups: [], payloadOf: () => ({}),
+  });
+  const [result] = search(index, 'restart mac-panel');
+  assert.equal(result.anchor, 'panel');
+  assert.equal(search(index, 'launchd')[0], result);
+  assert.equal(ran, false);
+});

@@ -170,7 +170,7 @@ export const JOBS_COPY = {
   },
   deferred: {
     scheduleInfo: 'Each tick is a queued job at its due time; hollow ticks are still to come and the amber line is now. A job past due runs when the hourly checker next looks.',
-    scheduleEmpty: 'No jobs are queued.',
+    scheduleEmpty: 'No jobs are due in this window.',
     addTitle: 'Add a job',
     addInfo: 'Queues a one-off job. The script runs once at the due time with the timeout you set; the checker alerts if it fails.',
     fields: {
