@@ -26,17 +26,26 @@ DISJOINT_TRIGGER_PAIRS = (frozenset({'EDA649C3-026B-4402-9BF9-CE339233EFB2',
                                      'A9D83EB2-3D4F-5A85-984E-511A2477E7CE'}),)
 
 
-def runtime_action(function, entry, options, title, runtime, *, line_clipboard_variable=None):
+def runtime_action(function, entry, options, title, runtime, *, line_clipboard_variable=None,
+                   ensure_line_clipboard_variable=False):
     """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
     call = '\n%s(%s);' % (entry, json.dumps(options))
+    off, on = map(json.dumps, (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON))
+    variable_name = json.dumps(line_clipboard_variable)
+    ensure_variable = (
+        f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {variable_name}}});\n'
+        f'    if (lineClipboard == null || lineClipboard === "") await callBTT("set_persistent_string_variable", '
+        f'{{variable_name: {variable_name}, to: {off}}});\n'
+        if ensure_line_clipboard_variable and line_clipboard_variable else '')
     variable_update = (
-        '    if (typeof result.lineClipboard === "boolean") await callBTT("set_string_variable", '
-        + '{variable_name: ' + json.dumps(line_clipboard_variable) + ', to: result.lineClipboard ? "1" : "0"});\n'
+        '    if (typeof result.lineClipboard === "boolean") await callBTT("set_persistent_string_variable", '
+        + f'{{variable_name: {variable_name}, to: result.lineClipboard ? {on} : {off}}});\n'
         if line_clipboard_variable else '')
     # display_notification uses the unnamed body parameter, not "text":
     # https://docs.folivora.ai/docs/scripting/cli/ (command #6).
     # A script that fails inside runJXA comes back as {NSLocalizedDescription} instead.
     script = (f'async function {function}() {{\n'
+              f'{ensure_variable}'
               f'    const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));\n'
               f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
               f'{variable_update}'

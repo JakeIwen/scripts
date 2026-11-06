@@ -37,7 +37,8 @@ def selection_condition(length_pattern):
 WRAP_CONDITION = selection_condition('[1-9][0-9]*')
 CARET_CONDITION = selection_condition('0')
 LINE_CLIPBOARD_VARIABLE = 'jacobr_editing_keys_line_clipboard'
-PASTE_CONDITION = CARET_CONDITION + ' AND ' + LINE_CLIPBOARD_VARIABLE + ' == ' + json.dumps('1')
+LINE_CLIPBOARD_OFF, LINE_CLIPBOARD_ON = '0', '1'
+PASTE_CONDITION = CARET_CONDITION + ' AND ' + LINE_CLIPBOARD_VARIABLE + ' == ' + json.dumps(LINE_CLIPBOARD_ON)
 
 
 class ConditionCase(NamedTuple):
@@ -100,7 +101,7 @@ def canonical(predicate):
 
 def truth_table_errors():
     variables = [{'BTTActiveAppBundleIdentifier': case.app, 'focused_element_details': case.details,
-                  LINE_CLIPBOARD_VARIABLE: '1' if case.tagged else '0'}
+                  LINE_CLIPBOARD_VARIABLE: LINE_CLIPBOARD_ON if case.tagged else LINE_CLIPBOARD_OFF}
                  for case in CASES]
     errors = []
     for key, predicate in (('wrap', WRAP_CONDITION), ('caret', CARET_CONDITION), ('paste', PASTE_CONDITION)):

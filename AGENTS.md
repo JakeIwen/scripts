@@ -292,13 +292,18 @@ compare it with this checkout. Deployed files may differ from the repository.
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
   read, and a failed write puts the previous clipboard back. Copy/cut share the
   private type defined once as `LINE_PASTEBOARD_TYPE` in `text_editing_keys.js`.
-  Cmd-V requires a caret and the temporary BTT custom variable declared in
+  Cmd-V requires a caret and the persistent BTT custom variable declared in
   `text_editing_conditions.py`; the runtime rechecks the real tag and uses normal
-  Edit > Paste once on stale/untagged data, clearing the variable. Tagged paste
+  Edit > Paste once on stale/untagged data, setting the variable to off. Tagged paste
   uses the logical line start and restores the original character caret after
   exact text confirmation. Firefox uses paragraph-start/forward native markers;
   blank-only pastes fail closed because flat AXValue cannot confirm them. BTT
-  restart loses the variable until the next line copy/cut. `trigger_install.py`
+  restart retains the variable. All writes use `set_persistent_string_variable`;
+  `--apply` initializes and reads back `"0"` before enabling, and the app-switch
+  action reasserts it if `get_string_variable` is empty. This prevents BTT from
+  swallowing Cmd-V on an unbound condition without mismatch pass-through
+  (observed live 2026-11-05). The Foundation evaluator rejects cases missing
+  predicate variables, rather than treating them as false. `trigger_install.py`
   permits only the explicit disjoint Finder/non-text and editing-key/text Cmd-V
   UUID pair; unrelated same-key triggers still conflict. BTT documents mismatch
   pass-through but not arbitration with another matching trigger: verify one

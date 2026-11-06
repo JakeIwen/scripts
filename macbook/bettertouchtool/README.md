@@ -346,17 +346,29 @@ this restore covers sequences lost before a checkpoint held them.
   blank-only pastes are refused because its flat AXValue cannot confirm them.
   With a selection, Cmd-V remains the app's normal paste (even with our tag).
 
-The paste condition uses the temporary custom BTT string variable
+The paste condition uses the persistent custom BTT string variable
 `jacobr_editing_keys_line_clipboard` (`"1"` after a tagged copy/cut). BTT documents
 [custom variables in conditions](https://docs.folivora.ai/docs/actions/conditions/)
-and [set_string_variable](https://docs.folivora.ai/docs/1106_java_script.html), but
+and [set_persistent_string_variable](https://docs.folivora.ai/docs/1106_java_script.html), but
 [standard variables](https://docs.folivora.ai/docs/1105_variables.html) offer no
 pasteboard-type variable; live read-only probes of `clipboard_content_type` and
 `clipboard_types` were empty. The tag is authoritative at runtime. A native copy
 may leave the BTT variable stale: the next caret paste then performs normal
-Edit > Paste once and clears the variable. Restarting BTT loses the variable;
-copy/cut a line again to re-enable whole-line paste. Clipboard managers must
-preserve the private type for it to remain a line copy.
+Edit > Paste once and sets the variable to `"0"`. Copy/cut/paste update it with
+`set_persistent_string_variable`, so normal BTT restarts retain its binding.
+`--apply` sets it to `"0"` and verifies it through `get_string_variable` before
+any trigger is enabled; the app-switch action checks it before `runAppSwitch`
+and persistently reasserts `"0"` if empty after a BTT reset/reinstall. Applying
+therefore requires a fresh line copy/cut to enable whole-line paste again.
+Clipboard managers must preserve the private type for it to remain a line copy.
+
+Observed live 2026-11-05: an unbound condition variable caused BTT to swallow
+Cmd-V without running the action or passing the key through. Foundation instead
+silently treated a missing dictionary key as nil/false, so a false truth-table
+result did not model that failure. The evaluator now walks the parsed predicate
+and rejects cases missing any referenced variable, including branches that would
+short-circuit. Unsupported expression kinds fail loudly rather than bypassing
+that validation.
 
 The explicit disjoint-UUID pair in `trigger_install.py` allows the Finder paste
 trigger (non-text focus) beside this text-only Cmd-V trigger; all other shortcut

@@ -26,12 +26,15 @@ const vm = require('node:vm');
 const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 (async () => {
     const out = [];
-    for (const {script, name, jxa} of entries) {
+    for (const {script, name, jxa, variable} of entries) {
         const calls = [];
         const context = vm.createContext({
             readFile: async path => { calls.push(['readFile', path]); return 'SOURCE'; },
             runJXA: async source => { calls.push(['runJXA', source]); return jxa; },
-            callBTT: async (command, args) => { calls.push(['callBTT', command, args]); }
+            callBTT: async (command, args) => {
+                calls.push(['callBTT', command, args]);
+                if (command === 'get_string_variable') return variable;
+            }
         });
         vm.runInContext(script, context);
         out.push({result: await vm.runInContext(name + '()', context), calls});
@@ -72,6 +75,20 @@ class ConditionTests(unittest.TestCase):
     def test_stored_conditions_compare_in_nspredicate_format(self):
         reserialized = conditions.CARET_CONDITION.replace(' AND ', '  AND  ')
         self.assertEqual(conditions.canonical(reserialized), conditions.canonical(conditions.CARET_CONDITION))
+
+    def test_a_case_missing_a_condition_variable_fails_even_if_the_condition_short_circuits(self):
+        for app in ('com.apple.TextEdit', 'com.microsoft.VSCode'):
+            with self.subTest(app=app), self.assertRaisesRegex(RuntimeError, conditions.LINE_CLIPBOARD_VARIABLE):
+                conditions.evaluate(conditions.PASTE_CONDITION,
+                    [{'BTTActiveAppBundleIdentifier': app, 'focused_element_details': conditions.CARET}])
+
+    def test_a_misspelled_predicate_key_fails_loudly(self):
+        with self.assertRaisesRegex(RuntimeError, 'misspelled_variable'):
+            conditions.evaluate('misspelled_variable == "1"', [{'different_variable': '1'}])
+
+    def test_a_missing_variable_inside_an_aggregate_fails_loudly(self):
+        with self.assertRaisesRegex(RuntimeError, 'missing_candidate'):
+            conditions.evaluate('app IN {missing_candidate}', [{'app': 'com.apple.TextEdit'}])
 
 
 @unittest.skipUnless(shutil.which('node'), 'emitted scripts are executed with Node')
@@ -141,7 +158,7 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(paste['BTTTriggerConditionsFormat'], conditions.PASTE_CONDITION)
         self.assertTrue(paste[triggers.PASSTHROUGH])
         [outcome] = run_entries([self.entry(paste, '{"ok":true,"result":"pasted line","lineClipboard":true}')])
-        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_string_variable',
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_persistent_string_variable',
             {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '1'}])
         self.assertEqual(call_options(outcome['calls'][-2][1], 'runEditingKey'),
             {'kind': 'paste-line', 'directory': str(keys.DIRECTORY),
@@ -150,7 +167,7 @@ class EmittedScriptTests(unittest.TestCase):
     def test_a_raced_native_clipboard_clears_the_custom_condition_variable(self):
         [outcome] = run_entries([self.entry(by_note('pastes above the line'),
             '{"ok":true,"result":"pasted normally","lineClipboard":false}')])
-        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_string_variable',
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_persistent_string_variable',
             {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '0'}])
 
     def test_a_completed_cut_with_a_tag_warning_still_returns_success_and_notifies(self):
@@ -165,7 +182,27 @@ class EmittedScriptTests(unittest.TestCase):
         [outcome] = run_entries([self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')])
         self.assertEqual(outcome['result'], 'enabled')
         self.assertEqual(call_options(outcome['calls'][-1][1], 'runAppSwitch'),
-                         {'excluded': list(conditions.EXCLUDED_APPS)})
+                         {'excluded': list(conditions.EXCLUDED_APPS),
+                          'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
+
+    def test_app_switch_repairs_an_unbound_variable_before_running_jxa(self):
+        definition = by_note('on app switch')
+        for variable in ('', None):
+            entry = self.entry(definition, '{"ok":true,"result":"enabled"}')
+            entry['variable'] = variable
+            [outcome] = run_entries([entry])
+            self.assertEqual(outcome['calls'][:2], [
+                ['callBTT', 'get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE}],
+                ['callBTT', 'set_persistent_string_variable',
+                 {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': conditions.LINE_CLIPBOARD_OFF}]])
+
+    def test_app_switch_preserves_an_existing_bound_variable(self):
+        for variable in (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON):
+            entry = self.entry(by_note('on app switch'), '{"ok":true,"result":"excluded"}')
+            entry['variable'] = variable
+            [outcome] = run_entries([entry])
+            self.assertEqual([call for call in outcome['calls'] if call[0] == 'callBTT'], [
+                ['callBTT', 'get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE}]])
 
 
 class InstallFlowTests(unittest.TestCase):
@@ -174,7 +211,8 @@ class InstallFlowTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory)
         self.plan = keys.definitions()
         self.fake = FakeBTT()
-        for module, target, value in [(btt_socket, 'call', self.fake), (triggers, 'saved_errors', lambda *args: []),
+        self.calls, self.variable = [], None
+        for module, target, value in [(btt_socket, 'call', self.socket), (triggers, 'saved_errors', lambda *args: []),
                                       (keys, 'BACKUPS', directory),
                                       (triggers, 'backup_configuration', lambda *args, **kw: directory / 'backup.json'),
                                       (conditions, 'canonical', lambda predicate: predicate)]:
@@ -184,6 +222,32 @@ class InstallFlowTests(unittest.TestCase):
         patcher = patch('builtins.print')
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def socket(self, command, **parameters):
+        self.calls.append((command, parameters))
+        if command == 'set_persistent_string_variable':
+            self.variable = parameters['to']
+            return ''
+        if command == 'get_string_variable':
+            return self.variable or ''
+        return self.fake(command, **parameters)
+
+    def test_persistent_variable_is_initialized_and_read_back_before_any_trigger_enables(self):
+        keys.install('db', self.plan)
+        self.assertEqual(self.calls[:2], [
+            ('set_persistent_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE,
+                                                'to': conditions.LINE_CLIPBOARD_OFF}),
+            ('get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE})])
+        enabled = [i for i, (command, args) in enumerate(self.calls)
+                   if command == 'update_trigger' and json.loads(args['json'])['BTTEnabled'] == 1]
+        self.assertTrue(enabled)
+        self.assertGreater(min(enabled), 1)
+
+    def test_an_unconfirmed_variable_initialization_enables_nothing(self):
+        with patch.object(btt_socket, 'call', return_value=''):
+            with self.assertRaisesRegex(RuntimeError, 'variable did not initialize'):
+                keys.install('db', self.plan)
+        self.assertEqual(self.fake.writes, [])
 
     def test_fresh_install_creates_everything_disabled_before_enabling(self):
         touched = keys.install('db', self.plan)

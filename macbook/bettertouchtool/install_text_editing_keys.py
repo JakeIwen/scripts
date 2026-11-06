@@ -19,6 +19,7 @@ import uuid
 
 from btt_common import current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
+import btt_socket
 import text_editing_conditions as conditions
 import trigger_install as triggers
 from trigger_install import COMMAND, SHIFT, conflicts, set_enabled
@@ -43,7 +44,8 @@ def stable_uuid(name):
 
 def _action(function, entry, options, title):
     return triggers.runtime_action(function, entry, options, title, RUNTIME,
-                                   line_clipboard_variable=options.get('lineClipboardVariable'))
+                                   line_clipboard_variable=options.get('lineClipboardVariable'),
+                                   ensure_line_clipboard_variable=entry == 'runAppSwitch')
 
 
 def _keyboard(name, keycode, modifiers, condition, notes, action):
@@ -75,13 +77,19 @@ def definitions():
                    'BTTGestureNotes': 'Editing keys: expose Electron text to Accessibility on app switch',
                    'BTTPredefinedActionType': 281,
                    'BTTAdditionalActionData': _action('prepareTextAccessibility', 'runAppSwitch',
-                                                      {'excluded': list(conditions.EXCLUDED_APPS)},
+                                                      {'excluded': list(conditions.EXCLUDED_APPS),
+                                                       'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE},
                                                       'Editing keys stopped')})
     return result
 
 
 def install(database, plan):
     """Create or recreate disabled, verify runtime and disk, then enable; returns written UUIDs."""
+    # An unbound condition variable can swallow Cmd-V instead of passing it through.
+    btt_socket.call('set_persistent_string_variable', variable_name=conditions.LINE_CLIPBOARD_VARIABLE,
+                    to=conditions.LINE_CLIPBOARD_OFF)
+    if btt_socket.call('get_string_variable', variable_name=conditions.LINE_CLIPBOARD_VARIABLE).strip() != conditions.LINE_CLIPBOARD_OFF:
+        raise RuntimeError('The line clipboard variable did not initialize; no triggers were enabled.')
     return triggers.install(database, plan, LABEL, BACKUPS, 'keys-')
 
 
