@@ -27,7 +27,7 @@ const vm = require('node:vm');
 const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 (async () => {
     const out = [];
-    for (const {script, name, jxa, variable, failRead, failJxa} of entries) {
+    for (const {script, name, jxa, variable, failRead, failJxa, failVariableRead} of entries) {
         const calls = [];
         const context = vm.createContext({
             Date: {now: () => 100000},
@@ -43,7 +43,10 @@ const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
             },
             callBTT: async (command, args) => {
                 calls.push(['callBTT', command, args]);
-                if (command === 'get_string_variable') return variable;
+                if (command === 'get_string_variable') {
+                    if (failVariableRead) throw new Error('fixture variable read failure');
+                    return variable;
+                }
             }
         });
         vm.runInContext(script, context);
@@ -271,6 +274,16 @@ class EmittedScriptTests(unittest.TestCase):
                                  {'variable_name': keys.LINE_COPY_STARTED_VARIABLE}])
                 [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
                 self.assertIs(call_options(source, 'runEditingKey')['waitForTag'], wait)
+
+    def test_a_rejected_timestamp_read_pastes_without_waiting_and_disarms(self):
+        entry = self.entry(by_note('pastes above the line'),
+                           '{"ok":true,"result":"pasted normally","lineClipboard":false}')
+        entry['failVariableRead'] = True
+        [outcome] = run_entries([entry])
+        [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
+        self.assertIs(call_options(source, 'runEditingKey')['waitForTag'], False)
+        self.assertEqual(outcome['result'], 'pasted normally')
+        self.assertEqual(self.variable_writes(outcome), [conditions.LINE_CLIPBOARD_OFF])
 
     def test_trigger_layer_and_shared_ids_do_not_import_their_installers(self):
         subprocess.run([sys.executable, '-c',

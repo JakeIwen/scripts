@@ -365,9 +365,11 @@ The paste condition uses the persistent custom BTT string variable
 `jacobr_editing_keys_line_copy_started_ms`, then set the line variable to `"1"`
 before background `runJXA`. The paste action (never a condition) reads that
 start time: only a paste within 1.5 seconds of a line copy/cut waits for its tag,
-up to one second in 50 ms steps. Missing, invalid or older timestamps do not wait,
-so a stale ON after an ordinary copy normally falls back immediately rather than
-letting a later Return overtake the paste. A fallback always sets the line variable
+up to one second in 50 ms steps. Missing, invalid or older timestamps and failed timestamp reads do not wait.
+This removes the extra one-second delay for an ordinary copy with a stale ON;
+it does not guarantee ordering against a subsequent Return, because the fallback
+still runs through background `runJXA` and an Edit-menu lookup. The stale ON lasts
+until the next caret paste in an `AXTextArea`. A fallback always sets the line variable
 OFF, even if the board still has a tag. The transport also sets it OFF on
 missing/non-boolean results, malformed JSON and runJXA failures. BTT documents
 [custom variables in conditions](https://docs.folivora.ai/docs/actions/conditions/)
@@ -429,7 +431,8 @@ has not been verified live.
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
 `focused_element_details` shows a settable `AXSelectedText` with a nonempty range
-(wrapping) or an empty one (Cmd-X, Cmd-C, tagged Cmd-V), in an app outside
+(wrapping) or an empty one (Cmd-X, Cmd-C, tagged Cmd-V, with `AXTextArea` also
+required for Cmd-V), in an app outside
 `text_editing_conditions.EXCLUDED_APPS` (code editors
 and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
 no text tree never match. Earlier condition checks measured about 20 ms per keystroke; ordering with a

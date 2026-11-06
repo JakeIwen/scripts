@@ -74,7 +74,7 @@ def _line_clipboard_hook(entry, options):
     started = json.dumps(LINE_COPY_STARTED_VARIABLE)
     runtime_options = None
     if kind == 'paste-line':
-        before = (f'    const start = Number(await callBTT("get_string_variable", {{variable_name: {started}}}));\n'
+        before = (f'    const start = Number(await callBTT("get_string_variable", {{variable_name: {started}}}).catch(() => ""));\n'
                   '    const age = Date.now() - start;\n'
                   f'    const waitForTag = start > 0 && age >= 0 && age < {TAG_WAIT_WINDOW_MS};\n')
         runtime_options = '{...' + json.dumps(options) + ', waitForTag}'
