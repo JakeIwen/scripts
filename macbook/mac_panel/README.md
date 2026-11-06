@@ -68,6 +68,7 @@ module that holds the section's state: the panel only relays validated requests 
 | Mac, Amphetamine (`#amphetamine`) | `macbook/scripts/amphetamine_control.py status/configure`. The automatic-lock switch and the idle-minutes field each save through `configure` with the displayed revision. The battery cutoff is read-only (Amphetamine owns it). |
 | Mac, BTT guard (`#guard`) | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `audit` (a fresh read-only audit on every load), `service status`, `acceptance` (shown as Auto-accept; drift pending acceptance is yellow), `inspect`. Inspect and audit are unconfirmed and read-only; the known-good checkpoint (`checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check) is armed and sends `confirmed: true`. Repair is Terminal-only. |
 | Mac, ntfy alerts (`#ntfy`) | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify; destinations are never read or shown. The one action is a confirmed test through `guard notify-test --send`. |
+| Mac, Logs (`#logs`) | `/usr/bin/python3 -I -B macbook/scripts/log_rotate.py inventory --json` lists every log the Mac's jobs write (LaunchAgent plists, the tracked crontab, scanned state folders, added paths) with size, archives, growth per day, policy and state; the section adds the `com.jacobr.log-rotate` agent's launchd state. Confirmed `POST /api/logs {action: rotate, path?, force?, confirmed: true}` runs `rotate --json [--only PATH] [--force]`; `policy`, `add`, `ignore` and `unignore` pass the displayed revision to the same-named subcommands (exit 3 is a 409 conflict, exit 75 a 409 with code `busy`). A sparkline plots total live bytes from the history store. |
 | Usage (`#usage`) | `/usr/bin/python3 -I -B /Users/jacobr/config/mac/usage-budget/usage_budget.py facts --json`, a read-only subcommand that reads the cached snapshot only. Gauges for the Claude, Fable and Codex windows and credits, the routing lean, workers, review and availability, and sparklines from the history store. No account identity is exposed. |
 | Settings (`#settings`) | `shared/python/tool_settings.py` loads declarations from `shared/settings/` (plus `~/.config/jacobr/declarations/`) and revision-checked values from `~/.config/jacobr/`. Each field renders through one row with its description in an info icon, its unit and a "changed from default" marker; save checks the revision and a conflict offers Reload; reset is armed and sends `action: "reset"` with `confirmed: true`. A declaration that cannot be loaded becomes an error card on that tool alone. |
 
@@ -137,12 +138,12 @@ Escape, blur or 8 seconds disarm it, and the second click sends the request with
 `confirmed: true`. The server refuses these requests with HTTP 400 without it: service
 start, stop and restart, crontab pause, resume, install and run-now, deferred run-now,
 cancel and add, metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
-test, settings reset and confirmed automation actions. Reschedule opens an inline editor
+test, settings reset, log rotation and confirmed automation actions. Reschedule opens an inline editor
 whose Apply is enabled only once the time differs.
 
 Navigation: the sidebar groups Overview; Jobs & services (Services, Deferred jobs,
 Crontab, Automations, llm-restore); Network (Metered); Mac (Amphetamine, BTT guard, ntfy
-alerts); Usage; Settings. It is a drawer opened by Menu below 900 px. A nav entry shows its
+alerts, Logs); Usage; Settings. It is a drawer opened by Menu below 900 px. A nav entry shows its
 state dot (green fine, yellow needs attention, red failing, grey idle, hollow unknown) and
 its one-line summary as the hover tooltip; a group heading shows the worst of its members.
 The arrow keys, Home and End move between entries. The shell opens the section named by the URL hash, else the last-viewed section from
@@ -256,8 +257,7 @@ properties (CSSOM).
 Child tools receive a minimal environment and timeouts. Logs and displayed configuration are
 redacted, with all HTTP(S) URLs hidden because arbitrary ntfy topics can be secrets. Log
 tails additionally hide MAC addresses and SSID/BSSID/network field values. The metered
-service's tails are withheld because free-text network names cannot be reliably masked. The
-panel never reads `pi/secrets/`, displays the Claude settings `env` block, invokes BTT
+service's tails are withheld because free-text network names cannot be reliably masked. The panel reads log sizes and paths through the rotator's CLI, never log contents. It never reads `pi/secrets/`, displays the Claude settings `env` block, invokes BTT
 repair, or edits tool-owned files itself. The only root action is the restart of a
 `com.jacobr.*` system daemon through a rule Jacob installs himself: `panel_service.py
 sudoers --print` shows it and `sudoers --script` prints a zsh installer that checks it with

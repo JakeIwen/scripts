@@ -353,7 +353,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `background_tasks.py` and are polled at `GET /api/tasks/<id>`. Its Automations
   section (`automations_adapter.py`) needs no per-tool panel code: it lists
   `shared/automations/<tool>.json` declarations, runs each one's status command
-  and the declared actions by fixed argv. `sampler.py` records each section's
+  and the declared actions by fixed argv. Its Logs section (`logs_adapter.py`,
+  `static/section_logs.mjs`) relays `macbook/scripts/log_rotate.py` and reads sizes and paths only. `sampler.py` records each section's
   level and a few values into the panel-owned SQLite history
   `~/.local/state/mac-panel/history.sqlite` (`history_store.py`: per-series
   thinning, 30-day prune; `GET /api/history`), and `usage_adapter.py` serves
