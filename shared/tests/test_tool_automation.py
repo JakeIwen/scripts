@@ -62,7 +62,7 @@ class DeclarationTests(unittest.TestCase):
         self.assertEqual(set(page),
                          {'tool', 'title', 'description', 'service', 'settings', 'actions'})
         self.assertEqual(set(page['actions'][0]),
-                         {'name', 'label', 'description', 'confirm'})
+                         {'name', 'label', 'description', 'confirm', 'async'})
         self.assertNotIn('argv', repr(page))
 
     def test_relative_executable_and_timeout_bounds_are_rejected(self):
@@ -74,6 +74,23 @@ class DeclarationTests(unittest.TestCase):
                 value = self.declaration()
                 value['actions'][0]['timeout'] = timeout
                 self.assert_invalid(value, 'timeout must be an integer')
+
+    def test_async_timeout_is_opt_in_and_status_stays_bounded(self):
+        value = self.declaration()
+        value['actions'][0].update({'async': True, 'timeout': 1800})
+        self.write(value)
+        action = tool_automation.load_declaration('fixture').actions[0]
+        self.assertTrue(action.asynchronous)
+        self.assertEqual(action.command.timeout, 1800)
+        self.assertTrue(action.as_dict()['async'])
+        for timeout in (1801, 0, True):
+            value['actions'][0]['timeout'] = timeout
+            self.assert_invalid(value, 'timeout must be an integer')
+        value['actions'][0].update({'async': 'yes', 'timeout': 10})
+        self.assert_invalid(value, 'async must be a boolean')
+        value['actions'][0].update({'async': True, 'timeout': 1000})
+        value['status']['timeout'] = 121
+        self.assert_invalid(value, 'timeout must be an integer')
 
     def test_unknown_and_missing_fields_are_rejected(self):
         value = self.declaration()

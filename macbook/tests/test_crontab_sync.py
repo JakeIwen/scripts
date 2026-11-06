@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 import unittest
 
+import crontab_sync
+
 REPOSITORY = Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY / 'macbook/scripts/crontab_sync.py'
 PYTHON = Path('/usr/bin/python3')
@@ -207,6 +209,49 @@ class CrontabSyncTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)['error'], 'fixture install failed')
         self.assertEqual(self.crontab.read_text(), ACTIVE_JOB + '\n')
         self.assertEqual(self.live.read_text(), ACTIVE_JOB + '\n')
+
+    def test_run_paused_managed_job_is_revision_checked_and_does_not_install(self):
+        command = 'printf "%s\\n" "$CUSTOM" "$HOME" "$PATH" "$PWD"; printf err >&2; exit 7'
+        line = '* * * * * ' + command
+        text = ('CUSTOM="fixture value"\n# BEGIN managed llm-restore\n#off ' + line +
+                '\n# END managed llm-restore\n')
+        self.set_crontab(text, live='live-only job\n')
+        rev = hashlib.sha256(text.encode()).hexdigest()
+        job_id = self.job_id(line)
+        result = self.result_json('run', job_id, '--revision', rev, '--json')
+        self.assertEqual(set(result), {'id', 'exit', 'started', 'finished', 'output', 'timed_out'})
+        self.assertEqual(result['id'], job_id)
+        self.assertEqual(result['exit'], 7)
+        self.assertFalse(result['timed_out'])
+        self.assertIn('fixture value', result['output'])
+        self.assertIn(str(self.home), result['output'])
+        self.assertIn('/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin', result['output'])
+        self.assertTrue(result['output'].endswith('err'))
+        self.assertLessEqual(result['started'], result['finished'])
+        self.assertEqual(self.crontab.read_text(), text)
+        self.assertEqual(self.live.read_text(), 'live-only job\n')
+        self.assertFalse(self.state.exists())
+        self.result_json('run', job_id, '--revision', '0' * 64, '--json', expected=75)
+        self.result_json('run', 'a' * 12, '--revision', rev, '--json', expected=3)
+        self.set_crontab(line + '\n' + line + '\n')
+        duplicate_rev = hashlib.sha256(self.crontab.read_bytes()).hexdigest()
+        self.result_json('run', job_id, '--revision', duplicate_rev, '--json', expected=3)
+
+    def test_run_timeout_is_bounded_and_captures_output(self):
+        code, output, timed_out = crontab_sync.capture_run(
+            'printf before; exec /bin/sleep 10', self.home,
+            crontab_sync.run_environment('', self.home), timeout=0.1)
+        self.assertTrue(timed_out)
+        self.assertEqual(code, -9)
+        self.assertEqual(output, 'before')
+
+    def test_run_output_is_a_bounded_tail(self):
+        line = '* * * * * /usr/bin/yes x | /usr/bin/head -c 20000; printf end'
+        self.set_crontab(line + '\n')
+        rev = hashlib.sha256(self.crontab.read_bytes()).hexdigest()
+        result = self.result_json('run', self.job_id(line), '--revision', rev, '--json')
+        self.assertEqual(len(result['output'].encode()), 8192)
+        self.assertTrue(result['output'].endswith('end'))
 
     def test_usage_exit_is_two(self):
         self.assertEqual(self.run_cli().returncode, 2)

@@ -80,11 +80,9 @@ class SettingsPayload(TypedDict):
     tools: list[SettingsToolRecord]
 
 
-class AutomationActionRecord(TypedDict):
-    name: str
-    label: str
-    description: str
-    confirm: bool
+AutomationActionRecord = TypedDict('AutomationActionRecord', {
+    'name': str, 'label': str, 'description': str, 'confirm': bool, 'async': bool,
+})
 
 
 class AutomationStatusField(TypedDict):
@@ -112,6 +110,7 @@ class AutomationRecord(TypedDict):
 
 
 class AutomationsPayload(TypedDict):
+    tasks: list[TaskRecord]
     automations: list[AutomationRecord]
 
 
@@ -146,11 +145,14 @@ class ServiceRecord(TypedDict):
     last_exit: int | None
     plist: str | None
     logs: list[ServiceLogMeta]
+    actions: list[str]
+    sudo_rule: str
     error: str | None
 
 
 class ServicesPayload(TypedDict):
     services: list[ServiceRecord]
+    sudo_install_command: str
 
 
 class ServiceLogsPayload(TypedDict):
@@ -176,6 +178,7 @@ class CronJob(TypedDict):
 
 
 class CrontabPayload(TypedDict):
+    tasks: list[TaskRecord]
     revision: str
     uncommitted: bool
     jobs: list[CronJob]
@@ -302,3 +305,15 @@ class Level(str, Enum):
     UNKNOWN = 'unknown'
     WARN = 'warn'
     ERROR = 'error'
+
+
+class ServiceAction(str, Enum):
+    RESTART = 'restart'
+    START = 'start'
+    STOP = 'stop'
+
+
+class SudoRule(str, Enum):
+    PRESENT = 'present'
+    MISSING = 'missing'
+    NOT_APPLICABLE = 'n/a'

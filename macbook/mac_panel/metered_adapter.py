@@ -2,7 +2,7 @@
 from cli_runner import json_result
 from panel_contracts import ApiError
 from panel_paths import ROOT
-from wire_validation import field, object_fields
+from wire_validation import confirm, field, object_fields
 
 COMMAND = (str(ROOT / 'macbook/metered/mac-metered'),)
 
@@ -42,7 +42,9 @@ def mutation_args(body):
     action = field(body, 'action', str, status=400)
     if action in ('ssid-add', 'ssid-remove'):
         expected = ('action', 'ssid') + (('revision',) if action == 'ssid-remove' else ())
-        object_fields(body, expected)
+        object_fields(body, expected, ('confirmed',))
+        if action == 'ssid-remove':
+            confirm(body)
         ssid = field(body, 'ssid', str, status=400)
         args = ['ssid', 'add' if action == 'ssid-add' else 'remove']
         if action == 'ssid-remove':
@@ -52,11 +54,10 @@ def mutation_args(body):
         object_fields(body, ('action',))
         return ['sync']
     if action == 'low-data-mode':
-        object_fields(body, ('action', 'enabled', 'revision', 'confirmed'))
+        object_fields(body, ('action', 'enabled', 'revision'), ('confirmed',))
         enabled = field(body, 'enabled', bool, status=400)
         revision = field(body, 'revision', str, status=400)
-        if field(body, 'confirmed', bool, status=400) is not True:
-            raise ApiError(400, 'Explicit Low Data Mode confirmation is required')
+        confirm(body)
         return ['low-data-mode', 'on' if enabled else 'off', '--revision', revision, '--confirm']
     return policy_args(body)
 

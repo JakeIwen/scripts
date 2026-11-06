@@ -56,7 +56,7 @@ function jobAction(job, data) {
   }
   const kind = job.paused ? 'resume' : 'pause';
   cell.append(button(job.paused ? 'Resume' : 'Pause', () => action(SECTION, '/api/crontab',
-    {action: kind, job: job.id, revision: data.revision}), {confirm: `Confirm ${kind}${repoNote(data)}`, key: `${kind}-${job.id}`}));
+    {action: kind, job: job.id, revision: data.revision, confirmed: true}), {confirm: `Confirm ${kind}${repoNote(data)}`, key: `${kind}-${job.id}`}));
   return cell;
 }
 

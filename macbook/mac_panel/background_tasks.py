@@ -1,4 +1,4 @@
-"""In-memory task receipts; the deferred CLI remains the durable job owner."""
+"""Bounded in-memory task receipts; each invoked tool owns its durable state."""
 from concurrent.futures import ThreadPoolExecutor
 import secrets
 import threading
@@ -37,8 +37,8 @@ class BackgroundTasks:
             result = operation()
             code = result.returncode
             message = (result.stderr or result.stdout).strip()
-            if code == 75:
-                message = 'The checker is running jobs; try again shortly'
+            if code and not message:
+                message = f'Tool exited {code}; refresh its state before retrying'
             state = TaskState.DONE if code == 0 else TaskState.FAILED
         except Exception as exc:
             message, state = str(exc), TaskState.FAILED

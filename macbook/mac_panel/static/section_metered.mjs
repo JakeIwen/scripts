@@ -35,7 +35,7 @@ function ssids(data) {
     const chip = node('div', null, 'actions');
     chip.append(node('span', ssid));
     if (pending.has(ssid)) chip.append(node('span', 'pending sync', 'muted small'));
-    chip.append(button('Remove', () => send({action: 'ssid-remove', ssid, revision: data.config.revision}),
+    chip.append(button('Remove', () => send({action: 'ssid-remove', confirmed: true, ssid, revision: data.config.revision}),
       {confirm: 'Confirm remove', key: `remove-${ssid}`, disabled: pending.has(ssid)}));
     chips.append(chip);
   });
