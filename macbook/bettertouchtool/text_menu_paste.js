@@ -28,23 +28,36 @@ function restorePasteboard(board, saved, owned) {
         throw new Error('The previous clipboard could not be restored.');
 }
 
-// Replaces the clipboard with plain `text`, plus '1' under each of `flags`
+// Writes `text` (plain by default, preserving app items when requested), plus
+// '1' under each of `flags`
 // (nspasteboard.org markers), and returns the changeCount it then owns. It
 // refuses unless the clipboard is still at `saved.version` just before it
 // clears it, so a copy made meanwhile (even while the item was built) is
 // kept, and if the write then fails it puts `saved` back.
-function writeClipboardText(board, text, saved, {flags = [], options = 0} = {}) {
-    const item = $.NSPasteboardItem.alloc.init;
+function writeClipboardText(board, text, saved, {flags = [], options = 0, preserveItems = false} = {}) {
+    // Cut may already supply the right text and rich formats. Copy its items
+    // separately: mutating saved.copies would also tag the rollback snapshot.
+    const rich = preserveItems ? copyPasteboard(board) : null;
+    if (rich && rich.version !== saved.version) throw new Error('The clipboard changed.');
+    // A board's stringForType searches all items. Do not add duplicate text to
+    // a leading non-text item: that unusual Cut is normalized to plain text.
+    const keepRich = rich && Number(rich.copies.count) > 0
+        && ObjC.unwrap(rich.copies.objectAtIndex(0).stringForType($.NSPasteboardTypeString)) === text;
+    const item = keepRich ? rich.copies.objectAtIndex(0) : $.NSPasteboardItem.alloc.init;
+    const items = keepRich ? rich.copies : $.NSArray.arrayWithObject(item);
     if (!item.setStringForType(text, $.NSPasteboardTypeString)) throw new Error('Could not prepare the clipboard text.');
     for (const type of flags) {
         if (!item.setStringForType('1', type)) throw new Error('Could not mark the clipboard data.');
     }
     if (Number(board.changeCount) !== saved.version) throw new Error('The clipboard changed.');
-    let owned = Number(board.prepareForNewContentsWithOptions(options));
+    const owned = Number(board.prepareForNewContentsWithOptions(options));
     try {
         if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
-        if (!board.writeObjects($.NSArray.arrayWithObject(item))) throw new Error('Could not write the clipboard.');
-        owned = Number(board.changeCount);
+        if (!board.writeObjects(items)) throw new Error('Could not write the clipboard.');
+        // writeObjects never bumps changeCount, so `owned` stays the generation
+        // prepareForNewContents returned: adopting a newer one here would let a
+        // failed readback restore our text over somebody's newer copy.
+        if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
         if (ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)) !== text)
             throw new Error('The clipboard text did not read back.');
         return owned;

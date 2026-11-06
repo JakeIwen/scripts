@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import patch
 
 import btt_socket
+import install_finder_paste as finder
 import install_text_editing_keys as keys
 import text_editing_conditions as conditions
 import trigger_install as triggers
@@ -26,12 +27,27 @@ const vm = require('node:vm');
 const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 (async () => {
     const out = [];
-    for (const {script, name, jxa} of entries) {
+    for (const {script, name, jxa, variable, failRead, failJxa, failVariableRead} of entries) {
         const calls = [];
         const context = vm.createContext({
-            readFile: async path => { calls.push(['readFile', path]); return 'SOURCE'; },
-            runJXA: async source => { calls.push(['runJXA', source]); return jxa; },
-            callBTT: async (command, args) => { calls.push(['callBTT', command, args]); }
+            Date: {now: () => 100000},
+            readFile: async path => {
+                calls.push(['readFile', path]);
+                if (failRead) throw new Error('fixture read failure');
+                return 'SOURCE';
+            },
+            runJXA: async source => {
+                calls.push(['runJXA', source]);
+                if (failJxa) throw new Error('fixture runJXA rejection');
+                return jxa;
+            },
+            callBTT: async (command, args) => {
+                calls.push(['callBTT', command, args]);
+                if (command === 'get_string_variable') {
+                    if (failVariableRead) throw new Error('fixture variable read failure');
+                    return variable;
+                }
+            }
         });
         vm.runInContext(script, context);
         out.push({result: await vm.runInContext(name + '()', context), calls});
@@ -69,9 +85,50 @@ class ConditionTests(unittest.TestCase):
         with patch.object(conditions, 'CARET_CONDITION', loose):
             self.assertIn('caret condition fires on: read-only text', conditions.truth_table_errors())
 
+    def test_p4_single_line_roles_never_intercept_even_in_a_menu_less_app(self):
+        cases = [{'BTTActiveAppBundleIdentifier': app,
+                  'focused_element_details': conditions.CARET.replace('AXTextArea', role),
+                  conditions.LINE_CLIPBOARD_VARIABLE: '1'}
+                 for app in ('com.apple.TextEdit', 'com.apple.Spotlight', 'com.runningwithcrayons.Alfred', 'com.raycast.macos')
+                 for role in ('AXTextField', 'AXTextArea')]
+        self.assertEqual(conditions.evaluate(conditions.PASTE_CONDITION, cases)['results'], [False, True] * 4)
+        loose = conditions.PASTE_CONDITION.replace('(?=.*AXRole:  "AXTextArea")', '')
+        with patch.object(conditions, 'PASTE_CONDITION', loose):
+            self.assertIn('paste condition fires on: tagged AXTextField caret', conditions.truth_table_errors())
+
     def test_stored_conditions_compare_in_nspredicate_format(self):
         reserialized = conditions.CARET_CONDITION.replace(' AND ', '  AND  ')
         self.assertEqual(conditions.canonical(reserialized), conditions.canonical(conditions.CARET_CONDITION))
+
+    def test_a_case_missing_a_condition_variable_fails_even_if_the_condition_short_circuits(self):
+        for app in ('com.apple.TextEdit', 'com.microsoft.VSCode'):
+            with self.subTest(app=app), self.assertRaisesRegex(RuntimeError, conditions.LINE_CLIPBOARD_VARIABLE):
+                conditions.evaluate(conditions.PASTE_CONDITION,
+                    [{'BTTActiveAppBundleIdentifier': app, 'focused_element_details': conditions.CARET}])
+
+    def test_every_installed_condition_reads_only_builtins_or_initialized_variables(self):
+        allowed = set(conditions.BUILTIN_VARIABLES) | set(conditions.INITIAL_VARIABLES)
+        predicates = {d['BTTTriggerConditionsFormat'] for d in keys.definitions() if d.get('BTTTriggerConditionsFormat')}
+        self.assertIn(conditions.PASTE_CONDITION, predicates)
+        for predicate in predicates:
+            with self.subTest(predicate=predicate[:60]):
+                self.assertLessEqual(set(conditions.variables_used(predicate)), allowed)
+        self.assertEqual(conditions.variables_used(conditions.PASTE_CONDITION),
+                         sorted(allowed))
+
+    def test_the_paste_condition_checks_app_then_variable_then_details(self):
+        text = conditions.PASTE_CONDITION
+        order = [text.index(part) for part in ('BTTActiveAppBundleIdentifier', conditions.LINE_CLIPBOARD_VARIABLE,
+                                               'focused_element_details')]
+        self.assertEqual(order, sorted(order))
+
+    def test_a_misspelled_predicate_key_fails_loudly(self):
+        with self.assertRaisesRegex(RuntimeError, 'misspelled_variable'):
+            conditions.evaluate('misspelled_variable == "1"', [{'different_variable': '1'}])
+
+    def test_a_missing_variable_inside_an_aggregate_fails_loudly(self):
+        with self.assertRaisesRegex(RuntimeError, 'missing_candidate'):
+            conditions.evaluate('app IN {missing_candidate}', [{'app': 'com.apple.TextEdit'}])
 
 
 @unittest.skipUnless(shutil.which('node'), 'emitted scripts are executed with Node')
@@ -122,21 +179,183 @@ class EmittedScriptTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 [outcome] = run_entries([self.entry(by_note(note), '{"ok":true,"result":"%s"}' % result)])
                 self.assertEqual(outcome['result'], result)
-                *reads, (_, source) = outcome['calls']
+                reads = [call for call in outcome['calls'] if call[0] == 'readFile']
+                [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
                 self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
                 self.assertEqual(call_options(source, 'runEditingKey'),
-                                 {'kind': kind, 'directory': str(keys.DIRECTORY)})
+                                 {'kind': kind, 'directory': str(keys.DIRECTORY),
+                                  'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
 
     def test_a_refused_copy_is_reported_as_a_notification(self):
         [outcome] = run_entries([self.entry(by_note('copies the line'), '{"ok":false,"error":"fixture refusal"}')])
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
                                                 {'title': 'Copy line stopped', '': 'fixture refusal'}])
 
+    def test_paste_uses_a_stable_cmd_v_uuid_and_tagged_caret_condition(self):
+        paste = by_note('pastes above the line')
+        self.assertEqual(paste['BTTUUID'], 'A9D83EB2-3D4F-5A85-984E-511A2477E7CE')
+        self.assertEqual(paste['BTTUUID'], keys.stable_uuid('paste line'))
+        self.assertEqual((paste['BTTShortcutKeyCode'], paste['BTTShortcutModifierKeys']), (9, triggers.COMMAND))
+        self.assertEqual(paste['BTTTriggerConditionsFormat'], conditions.PASTE_CONDITION)
+        self.assertTrue(paste[triggers.PASSTHROUGH])
+        [outcome] = run_entries([self.entry(paste, '{"ok":true,"result":"pasted line","lineClipboard":true}')])
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_persistent_string_variable',
+            {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '1'}])
+        self.assertEqual(call_options(outcome['calls'][-2][1], 'runEditingKey'),
+            {'kind': 'paste-line', 'directory': str(keys.DIRECTORY),
+             'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE, 'waitForTag': False})
+
+    def test_the_disjoint_pair_is_built_from_the_one_finder_and_paste_line_ids(self):
+        self.assertEqual(keys.DISJOINT_TRIGGER_PAIRS, (frozenset({finder.TRIGGER, keys.PASTE_LINE_ID}),))
+        self.assertEqual(keys.PASTE_LINE_ID, keys.stable_uuid('paste line'))
+        self.assertEqual(by_note('pastes above the line')['BTTUUID'], keys.PASTE_LINE_ID)
+        self.assertEqual(triggers.DISJOINT_TRIGGER_PAIRS, keys.DISJOINT_TRIGGER_PAIRS)
+
+    def test_variable_logic_is_an_optional_hook_and_finders_action_has_none(self):
+        script = finder.action()['BTTAppleScriptString']
+        self.assertNotIn('_variable', script)
+        self.assertNotIn('lineClipboard', script)
+        plain = triggers.runtime_action('f', 'run', {}, 'T', ('a.js',))['BTTAppleScriptString']
+        self.assertEqual(plain, script.replace('pasteInFinder', 'f').replace('runFinderPaste', 'run')
+                         .replace('Finder paste stopped', 'T').replace(json.dumps(list(finder.RUNTIME)),
+                                                                        json.dumps(['a.js'])))
+        hooked = triggers.runtime_action('f', 'run', {}, 'T', ('a.js',),
+                                         hook=lambda entry, options: triggers.RuntimeHook('    BEFORE\n', '    AFTER\n'))['BTTAppleScriptString']
+        order = [hooked.index(part) for part in ('BEFORE', 'readFile', 'runJXA', 'AFTER', 'display_notification')]
+        self.assertEqual(order, sorted(order))
+
+    def variable_writes(self, outcome):
+        return [call[2]['to'] for call in outcome['calls']
+                if call[0] == 'callBTT' and call[1] == 'set_persistent_string_variable'
+                and call[2]['variable_name'] == conditions.LINE_CLIPBOARD_VARIABLE]
+
+    def test_copy_and_cut_mark_the_tag_before_reading_sources_and_end_off_without_one(self):
+        on, off = conditions.LINE_CLIPBOARD_ON, conditions.LINE_CLIPBOARD_OFF
+        for note in ('cuts the line', 'copies the line'):
+            definition = by_note(note)
+            for jxa, final in (('{"ok":true,"result":"x","lineClipboard":true}', on),
+                               ('{"ok":true,"result":"x","lineClipboard":false}', off),
+                               ('{"ok":true,"result":"x"}', off),
+                               ('{"ok":true,"result":"x","lineClipboard":"true"}', off),
+                               ('{"ok":false,"error":"no tag"}', off),
+                               ('{"NSLocalizedDescription":"Error: boom"}', off),
+                               ('not json', off), ('null', off)):
+                with self.subTest(note=note, jxa=jxa):
+                    [outcome] = run_entries([self.entry(definition, jxa)])
+                    self.assertEqual(outcome['calls'][0][:2], ['callBTT', 'set_persistent_string_variable'])
+                    self.assertEqual(outcome['calls'][0][2],
+                                     {'variable_name': keys.LINE_COPY_STARTED_VARIABLE, 'to': '100000'})
+                    self.assertEqual(outcome['calls'][1][2],
+                                     {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': on})
+                    self.assertEqual(self.variable_writes(outcome), [on, final])
+                    self.assertGreater([c[0] for c in outcome['calls']].index('readFile'), 0)
+
+    def test_a_crash_in_the_transport_ends_off_and_notifies(self):
+        for note, title, prior in (('cuts the line', 'Cut line stopped', [conditions.LINE_CLIPBOARD_ON]),
+                                   ('pastes above the line', 'Paste line stopped', [])):
+            for flag in ('failRead', 'failJxa'):
+                entry = self.entry(by_note(note), '{"ok":true,"result":"x","lineClipboard":true}')
+                entry[flag] = True
+                with self.subTest(note=note, flag=flag):
+                    [outcome] = run_entries([entry])
+                    self.assertEqual(self.variable_writes(outcome), prior + [conditions.LINE_CLIPBOARD_OFF])
+                    self.assertEqual(outcome['calls'][-1][:2], ['callBTT', 'display_notification'])
+                    self.assertEqual(outcome['calls'][-1][2]['title'], title)
+                    self.assertIn('fixture', outcome['result'])
+
+    def test_paste_waits_only_with_a_recent_copy_start_read_by_the_action(self):
+        for value, wait in ((None, False), ('', False), ('bad', False), ('0', False), ('98500', False),
+                            ('98501', True), ('100000', True), ('100001', False), ('1', False)):
+            with self.subTest(value=value):
+                entry = self.entry(by_note('pastes above the line'), '{"ok":true,"result":"pasted normally"}')
+                entry['variable'] = value
+                [outcome] = run_entries([entry])
+                self.assertEqual(outcome['calls'][0], ['callBTT', 'get_string_variable',
+                                 {'variable_name': keys.LINE_COPY_STARTED_VARIABLE}])
+                [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
+                self.assertIs(call_options(source, 'runEditingKey')['waitForTag'], wait)
+
+    def test_a_rejected_timestamp_read_pastes_without_waiting_and_disarms(self):
+        entry = self.entry(by_note('pastes above the line'),
+                           '{"ok":true,"result":"pasted normally","lineClipboard":false}')
+        entry['failVariableRead'] = True
+        [outcome] = run_entries([entry])
+        [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
+        self.assertIs(call_options(source, 'runEditingKey')['waitForTag'], False)
+        self.assertEqual(outcome['result'], 'pasted normally')
+        self.assertEqual(self.variable_writes(outcome), [conditions.LINE_CLIPBOARD_OFF])
+
+    def test_trigger_layer_and_shared_ids_do_not_import_their_installers(self):
+        subprocess.run([sys.executable, '-c',
+            'import trigger_install, editing_key_ids, sys; '
+            'trigger_install.active_triggers = lambda *args: []; '
+            'trigger_install.conflicts(None, []); '
+            'assert "install_text_editing_keys" not in sys.modules; '
+            'assert "install_finder_paste" not in sys.modules'], check=True)
+
+    def test_paste_does_not_mark_before_running_and_follows_the_reported_tag(self):
+        for jxa, final in (('{"ok":true,"result":"x","lineClipboard":true}', '1'), ('{"ok":true,"result":"x"}', '0'),
+                           ('{"ok":false,"error":"e"}', '0'),
+                           ('{"ok":false,"error":"e","lineClipboard":true}', '0'), ('null', '0'), ('bad', '0')):
+            [outcome] = run_entries([self.entry(by_note('pastes above the line'), jxa)])
+            self.assertEqual(self.variable_writes(outcome), [final])
+
+    def test_wrap_and_finder_transport_never_touch_variables(self):
+        [outcome] = run_entries([self.entry(by_note('in ('), '{"ok":true,"result":"wrapped"}')])
+        self.assertEqual(self.variable_writes(outcome), [])
+        script = finder.action()['BTTAppleScriptString']
+        self.assertNotIn('callBTT("set_persistent', script)
+        self.assertNotIn('lineClipboard', script)
+
+    def test_a_raced_native_clipboard_clears_the_custom_condition_variable(self):
+        [outcome] = run_entries([self.entry(by_note('pastes above the line'),
+            '{"ok":true,"result":"pasted normally","lineClipboard":false}')])
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_persistent_string_variable',
+            {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '0'}])
+
+    def test_a_completed_cut_with_a_tag_warning_still_returns_success_and_notifies(self):
+        message = 'Line cut, but Cmd-V will paste it inline.'
+        [outcome] = run_entries([self.entry(by_note('cuts the line'),
+            json.dumps({'ok': True, 'result': message, 'warning': message, 'lineClipboard': False}))])
+        self.assertEqual(outcome['result'], message)
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
+            {'title': 'Line cut with a warning', '': message}])
+
     def test_app_switches_prepare_text_accessibility_outside_excluded_apps(self):
         [outcome] = run_entries([self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')])
         self.assertEqual(outcome['result'], 'enabled')
         self.assertEqual(call_options(outcome['calls'][-1][1], 'runAppSwitch'),
-                         {'excluded': list(conditions.EXCLUDED_APPS)})
+                         {'excluded': list(conditions.EXCLUDED_APPS),
+                          'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
+
+    def test_app_switch_repairs_an_unbound_variable_before_running_jxa(self):
+        definition = by_note('on app switch')
+        for variable in ('', None):
+            entry = self.entry(definition, '{"ok":true,"result":"enabled"}')
+            entry['variable'] = variable
+            [outcome] = run_entries([entry])
+            self.assertEqual(outcome['calls'][:2], [
+                ['callBTT', 'get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE}],
+                ['callBTT', 'set_persistent_string_variable',
+                 {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': conditions.LINE_CLIPBOARD_OFF}]])
+
+    def test_app_switch_repairs_a_rejected_variable_read(self):
+        entry = self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')
+        entry['failVariableRead'] = True
+        [outcome] = run_entries([entry])
+        self.assertEqual(outcome['calls'][:2], [
+            ['callBTT', 'get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE}],
+            ['callBTT', 'set_persistent_string_variable',
+             {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': conditions.LINE_CLIPBOARD_OFF}]])
+        self.assertEqual(outcome['result'], 'enabled')
+
+    def test_app_switch_preserves_an_existing_bound_variable(self):
+        for variable in (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON):
+            entry = self.entry(by_note('on app switch'), '{"ok":true,"result":"excluded"}')
+            entry['variable'] = variable
+            [outcome] = run_entries([entry])
+            self.assertEqual([call for call in outcome['calls'] if call[0] == 'callBTT'], [
+                ['callBTT', 'get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE}]])
 
 
 class InstallFlowTests(unittest.TestCase):
@@ -145,7 +364,8 @@ class InstallFlowTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory)
         self.plan = keys.definitions()
         self.fake = FakeBTT()
-        for module, target, value in [(btt_socket, 'call', self.fake), (triggers, 'saved_errors', lambda *args: []),
+        self.calls, self.variable = [], None
+        for module, target, value in [(btt_socket, 'call', self.socket), (triggers, 'saved_errors', lambda *args: []),
                                       (keys, 'BACKUPS', directory),
                                       (triggers, 'backup_configuration', lambda *args, **kw: directory / 'backup.json'),
                                       (conditions, 'canonical', lambda predicate: predicate)]:
@@ -155,6 +375,32 @@ class InstallFlowTests(unittest.TestCase):
         patcher = patch('builtins.print')
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def socket(self, command, **parameters):
+        self.calls.append((command, parameters))
+        if command == 'set_persistent_string_variable':
+            self.variable = parameters['to']
+            return ''
+        if command == 'get_string_variable':
+            return self.variable or ''
+        return self.fake(command, **parameters)
+
+    def test_persistent_variable_is_initialized_and_read_back_before_any_trigger_enables(self):
+        keys.install('db', self.plan)
+        self.assertEqual(self.calls[:2], [
+            ('set_persistent_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE,
+                                                'to': conditions.LINE_CLIPBOARD_OFF}),
+            ('get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE})])
+        enabled = [i for i, (command, args) in enumerate(self.calls)
+                   if command == 'update_trigger' and json.loads(args['json'])['BTTEnabled'] == 1]
+        self.assertTrue(enabled)
+        self.assertGreater(min(enabled), 1)
+
+    def test_an_unconfirmed_variable_initialization_enables_nothing(self):
+        with patch.object(btt_socket, 'call', return_value=''):
+            with self.assertRaisesRegex(RuntimeError, 'did not initialize'):
+                keys.install('db', self.plan)
+        self.assertEqual(self.fake.writes, [])
 
     def test_fresh_install_creates_everything_disabled_before_enabling(self):
         touched = keys.install('db', self.plan)
@@ -242,7 +488,26 @@ class SavedStateTests(unittest.TestCase):
             self.update('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,ZGESTURETYPE,
                 ZKEYCODE,ZMODIFIERKEYS,ZISENABLED,ZENABLEDNEW) VALUES (?,?,?,0,?,?,?,?)''',
                         index, 'other-%d' % index, preset, keycode, triggers.COMMAND, enabled, enabled)
-        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90', 'other-93'])
+        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90', 'other-93', 'other-94'])
+
+    def test_only_the_documented_disjoint_finder_uuid_is_allowed(self):
+        import install_finder_paste as finder
+        self.update('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,ZGESTURETYPE,
+            ZKEYCODE,ZMODIFIERKEYS,ZISENABLED,ZENABLEDNEW) VALUES (90,?,1,0,9,?,1,1)''',
+            finder.TRIGGER, triggers.COMMAND)
+        self.assertEqual(triggers.conflicts(self.database, self.plan), [])
+        self.assertEqual(triggers.conflicts(self.database, finder.definitions()), [])
+        self.update('UPDATE ZBTTBASEENTITY SET ZUNIQUEIDENTIFIER=? WHERE Z_PK=90', 'unreviewed-cmd-v')
+        self.assertEqual(triggers.conflicts(self.database, self.plan), ['unreviewed-cmd-v'])
+        self.assertEqual(triggers.conflicts(self.database, finder.definitions()), ['unreviewed-cmd-v'])
+
+    def test_finder_and_line_paste_conditions_never_overlap_in_the_truth_tables(self):
+        import finder_paste_condition as finder
+        variables = [{'BTTActiveAppBundleIdentifier': case.app, 'focused_element_details': case.details,
+                      conditions.LINE_CLIPBOARD_VARIABLE: '1'}
+                     for case in (*conditions.CASES, *finder.CASES)]
+        overlap = '(' + conditions.PASTE_CONDITION + ') AND (' + finder.CONDITION + ')'
+        self.assertFalse(any(conditions.evaluate(overlap, variables)['results']))
 
 
 if __name__ == '__main__':

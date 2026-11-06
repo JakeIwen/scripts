@@ -49,7 +49,7 @@ function firefoxMarkerModel({state, editor, length, field}) {
 // `editor` is the focused element; `native` holds its marker functions, merged
 // into each test's own `$`. Elements and leaves compare by value (`equal`).
 function firefoxEditor({paragraphs = ['first', 'mIxEd tail'], blocks = paragraphs.map(text => [text]),
-    chrome = [], field = false, node = 1, start = 0, endNode = node, end = 5, refuseMarkers = false} = {}) {
+    chrome = [], field = false, node = 1, start = 0, endNode = node, end = 5, refuseMarkers = false, breakLeaves = false} = {}) {
     const editor = {element:'firefox editor'};
     const leaves = chrome.map((text, block) => ({text, block:'chrome' + block, editor:false}));
     blocks.forEach((runs, block) => runs.forEach(text => leaves.push({text, block, editor:true})));
@@ -82,8 +82,24 @@ function firefoxEditor({paragraphs = ['first', 'mIxEd tail'], blocks = paragraph
         const caret={node:from.node, offset:from.offset+text.length};
         state.selection={start:caret,end:caret};
     };
+    // Gecko can expose a pasted break as its own newline leaf, or as only a
+    // block boundary. Keep replaceSelection for existing inline transform tests.
+    const pasteText = text => {
+        const from = state.selection.start, to = state.selection.end;
+        const parts = text.split(/\r\n?|[\n\u2029]/);
+        const before = state.leaves[from.node].text.slice(0, from.offset);
+        const after = state.leaves[to.node].text.slice(to.offset);
+        const inserted = parts.map((part, i) => ({text:(i === 0 ? before : '') + part
+            + (i === parts.length - 1 ? after : ''), block:Symbol('pasted block'), editor:true}));
+        const leaves = inserted.flatMap((leaf, i) => breakLeaves && i < inserted.length - 1
+            ? [leaf, {...leaf, text:'\n'}] : [leaf]);
+        state.leaves = [...state.leaves.slice(0, from.node), ...leaves, ...state.leaves.slice(to.node + 1)];
+        const caret = {node:from.node + leaves.length - 1, offset:parts.length === 1 ? before.length + text.length
+            : parts[parts.length - 1].length};
+        state.selection = {start:caret, end:caret};
+    };
     const native = nativeMarkers({state, editor, equal, rangeText, flatIndex, length, field, refuseMarkers});
-    return {editor, state, equal, rangeText, offsets, texts, attribute, replaceSelection, native};
+    return {editor, state, equal, rangeText, offsets, texts, attribute, replaceSelection, pasteText, native};
 }
 
 function nativeMarkers({state, editor, rangeText, flatIndex, length, field, refuseMarkers}) {

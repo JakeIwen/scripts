@@ -5,13 +5,14 @@
 const array = values => ({count:values.length, objectAtIndex:i => values[i]});
 const mutableArray = () => {
     const values = [];
-    return {get count() { return values.length; }, objectAtIndex:i => values[i], addObject:value => values.push(value)};
+    return {values, get count() { return values.length; }, objectAtIndex:i => values[i], addObject:value => values.push(value)};
 };
 const data = value => ({value, length:value.length, get copy() { return data(value); }});
 class Item {
     constructor(values = {}) { this.values = new Map(Object.entries(values).map(([k,v]) => [k,data(v)])); }
     get types() { return array([...this.values.keys()]); }
     dataForType(type) { return this.values.get(type); }
+    stringForType(type) { return this.dataForType(type)?.value; }
     setDataForType(value, type) { this.values.set(type,value); return true; }
     setStringForType(value, type) { return this.setDataForType(data(value),type); }
 }
@@ -26,12 +27,13 @@ function pasteboardFake({items = [{[PLAIN_TEXT]:'original','public.rtf':'rich or
         items:items.map(values => new Item(values)), changeCount, prepared:[],
         get pasteboardItems() { return array(this.items); },
         get text() { return this.stringForType(PLAIN_TEXT); },
-        stringForType(type) { return this.items[0]?.dataForType(type)?.value; },
+        stringForType(type) { return this.items.find(item => item.dataForType(type))?.stringForType(type); },
         get clearContents() { this.items = []; return ++this.changeCount; },
         prepareForNewContentsWithOptions(options) { this.prepared.push(options); return this.clearContents; },
         writeObjects(items) {
-            this.items = Array.isArray(items) ? items : Array.from({length:Number(items.count)},(_,i) => items.objectAtIndex(i));
-            this.changeCount++;
+            // Native semantics (measured): writeObjects appends and never bumps changeCount;
+            // only clearContents / prepareForNewContents start a new generation.
+            this.items.push(...(Array.isArray(items) ? items : Array.from({length:Number(items.count)},(_,i) => items.objectAtIndex(i))));
             return true;
         }
     };

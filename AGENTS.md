@@ -274,7 +274,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
   `install_text_editing_keys.py` (`btt.py text-keys`) owns the system-wide editing
-  keys (Cmd-X line cut, Cmd-C line copy, quote/bracket
+  keys (Cmd-X line cut, Cmd-C line copy, tagged Cmd-V whole-line paste, quote/bracket
   wrapping): conditional pass-through triggers that fire only on a settable
   focused selection outside `EXCLUDED_APPS`; `text_editing_conditions.py` owns
   those conditions and the truth table checked through `text_editing_conditions.js`
@@ -284,10 +284,44 @@ compare it with this checkout. Deployed files may differ from the repository.
   through Accessibility only while the caret is as first read, acts only on an
   exact readback with the text unchanged and focus checked last, and presses
   Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
-  trigger; Firefox blank lines are not cut. Cmd-C never touches the field: it
+  trigger; lazy NSMenu enabled flags are not a gate, and an unconfirmed cut
+  restores the caret while it still owns the selection. Firefox blank lines are
+  not cut. After confirmation, Cut waits up to one second for a newer matching
+  clipboard. If its first item's string equals the copy form, it tags a separate copy
+  of the app's items (RTF/HTML retained); otherwise it normalizes to plain line text
+  plus one `\n`. A failed tag write warns as a completed cut without undoing it, names the reason in the recorded result, and is retried while the app is still publishing (within the same one-second elapsed-time wait). Cmd-C never touches the field: it
   writes the line's text plus `\n` to the clipboard with `text_menu_paste.js`'s
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
-  read, and a failed write puts the previous clipboard back. Never select by
+  read, and a failed write puts the previous clipboard back. Copy/cut share the
+  private type defined once as `LINE_PASTEBOARD_TYPE` in `text_editing_keys.js`.
+  Cmd-V requires an `AXTextArea` caret in the condition and runtime, plus the
+  persistent BTT custom variable declared in
+  `text_editing_conditions.py`; the runtime rechecks the real tag and uses normal
+  Edit > Paste once on stale/untagged data, setting the variable to off. Copy/cut
+  transport records a persistent start timestamp before arming the variable;
+  only the paste action reads it, allowing the up-to-one-second tag wait only
+  within 1.5 seconds of a line copy/cut. An unset timestamp is harmless because
+  no condition reads it. Every normal fallback, failed/non-boolean outcome or
+  crash disarms the line variable. Single-line/search/URL fields pass through
+  natively (copy/cut unchanged). It uses the logical line start and restores
+  the original character caret after exact confirmation. An unconfirmed press
+  never restores the old caret, because a delayed paste may still land; before
+  a press, restoration requires this run to have issued the selection. Firefox uses native
+  paragraph-start/forward markers and accepts pasted breaks with or without a
+  newline leaf. Blank-only/unsupported shapes fall back to normal Paste; pre-press
+  fallback preserves newer focus/selection and never replays a press. A failed
+  paste turns interception off even if the tag remains. BTT restart retains the variable. All writes use `set_persistent_string_variable`;
+  `--apply` initializes and reads back `"0"` before enabling, and the app-switch
+  action reasserts it if `get_string_variable` is empty. This prevents BTT from
+  swallowing Cmd-V on an unbound condition without mismatch pass-through.
+  The Foundation evaluator rejects cases missing
+  predicate variables, rather than treating them as false. `INITIAL_VARIABLES`
+  is the one initializer map; all installed predicates are checked against it and
+  BTT's built-ins. The paste variable test precedes the focused-element dump.
+  `trigger_install.py` takes editing-variable logic as an installer hook and
+  permits only the explicit disjoint Finder/non-text and editing-key/text Cmd-V
+  UUID pair; `editing_key_ids.py` owns those shared stable IDs without importing
+  either installer. Unrelated same-key triggers still conflict. Never select by
   posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the

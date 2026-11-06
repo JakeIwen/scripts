@@ -11,9 +11,11 @@ from contextlib import closing
 import json
 import subprocess
 import time
+from typing import NamedTuple
 
 from btt_common import active_triggers, backup_configuration, connect, records
 import btt_socket
+from editing_key_ids import DISJOINT_TRIGGER_PAIRS
 import text_editing_conditions as conditions
 
 PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
@@ -22,15 +24,55 @@ SHIFT, COMMAND = 1 << 17, 1 << 20
 GLOBAL = 'BT.G'
 
 
-def runtime_action(function, entry, options, title, runtime):
-    """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
+class RuntimeHook(NamedTuple):
+    """Optional JS an installer splices into runtime_action's script.
+
+    before runs ahead of the source reads; after runs once `result` holds the
+    outcome (a parsed {ok, ...} object, or a synthesized failure when the
+    runtime threw or returned nothing usable). warning_title, when set, titles
+    the notification for an ok outcome that carries a warning. runtime_options
+    supplies a JS options expression when the action must read dynamic inputs.
+    """
+    before: str = ''
+    after: str = ''
+    warning_title: str | None = None
+    runtime_options: str | None = None
+
+
+def runtime_action(function, entry, options, title, runtime, *, hook=None):
+    """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome.
+
+    hook(entry, options) may return a RuntimeHook; the shared transport turns any
+    thrown, rejected or malformed runtime outcome into a failed result.
+    """
     call = '\n%s(%s);' % (entry, json.dumps(options))
+    extra = hook(entry, options) if hook else RuntimeHook()
+    notify_title = json.dumps(title) if extra.warning_title is None else (
+        f'result.ok ? {json.dumps(extra.warning_title)} : {json.dumps(title)}')
+    # display_notification uses the unnamed body parameter, not "text":
+    # https://docs.folivora.ai/docs/scripting/cli/ (command #6).
     # A script that fails inside runJXA comes back as {NSLocalizedDescription} instead.
+    # Only a hook that consumes failures needs normalized outcomes. Preserve the
+    # existing no-hook transport verbatim (Finder's installed action is a contract).
+    reads = f'const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));'
+    invocation = json.dumps(call)
+    if extra.runtime_options is not None:
+        invocation = '%s + JSON.stringify(%s) + ");"' % (json.dumps('\n' + entry + '('), extra.runtime_options)
+    outcome = f'JSON.parse(await runJXA(sources.join("\\n") + {invocation}))'
+    warning = ' || result.warning' if hook else ''
+    load = f'    {reads}\n    const result = {outcome};\n'
+    if extra.after:
+        load = (f'    let result;\n    try {{\n        {reads}\n'
+                f'        result = {outcome};\n'
+                '        if (result === null || typeof result !== "object") throw new Error("Runtime returned no outcome");\n'
+                '    } catch (error) {\n'
+                '        result = {ok: false, error: String(error && error.message || error)};\n'
+                '    }\n')
     script = (f'async function {function}() {{\n'
-              f'    const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));\n'
-              f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
-              f'    const error = result.error || result.NSLocalizedDescription;\n'
-              f'    if (!result.ok) await callBTT("display_notification", {{title: {json.dumps(title)}, "": error}});\n'
+              f'{extra.before}{load}'
+              f'{extra.after}'
+              f'    const error = result.error || result.NSLocalizedDescription{warning};\n'
+              f'    if (!result.ok{warning}) await callBTT("display_notification", {{title: {notify_title}, "": error}});\n'
               f'    return result.ok ? result.result : error;\n}}')
     # Separate contexts: triggers sharing a function name must not share state.
     return {'BTTScriptType': 3, 'BTTScriptLocation': 0, 'BTTAppleScriptUsePath': False,
@@ -112,9 +154,12 @@ def saved_errors(database, plan, enabled):
 def conflicts(database, plan):
     """Other enabled shortcuts in an active preset, in any app, on one of the plan's keys."""
     ours = {d['BTTUUID'] for d in plan}
-    keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']) for d in plan if d['BTTTriggerType'] == KEYBOARD}
+    keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']): d['BTTUUID']
+            for d in plan if d['BTTTriggerType'] == KEYBOARD}
     return sorted(row['ZUNIQUEIDENTIFIER'] for row in active_triggers(database, KEYBOARD)
-                  if row['ZUNIQUEIDENTIFIER'] not in ours and (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0) in keys)
+                  if row['ZUNIQUEIDENTIFIER'] not in ours
+                  and (key := (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0)) in keys
+                  and frozenset({row['ZUNIQUEIDENTIFIER'], keys[key]}) not in DISJOINT_TRIGGER_PAIRS)
 
 
 def wait_saved(database, plan, enabled, label):

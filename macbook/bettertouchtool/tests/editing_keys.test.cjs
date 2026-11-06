@@ -5,9 +5,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const {firefoxEditor} = require('./firefox_editor_fixture.cjs');
+const LINE_TYPE = 'com.jacobr.editing-keys.line';
 const {PLAIN_TEXT, array:nsArray, Item, pasteboardFake} = require('./pasteboard_fixture.cjs');
 
-// Cmd-X / Cmd-C with no selection, run through runEditingKey against a modelled
+// Cmd-X / Cmd-C / Cmd-V with no selection, run through runEditingKey against a modelled
 // focused field, its app's Edit menu (found by the real text_menu_paste.js) and
 // the general pasteboard (written by its real writeClipboardText). Elements
 // carry ids so they stay distinct under the Firefox model's by-value equality.
@@ -22,31 +23,36 @@ function editMenu() {
         ...[[cut, 'X'], [copy, 'C'], [paste, 'V']].map(([item, key]) =>
             [item, {AXRole:'AXMenuItem', AXMenuItemCmdChar:key, AXMenuItemCmdModifiers:0}])
     ]);
-    return {bar, cut, copy, attributes};
+    return {bar, cut, copy, paste, attributes};
 }
 
 // `field` is the focused element's model: `attribute(name)`, `set(name, value)`
 // for AX writes and `press(write)` for the app's Cut. A second field,
 // `state.other` (all of its text selected), can take focus; the Edit menu acts
 // on whichever field is focused when it is pressed. `onAttribute` (every AX
-// read) and `beforePress` (Cut's AXEnabled read) let the user act mid-run.
+// read) and `beforePress` (the final ownership check) let the user act mid-run.
 function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, clipboard:items = [{[PLAIN_TEXT]:'earlier'}],
-    onAttribute, beforePress} = {}) {
+    onAttribute, beforePress, onDelay} = {}) {
     const system = {id:'system'}, app = {id:'app'}, menu = editMenu();
     const other = cocoaField('IMPORTANT', 0, {id:'other field'});
     other.selection = {location:0, length:other.text.length};
     const {board, native:clipboard, contents} = pasteboardFake({items, changeCount:7});
     // An app's own Cut.
     const write = text => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:text})]); };
-    const state = {focused:field.element, other, presses:[], board};
+    const state = {focused:field.element, other, presses:[], board, clock:0};
     const fields = [field, other];
+    let selectionWrites = 0, selectionReads = 0;
     const attribute = (element, name, options) => {
+        // Run interleaving hooks at the final ownership check, not a stale menu flag.
+        if (selectionWrites > 0 && element === field.element && name === 'AXValue' && ++selectionReads === 2) {
+            if (beforePress) beforePress(state);
+        }
         if (onAttribute) onAttribute(state, element, name);
         const owner = fields.find(candidate => candidate.element === element);
         let value;
         if (element === system) value = {AXFocusedApplication:app, AXFocusedUIElement:state.focused}[name];
         else if (element === app) value = {AXMenuBar:menu.bar}[name];
-        else if (owner) value = name === 'AXRole' ? 'AXTextArea' : owner.attribute(name);
+        else if (owner) value = name === 'AXRole' ? (owner.role || 'AXTextArea') : owner.attribute(name);
         else if (element === menu.cut && name === 'AXEnabled') {
             if (beforePress) beforePress(state);
             return enabled;
@@ -64,18 +70,24 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, clipb
         NSFileManager:{defaultManager:{fileExistsAtPath:() => false}},
         AXUIElementSetAttributeValue(element, name, value) {
             assert.equal(element, field.element);
+            selectionWrites++;
             return field.set(name, value);
         },
         AXUIElementPerformAction(element, action) {
             assert.equal(action, 'AXPress');
-            assert.equal(element, menu.cut, 'only Cut is ever pressed');
-            state.presses.push('cut');
-            fields.find(candidate => candidate.element === state.focused).press(write);
+            assert.ok(element === menu.cut || element === menu.paste);
+            state.presses.push(element === menu.cut ? 'cut' : 'paste');
+            const target = fields.find(candidate => candidate.element === state.focused);
+            if (element === menu.cut) target.press(write);
+            else target.paste(board.text);
             return 0;
         }
     });
     const context = vm.createContext({$:native, Ref:() => [],
-        delay() {},
+        // A fake clock for the runtime's Date.now() deadlines: only delay() and
+        // tests (slow attempts) advance it.
+        delay(seconds) { state.clock += seconds * 1000; if (onDelay) onDelay(state, seconds); },
+        Date:class extends Date { static now() { return state.clock; } },
         ObjC:{import() {}, castRefToObject:x => x, unwrap:x => x}});
     for (const file of ['text_selection.js', 'text_editing_keys.js'])
         vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
@@ -87,13 +99,13 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, clipb
         // The real Edit-menu and marker sources, as BTT loads them.
         selectionReadSource:file => fs.readFileSync(path.join(__dirname, '..', path.basename(file)), 'utf8')
     });
-    const run = kind => JSON.parse(context.runEditingKey({kind, directory:'/fixture'}));
+    const run = (kind, options = {}) => JSON.parse(context.runEditingKey({kind, directory:'/fixture', ...options}));
     return {run, state, board, contents, context};
 }
 
 // A Cocoa text view: AXValue holds the breaks and ranges are numeric. Options
 // model an app that ignores or alters a range write, or whose Cut does nothing.
-function cocoaField(text, caret, {id = 'field', selectAs = range => range, refuseCaret = false, cuts = true} = {}) {
+function cocoaField(text, caret, {id = 'field', selectAs = range => range, refuseCaret = false, cuts = true, pastes = true} = {}) {
     const field = {element:{id}, text, selection:{location:caret, length:0}, writes:0};
     const selected = () => field.text.slice(field.selection.location, field.selection.location + field.selection.length);
     return Object.assign(field, {
@@ -105,6 +117,12 @@ function cocoaField(text, caret, {id = 'field', selectAs = range => range, refus
             if (refuseCaret && value.length === 0) return -25200;
             field.selection = {...selectAs(value)};
             return 0;
+        },
+        paste(text) {
+            if (!pastes) return;
+            const {location, length} = field.selection;
+            field.text = field.text.slice(0, location) + text + field.text.slice(location + length);
+            field.selection = {location:location + text.length, length:0};
         },
         press(write) {
             if (cuts) {
@@ -136,7 +154,7 @@ test('Cmd-X cuts the caret’s logical line and its break, wherever the caret si
         const {run, state, board} = keyFixture(field);
         assert.deepEqual(run('cut-line'), {ok:true, result:'cut line'}, JSON.stringify([text, caret]));
         assert.deepEqual(state.presses, ['cut']);
-        assert.equal(board.text, line);
+        assert.equal(board.text, line.replace(/(?:\r\n?|[\n\u2029])$/, '') + '\n');
         assert.equal(field.text, rest);
     }
 });
@@ -152,8 +170,8 @@ test('Cmd-C puts the caret’s line on the clipboard as plain text and leaves th
         const field = cocoaField(text, caret);
         const {run, state, board, contents} = keyFixture(field);
         assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'}, JSON.stringify([text, caret]));
-        // One ordinary copy: plain text alone, not marked transient or kept off other devices.
-        assert.deepEqual(contents(), [{[PLAIN_TEXT]:line}]);
+        // Ordinary plain text plus our line tag, not transient or kept off other devices.
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:line, [LINE_TYPE]:'1'}]);
         assert.deepEqual(board.prepared, [0]);
         assert.deepEqual(state.presses, []);
         assert.equal(field.writes, 0);
@@ -269,12 +287,12 @@ test('focus or text that changes before the press stops the command untouched', 
     }
 });
 
-test('an unavailable Cut presses nothing and puts the caret back', () => {
+test('a lazily disabled Cut item still presses and confirms the cut', () => {
     const field = cocoaField(THREE, 5);
     const {run, state} = keyFixture(field, {enabled:false});
-    assert.deepEqual(run('cut-line'), {ok:false, error:'The app’s Cut command is unavailable; nothing was cut.'});
-    assert.deepEqual(state.presses, []);
-    assert.deepEqual(field.selection, {location:5, length:0});
+    assert.deepEqual(run('cut-line'), {ok:true, result:'cut line'});
+    assert.deepEqual(state.presses, ['cut']);
+    assert.equal(field.text, 'one\nthree');
 });
 
 test('a cut the app does not carry out is reported rather than claimed', () => {
@@ -282,12 +300,13 @@ test('a cut the app does not carry out is reported rather than claimed', () => {
     const {run, state} = keyFixture(field);
     assert.deepEqual(run('cut-line'), {ok:false, error:'The app did not confirm the cut; check the text.'});
     assert.deepEqual(state.presses, ['cut']);
+    assert.deepEqual(field.selection, {location:5, length:0});
 });
 
 test('a caret the app will not put back is reported with the stopped cut', () => {
-    const field = cocoaField(THREE, 5, {refuseCaret:true});
-    assert.deepEqual(keyFixture(field, {enabled:false}).run('cut-line'), {ok:false, error:'The app’s Cut command is '
-        + 'unavailable; nothing was cut. The caret could not be put back: The app refused the selection.'});
+    const field = cocoaField(THREE, 5, {refuseCaret:true, cuts:false});
+    assert.deepEqual(keyFixture(field, {enabled:false}).run('cut-line'), {ok:false, error:'The app did not confirm the cut; '
+        + 'check the text. The caret could not be put back: The app refused the selection.'});
     assert.deepEqual(field.selection, {location:4, length:4});
 });
 
@@ -303,11 +322,12 @@ test('a selection made before the script runs is not replaced', () => {
 // Firefox: the field's model from firefox_editor_fixture.cjs. Its numeric
 // selection writes throw, so passing proves lines go through text markers.
 // Its Cut serializes a selection ending at the next block's start with a break.
-function firefoxField(paragraphs, node, offset) {
-    const document = firefoxEditor({paragraphs, node, start:offset, end:offset});
+function firefoxField(paragraphs, node, offset, options = {}) {
+    const document = firefoxEditor({paragraphs, node, start:offset, end:offset, ...options});
     return {element:document.editor, document, native:document.native, equal:document.equal,
         attribute:name => document.attribute(name),
         set:(name, value) => document.native.AXUIElementSetAttributeValue(document.editor, name, value),
+        paste:text => document.pasteText(text),
         press(write) {
             const {start, end} = document.state.selection;
             write(document.rangeText(document.state.selection) + (end.node > start.node && end.offset === 0 ? '\n' : ''));
@@ -322,7 +342,7 @@ test('Firefox cuts the caret’s paragraph and its break through text markers', 
         const {run, state, board} = keyFixture(field, {bundle:'org.mozilla.firefox'});
         assert.deepEqual(run('cut-line'), {ok:true, result:'cut line'});
         assert.deepEqual(state.presses, ['cut']);
-        assert.equal(board.text, line);
+        assert.equal(board.text, line.endsWith('\n') ? line : line + '\n');
         assert.deepEqual(field.document.texts(), rest);
     }
 });
@@ -339,7 +359,7 @@ test('Firefox copies the caret’s paragraph text and a break, blank and last pa
         const caret = JSON.stringify(field.document.state.selection);
         const {run, state, board, contents} = keyFixture(field, {bundle:'org.mozilla.firefox'});
         assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'}, JSON.stringify([paragraphs, node]));
-        assert.deepEqual(contents(), [{[PLAIN_TEXT]:line}]);
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:line, [LINE_TYPE]:'1'}]);
         assert.deepEqual(state.presses, []);
         assert.equal(JSON.stringify(field.document.state.selection), caret);
         assert.deepEqual(field.document.texts(), paragraphs);
@@ -355,7 +375,7 @@ test('Firefox copies each paragraph of every short mix of blank and filled parag
             for (let node = 0; node < count; node++) {
                 const {run, contents} = keyFixture(firefoxField(paragraphs, node, 0), {bundle:'org.mozilla.firefox'});
                 assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'}, JSON.stringify([paragraphs, node]));
-                assert.deepEqual(contents(), [{[PLAIN_TEXT]:paragraphs[node] + '\n'}], JSON.stringify([paragraphs, node]));
+                assert.deepEqual(contents(), [{[PLAIN_TEXT]:paragraphs[node] + '\n', [LINE_TYPE]:'1'}], JSON.stringify([paragraphs, node]));
             }
         }
     }
@@ -439,4 +459,478 @@ test('the runtime can load again into the same context, as BTT reuses one', () =
             vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
     }
     assert.equal(typeof context.runEditingKey, 'function');
+});
+
+
+test('tagged Cmd-V inserts above the line and keeps the original character under the caret', () => {
+    for (const [text, caret, expected, position] of [
+        [THREE, 5, 'one\ncopy\ntwo\nthree', 10],
+        [THREE, 4, 'one\ncopy\ntwo\nthree', 9],
+        ['one\n', 4, 'one\ncopy\n', 9],
+        ['one\ntwo', 6, 'one\ncopy\ntwo', 11],
+        ['one\r\ntwo\r\n', 6, 'one\r\ncopy\ntwo\r\n', 11],
+        ['', 0, 'copy\n', 5]
+    ]) {
+        const field = cocoaField(text, caret);
+        const {run, state, contents} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+        assert.deepEqual(run('paste-line'), {ok:true, result:'pasted line'}, JSON.stringify([text, caret]));
+        assert.equal(field.text, expected);
+        assert.deepEqual(field.selection, {location:position, length:0});
+        assert.deepEqual(state.presses, ['paste']);
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]);
+    }
+});
+
+test('untagged Cmd-V uses native Paste once at the current selection', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, state} = keyFixture(field);
+    assert.deepEqual(run('paste-line'), {ok:true, result:'pasted normally'});
+    assert.equal(field.text, 'one\n' + 't' + 'earlier' + 'wo\nthree');
+    assert.deepEqual(state.presses, ['paste']);
+});
+
+test('a tagged paste whose selection changed uses normal Paste once', () => {
+    const field = cocoaField(THREE, 5);
+    field.selection.length = 2;
+    const {run, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+    assert.deepEqual(run('paste-line'), {ok:true, result:'pasted normally'});
+    assert.equal(field.text, 'one\ntcopy\n\nthree');
+    assert.deepEqual(state.presses, ['paste']);
+});
+
+test('P2: a user caret moved to line start before select is not mistaken for ours', () => {
+    for (const change of [(state, field) => { field.selection.location = 9; },
+        (state, field) => { field.selection.location = 4; },
+        state => { state.focused = state.other.element; }]) {
+        const field = cocoaField(THREE, 5);
+        let menuRead = false, moved = false;
+        const {run, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}],
+            onAttribute:(state, element, name) => {
+                if (name === 'AXMenuBar') menuRead = true;
+                if (menuRead && !moved && element === field.element && name === 'AXSelectedTextRange') {
+                    moved = true; change(state, field);
+                }
+            }});
+        assert.equal(run('paste-line').ok, false);
+        assert.deepEqual(state.presses, []);
+        assert.equal(field.writes, 0);
+    }
+});
+
+test('a newer clipboard before Paste restores the caret and pastes that copy normally', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, contents, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}],
+        beforePress:state => { state.board.clearContents; state.board.writeObjects([new Item({[PLAIN_TEXT]:'new'})]); }});
+    assert.deepEqual(run('paste-line'), {ok:true, result:'pasted normally'});
+    assert.equal(field.text, 'one\ntnewwo\nthree');
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'new'}]);
+    assert.deepEqual(state.presses, ['paste']);
+});
+
+test('P3: a late paste lands at the line start after confirmation times out', () => {
+    const field = cocoaField(THREE, 5), paste = field.paste;
+    let pending;
+    field.paste = text => { pending = text; };
+    const {run, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+    assert.deepEqual(run('paste-line'), {ok:false, error:'The app did not confirm the paste; check the text.'});
+    assert.equal(field.text, THREE);
+    assert.deepEqual(field.selection, {location:4, length:0});
+    assert.deepEqual(state.presses, ['paste']);
+    paste(pending);
+    assert.equal(field.text, 'one\ncopy\ntwo\nthree');
+});
+
+test('Firefox pastes at the native paragraph start and restores a marker caret', () => {
+    for (const breakLeaves of [false, true]) for (const [paragraphs, node, offset] of [
+        [['first', 'middle', 'last'], 1, 3], [['first', 'middle', 'last'], 1, 0], [['first', ''], 1, 0]]) {
+        const field = firefoxField(paragraphs, node, offset, {breakLeaves});
+        const {run} = keyFixture(field, {bundle:'org.mozilla.firefox',
+            clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+        assert.deepEqual(run('paste-line'), {ok:true, result:'pasted line'});
+        assert.deepEqual(field.document.texts(), [...paragraphs.slice(0, node), 'copy',
+            ...(breakLeaves ? ['\n'] : []), ...paragraphs.slice(node)]);
+        const target = node + (breakLeaves ? 2 : 1);
+        assert.deepEqual(field.document.state.selection, {start:{node:target, offset}, end:{node:target, offset}});
+    }
+});
+
+test('Firefox blank tagged paste falls back to native Paste instead of swallowing Cmd-V', () => {
+    const field = firefoxField(['first', 'middle'], 1, 2);
+    const {run, state} = keyFixture(field, {bundle:'org.mozilla.firefox',
+        clipboard:[{[PLAIN_TEXT]:'\n', [LINE_TYPE]:'1'}]});
+    assert.equal(run('paste-line', {lineClipboardVariable:'v'}).ok, true);
+    assert.deepEqual(state.presses, ['paste']);
+    assert.deepEqual(field.document.texts(), ['first', 'mi', 'ddle']);
+});
+
+test('a failed cut tag write preserves the app clipboard and reports a successful cut with warning', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board, contents} = keyFixture(field);
+    const write = board.writeObjects;
+    let writes = 0;
+    board.writeObjects = function (items) { return ++writes === 2 ? false : write.call(this, items); };
+    const message = 'Line cut, but Cmd-V will paste it inline.';
+    assert.deepEqual(run('cut-line'), {ok:true, result:message + ' Could not write the clipboard.', warning:message});
+    assert.equal(field.text, 'one\nthree');
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'two\n'}]);
+});
+
+test('the line clipboard state is returned for BTT to update its custom condition variable', () => {
+    const {context, board} = keyFixture(cocoaField(THREE, 5));
+    const run = kind => JSON.parse(context.runEditingKey({kind, directory:'/fixture', lineClipboardVariable:'fixture'}));
+    assert.equal(run('copy-line').lineClipboard, true);
+    board.clearContents;
+    board.writeObjects([new Item({[PLAIN_TEXT]:'native'})]);
+    assert.equal(run('paste-line').lineClipboard, false);
+});
+
+
+test('a native copy after Cut is preserved instead of overwritten by the line tag', () => {
+    const field = cocoaField(THREE, 5);
+    let copied = false;
+    const {run, contents} = keyFixture(field, {onAttribute:(state, element, name) => {
+        if (!copied && state.presses.includes('cut') && name === 'AXValue') {
+            copied = true;
+            state.board.clearContents;
+            state.board.writeObjects([new Item({[PLAIN_TEXT]:'newer copy'})]);
+        }
+    }});
+    const outcome = run('cut-line');
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.warning, 'Line cut, but Cmd-V will paste it inline.');
+    assert.equal(outcome.result, outcome.warning + ' The app did not publish the cut line.');
+    assert.equal(field.text, 'one\nthree');
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'newer copy'}]);
+});
+
+test('a newer caret or focus before Paste is left alone without pressing Paste', () => {
+    for (const change of [(state, field) => { field.selection.location = 10; },
+        state => { state.focused = state.other.element; }]) {
+        const field = cocoaField(THREE, 5);
+        const {run, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}],
+            beforePress:state => change(state, field)});
+        const outcome = run('paste-line');
+        assert.equal(outcome.ok, false);
+        assert.match(outcome.error, /left as it is/);
+        assert.equal(field.text, THREE);
+        assert.deepEqual(state.presses, []);
+    }
+});
+
+test('Firefox leaves the line-start caret after an unconfirmed Paste', () => {
+    const field = firefoxField(['first', 'middle', 'last'], 1, 3);
+    field.paste = () => {};
+    const {run} = keyFixture(field, {bundle:'org.mozilla.firefox',
+        clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+    assert.deepEqual(run('paste-line'), {ok:false, error:'The app did not confirm the paste; check the text.'});
+    assert.deepEqual(field.document.state.selection, {start:{node:1, offset:0}, end:{node:1, offset:0}});
+});
+
+test('a confirmed paste remains successful if the app refuses the restored caret', () => {
+    const field = cocoaField(THREE, 5);
+    const set = field.set;
+    field.set = (name, value) => field.text === THREE ? set(name, value) : -25200;
+    const {run} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+    assert.deepEqual(run('paste-line'), {ok:true, result:'pasted line'});
+    assert.equal(field.text, 'one\ncopy\ntwo\nthree');
+    assert.deepEqual(field.selection, {location:9, length:0});
+});
+
+test('Firefox leaves the insertion caret if forward steps would cross a paragraph boundary', () => {
+    const field = firefoxField(['first', 'middle', 'last'], 1, 6);
+    const {run} = keyFixture(field, {bundle:'org.mozilla.firefox',
+        clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
+    assert.deepEqual(run('paste-line'), {ok:true, result:'pasted line'});
+    assert.deepEqual(field.document.state.selection, {start:{node:2, offset:0}, end:{node:2, offset:0}});
+});
+
+
+test('a clipboard that loses the private tag restores the previous data', () => {
+    const {run, board, contents} = keyFixture(cocoaField(THREE, 5));
+    const write = board.writeObjects;
+    let first = true;
+    board.writeObjects = function (items) {
+        const result = write.call(this, items);
+        if (first) { first = false; this.items[0].values.delete(LINE_TYPE); }
+        return result;
+    };
+    assert.deepEqual(run('copy-line'), {ok:false, error:'The line clipboard tag did not read back. Nothing was copied.'});
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'earlier'}]);
+});
+
+
+const TRACK_CLIPBOARD = {lineClipboardVariable:'fixture'};
+const TAGGED_LINE = [{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}];
+
+test('P4: a menu-less field releases interception if the runtime is reached', () => {
+    const field = cocoaField(THREE, 5);
+    field.role = 'AXTextField';
+    const {run, state} = keyFixture(field, {clipboard:TAGGED_LINE, onAttribute:(_s, _e, name) => {
+        if (name === 'AXMenuBar') throw new Error('Cannot read AXMenuBar (-25212).');
+    }});
+    const result = run('paste-line', TRACK_CLIPBOARD);
+    assert.equal(result.ok, false);
+    assert.equal(result.lineClipboard, false);
+    assert.equal(field.text, THREE);
+    assert.deepEqual(state.presses, []);
+});
+
+test('P1: unsupported fields fall back once and release interception even with the tag', () => {
+    for (const role of ['AXTextField', 'AXComboBox', 'AXTextArea']) {
+        const field = cocoaField('search terms', 7);
+        field.role = role;
+        const attribute = field.attribute;
+        if (role === 'AXTextArea') field.attribute = name => name === 'AXValue' ? 123 : attribute(name);
+        const {run, state} = keyFixture(field, {clipboard:TAGGED_LINE});
+        assert.deepEqual(run('paste-line', TRACK_CLIPBOARD), {ok:true, result:'pasted normally', lineClipboard:false});
+        assert.equal(field.text, 'search copy\nterms');
+        assert.equal(field.writes, 0);
+        assert.deepEqual(state.presses, ['paste']);
+    }
+});
+
+test('Cut waits for a later clipboard tick and tags the app’s rich items without losing formats', () => {
+    for (const lag of [0, 1, 8]) {
+        const field = cocoaField(THREE, 5), press = field.press;
+        let pending, ticks = 0;
+        field.press = () => press(text => { pending = text; });
+        const publish = state => {
+            if (pending && ticks++ >= lag) {
+                state.board.clearContents;
+                state.board.writeObjects([new Item({[PLAIN_TEXT]:pending, 'public.rtf':'rich', 'public.html':'<b>two</b>'}),
+                    new Item({'custom/type':'second'})]);
+                pending = null;
+            }
+        };
+        const {run, contents} = keyFixture(field, {onAttribute:lag === 0 ? publish : undefined, onDelay:publish});
+        assert.deepEqual(run('cut-line', TRACK_CLIPBOARD), {ok:true, result:'cut line', lineClipboard:true});
+        assert.equal(field.text, 'one\nthree');
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:'two\n', 'public.rtf':'rich', 'public.html':'<b>two</b>', [LINE_TYPE]:'1'},
+            {'custom/type':'second'}]);
+    }
+});
+
+test('only an in-flight copy waits for a tag; stale native copies paste without delay', () => {
+    for (const waitForTag of [true, false]) for (const arrives of [true, false]) {
+        const field = cocoaField(THREE, 5);
+        let ticks = 0;
+        const {run, state} = keyFixture(field, {onDelay:state => {
+            if (++ticks === 3 && arrives) {
+                state.board.clearContents;
+                state.board.writeObjects(TAGGED_LINE.map(values => new Item(values)));
+            }
+        }});
+        const result = run('paste-line', {...TRACK_CLIPBOARD, waitForTag});
+        const tagged = waitForTag && arrives;
+        assert.equal(result.result, tagged ? 'pasted line' : 'pasted normally');
+        assert.equal(result.lineClipboard, tagged);
+        assert.equal(field.text, tagged ? 'one\ncopy\ntwo\nthree' : 'one\ntearlierwo\nthree');
+        assert.equal(ticks, waitForTag ? (arrives ? 3 : 20) : 0);
+        assert.deepEqual(state.presses, ['paste']);
+    }
+});
+
+test('a failed copy does not keep interception armed by an old tag', () => {
+    const field = cocoaField(THREE, 5);
+    field.selection.length = 1;
+    const {run} = keyFixture(field, {clipboard:TAGGED_LINE});
+    assert.equal(run('copy-line', TRACK_CLIPBOARD).lineClipboard, false);
+});
+
+test('a failed rich cut tag restores every app item without the tag', () => {
+    const field = cocoaField(THREE, 5), press = field.press;
+    const {run, board, contents} = keyFixture(field);
+    const rich = [{[PLAIN_TEXT]:'two\n', 'public.rtf':'rich'}, {'custom/type':'second'}];
+    field.press = () => press(() => { board.clearContents; board.writeObjects(rich.map(value => new Item(value))); });
+    const write = board.writeObjects;
+    let writes = 0;
+    board.writeObjects = function (items) { return ++writes === 2 ? false : write.call(this, items); };
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.lineClipboard, false);
+    assert.match(outcome.warning, /Line cut/);
+    assert.deepEqual(contents(), rich);
+});
+
+test('a Cut with no clipboard publication does not retag an older matching copy', () => {
+    const field = cocoaField(THREE, 5), press = field.press;
+    field.press = () => press(() => {});
+    let ticks = 0;
+    const previous = [{[PLAIN_TEXT]:'two\n', [LINE_TYPE]:'1'}];
+    const {run, contents} = keyFixture(field, {clipboard:previous, onDelay:() => ticks++});
+    const result = run('cut-line', TRACK_CLIPBOARD);
+    assert.equal(result.ok, true);
+    assert.equal(result.lineClipboard, false);
+    assert.match(result.warning, /Line cut/);
+    assert.equal(ticks, 20);
+    assert.deepEqual(contents(), previous);
+});
+
+
+test('a native copy between the tag wait and version capture pastes inline', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board, state} = keyFixture(field, {clipboard:TAGGED_LINE});
+    const read = board.stringForType;
+    let changed = false;
+    board.stringForType = function (type) {
+        const value = read.call(this, type);
+        if (type === LINE_TYPE && !changed) {
+            changed = true; this.clearContents; this.writeObjects([new Item({[PLAIN_TEXT]:'native\n'})]);
+        }
+        return value;
+    };
+    assert.equal(run('paste-line', TRACK_CLIPBOARD).result, 'pasted normally');
+    assert.equal(field.text, 'one\ntnative\nwo\nthree');
+    assert.deepEqual(state.presses, ['paste']);
+});
+
+test('Cut with a leading non-text item is normalized instead of duplicating the text', () => {
+    const field = cocoaField(THREE, 5), press = field.press;
+    const {run, board, contents} = keyFixture(field);
+    field.press = () => press(text => { board.clearContents; board.writeObjects([
+        new Item({'custom/type':'metadata'}), new Item({[PLAIN_TEXT]:text, 'public.rtf':'rich'})]); });
+    assert.equal(run('cut-line', TRACK_CLIPBOARD).result, 'cut line');
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'two\n', [LINE_TYPE]:'1'}]);
+});
+
+
+// An app whose clipboard moves while we read it: `onSnapshot` runs once, the
+// first time the pasteboard's items are read (the tag's snapshot), the way a
+// second publish or someone's copy lands between our poll and our write.
+function movingAtSnapshot(board, onSnapshot) {
+    const items = Object.getOwnPropertyDescriptor(board, 'pasteboardItems').get;
+    let moved = false;
+    Object.defineProperty(board, 'pasteboardItems', {get() {
+        if (!moved) { moved = true; onSnapshot(); }
+        return items.call(this);
+    }});
+}
+
+test('a cut the app publishes in two steps is tagged by retrying within the same wait', () => {
+    const field = cocoaField(THREE, 5);
+    let ticks = 0;
+    const {run, board, contents} = keyFixture(field, {onDelay:() => ticks++});
+    const second = {[PLAIN_TEXT]:'two\n', 'public.html':'<b>two</b>'};
+    // The second publication lands between our poll and our snapshot.
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item(second)]); });
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.deepEqual(outcome, {ok:true, result:'cut line', lineClipboard:true});
+    assert.equal(field.text, 'one\nthree');
+    assert.deepEqual(contents(), [{...second, [LINE_TYPE]:'1'}]);
+    assert.equal(ticks, 1, 'the first snapshot failed and one tick later the retry tagged the second publication');
+});
+
+test('a clipboard replaced after the cut is left alone and the reason is reported', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board, contents} = keyFixture(field);
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:'unrelated secret'})]); });
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    const warning = 'Line cut, but Cmd-V will paste it inline.';
+    assert.deepEqual(outcome, {ok:true, result:warning + ' The clipboard changed.', warning, lineClipboard:false});
+    assert.equal(field.text, 'one\nthree');
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'unrelated secret'}]);
+});
+
+test('a moving clipboard is retried only while it still holds the line, and only until one elapsed second', () => {
+    for (const [replacement, slow, attemptsAllowed] of [['two\n', 300, 4], ['two\n', 0, 21], ['unrelated', 300, 1]]) {
+        const field = cocoaField(THREE, 5);
+        const {run, board, state} = keyFixture(field);
+        const items = Object.getOwnPropertyDescriptor(board, 'pasteboardItems').get;
+        let snapshots = 0, started = null;
+        // The clipboard changes under every snapshot, and each snapshot is slow
+        // (promised data): with the line's text on it every retry is allowed, so
+        // only the elapsed-time deadline can stop them.
+        Object.defineProperty(board, 'pasteboardItems', {get() {
+            snapshots++;
+            if (started === null) started = state.clock;
+            state.clock += slow;
+            board.clearContents;
+            board.writeObjects([new Item({[PLAIN_TEXT]:replacement})]);
+            return items.call(this);
+        }});
+        const outcome = run('cut-line', TRACK_CLIPBOARD);
+        assert.equal(outcome.result, 'Line cut, but Cmd-V will paste it inline. The clipboard changed.');
+        assert.equal(outcome.lineClipboard, false);
+        assert.ok(snapshots <= attemptsAllowed, snapshots + ' attempts');
+        assert.ok(state.clock - started <= 1000 + slow + 50, 'at most one attempt past the deadline: ' + (state.clock - started));
+    }
+});
+
+test('a tag whose write read back as ours is not retried', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board} = keyFixture(field);
+    const write = board.writeObjects;
+    let writes = 0;
+    board.writeObjects = function (items) {
+        const result = write.call(this, items);
+        if (++writes === 2) this.items[0].values.delete(LINE_TYPE);
+        return result;
+    };
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.equal(outcome.result, 'Line cut, but Cmd-V will paste it inline. The line clipboard tag did not read back.');
+    assert.equal(writes, 3, 'the cut, the tag and the restore of the app’s clipboard; no second tag attempt');
+});
+
+test('a tag failure’s reason names no clipboard text', () => {
+    const secret = 'PRIVATE CLIPBOARD TEXT';
+    const field = cocoaField(THREE, 5);
+    const {run, board} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:secret}]});
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:secret + ' 2'})]); });
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.match(outcome.result, /^Line cut, but Cmd-V will paste it inline\. /);
+    assert.equal(JSON.stringify(outcome).includes(secret), false);
+    assert.equal(JSON.stringify(outcome).includes('two'), false);
+});
+
+test('the recorded outcome of a cut whose tag failed carries the reason, not text', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board, context} = keyFixture(field);
+    const written = [], plain = context.$;
+    // Only the report JSON becomes a writable string; AX names stay plain.
+    context.$ = Object.assign(value => typeof value === 'string' && value.startsWith('{"time"')
+        ? {writeToFileAtomicallyEncodingError(file) { written.push([file, JSON.parse(value)]); return true; }} : value, plain,
+        {NSFileManager:{defaultManager:{fileExistsAtPath:() => true, setAttributesOfItemAtPathError() {}}}});
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:'unrelated'})]); });
+    run('cut-line', {directory:'/fixture'});
+    const [, report] = written.find(([file]) => file.endsWith('text-transform-last-result.json'));
+    assert.equal(report.ok, true, report.error);
+    assert.equal(report.result, 'Line cut, but Cmd-V will paste it inline. The clipboard changed.');
+    assert.equal(JSON.stringify(report).includes('unrelated'), false);
+});
+
+test('a native exception or non-Error is reduced to a fixed sentence in the recorded reason', () => {
+    const warning = 'Line cut, but Cmd-V will paste it inline. ';
+    for (const thrown of [new Error('NSInvalidArgumentException SENTINEL-9f3 -[NSPasteboard writeObjects:]'), 'SENTINEL-9f3', null,
+        new Error('Could not write the clipboard. SENTINEL-9f3 tail')]) {
+        const {run, board} = keyFixture(cocoaField(THREE, 5));
+        const write = board.writeObjects;
+        let writes = 0;
+        board.writeObjects = function (items) { if (++writes === 2) throw thrown; return write.call(this, items); };
+        const outcome = run('cut-line', TRACK_CLIPBOARD);
+        assert.equal(outcome.ok, true);
+        assert.equal(JSON.stringify(outcome).includes('SENTINEL'), false);
+        assert.equal(outcome.result, warning + (thrown && thrown.message && thrown.message.startsWith('Could')
+            ? 'Could not write the clipboard. Unexpected error.' : 'Unexpected error.'));
+    }
+});
+
+test('a write failure and its failed restore keep both of our own sentences', () => {
+    const {run, board} = keyFixture(cocoaField(THREE, 5));
+    const write = board.writeObjects;
+    let writes = 0;
+    board.writeObjects = function (items) { return ++writes >= 2 ? false : write.call(this, items); };
+    assert.equal(run('cut-line', TRACK_CLIPBOARD).result, 'Line cut, but Cmd-V will paste it inline. '
+        + 'Could not write the clipboard. The previous clipboard could not be restored.');
+});
+
+test('tagFailureReason keeps only allowlisted sentences', () => {
+    const {context} = keyFixture(cocoaField(THREE, 5));
+    const reason = error => context.tagFailureReason(error);
+    assert.equal(reason(new Error('The clipboard changed.')), 'The clipboard changed.');
+    assert.equal(reason(new Error('Could not write the clipboard. The previous clipboard could not be restored.')),
+        'Could not write the clipboard. The previous clipboard could not be restored.');
+    assert.equal(reason(new Error('')), 'Unexpected error.');
+    assert.equal(reason({message:42}), 'Unexpected error.');
+    assert.equal(reason(undefined), 'Unexpected error.');
+    assert.equal(reason(new Error('no period at all')), 'Unexpected error.');
 });
