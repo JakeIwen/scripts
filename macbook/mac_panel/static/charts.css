@@ -51,10 +51,12 @@
 .line.thin { stroke-width: 1.5; }
 .line.dashed { stroke-dasharray: 5 4; }
 .line.c-accent { stroke: var(--accent); }
+.line.c-series-2 { stroke: var(--series-2); }
 .line.c-text { stroke: var(--text); }
 .line.c-muted { stroke: var(--muted); }
 .end-dot, .hover-dot { stroke: var(--panel); stroke-width: 2; }
 .end-dot.c-accent, .hover-dot.c-accent { fill: var(--accent); }
+.end-dot.c-series-2, .hover-dot.c-series-2 { fill: var(--series-2); }
 .end-dot.c-text, .hover-dot.c-text { fill: var(--text); }
 .end-dot.c-muted, .hover-dot.c-muted { fill: var(--muted); }
 .end-label { fill: var(--text); }
@@ -66,6 +68,7 @@
 .legend-value { color: var(--text); font-weight: 600; }
 .swatch { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; }
 .swatch.c-accent { border-color: var(--accent); }
+.swatch.c-series-2 { border-color: var(--series-2); }
 .swatch.c-text { border-color: var(--text); }
 .swatch.c-muted { border-color: var(--muted); }
 .swatch.dashed { border-top-style: dashed; }

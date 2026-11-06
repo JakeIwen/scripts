@@ -154,7 +154,7 @@ function settingsCard(data) {
 // Two charts: the percentage windows share one 0-100 axis, credits get a count axis of their own.
 const ALLOWANCE_SERIES = [
   {key: 'claude_weekly_left', color: 'accent'},
-  {key: 'claude_session_left', color: 'accent', thin: true},
+  {key: 'claude_session_left', color: 'series-2'},
   {key: 'codex_weekly_left', color: 'text'},
   {key: 'claude_line_left', color: 'muted', dashed: true},
 ];
