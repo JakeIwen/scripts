@@ -4,7 +4,7 @@
 import {appendTimeTicks} from './chart_axes.mjs';
 import {html, responsive, svgNode, tooltip} from './chart_dom.mjs';
 import {linePoints, pathData, nearestByX} from './charts.mjs';
-import {niceTicks, round, spreadLabels, tickLabelWidth, momentLabel, timeToX} from './chart_scale.mjs';
+import {niceTicks, round, spreadLabels, tickLabelWidth, momentLabel, timeToX, xToTime} from './chart_scale.mjs';
 import {absoluteText} from './relative_time.mjs';
 
 const SLACK = 0.01;
@@ -30,6 +30,21 @@ export function recordingStart(series, from, to, since) {
   return first > from + (to - from) * SLACK ? Math.min(first, to) : null;
 }
 
+const median = numbers => {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+/** Seconds of sampling cadence in a series (median spacing), or null with fewer than two samples. */
+function spacingOf(points) {
+  const gaps = points.slice(1).map((point, index) => point.ts - points[index].ts).filter(gap => gap > 0);
+  return gaps.length ? median(gaps) : null;
+}
+
+/** How far (seconds) a hover time may lie from a sample for that sample to count as "at" it. */
+const toleranceOf = (spacing, maxGap) => Math.min(maxGap ?? Infinity, spacing === null ? Infinity : spacing / 2);
+
 /** Everything a draw needs, in pixels: plot box, gridlines, per-series segments and end labels. */
 export function lineChartLayout({series, from, to, width, height, yMin, yMax, yFormat = String, maxGap, recordingSince, now = to, hasUnit = false}) {
   const top = TOP_PX + (hasUnit ? UNIT_ROW_PX : 0);
@@ -53,15 +68,46 @@ export function lineChartLayout({series, from, to, width, height, yMin, yMax, yF
     plot, width, now, from, to, yTicks: ticks.ticks.map(value => ({value, label: yFormat(value),
       y: round(plot.top + (1 - (value - ticks.min) / (ticks.max - ticks.min)) * plot.height)})),
     series: placed.map((entry, index) => ({...entry, endText: ends[index], labelY: labelYs[index],
+      tolerance: toleranceOf(spacingOf(entry.points), maxGap),
       last: entry.points.length ? entry.points[entry.points.length - 1] : null})),
     sinceX: since === null ? null : round(timeToX(since, {from, to, width: plot.width})), since,
   };
 }
 
-/** The point of each series nearest to plot-relative x; nothing while the cursor is over time before recording began. */
+/**
+ * Per series, the sample nearest to plot-relative x if it lies within that series' tolerance of the hover
+ * time (half its median spacing, capped by maxGap), else null. Nothing while the cursor is over time before
+ * recording began, so a tooltip never pairs one series' value with another series' distant sample.
+ */
 export function valuesAt(layout, x) {
   if (layout.sinceX !== null && x < layout.sinceX - HOVER_SLACK_PX) return layout.series.map(() => null);
-  return layout.series.map(entry => nearestByX(entry.points, x));
+  const at = xToTime(x, {from: layout.from, to: layout.to, width: layout.plot.width});
+  return layout.series.map(entry => {
+    const point = nearestByX(entry.points, x);
+    return point && Math.abs(point.ts - at) <= entry.tolerance ? point : null;
+  });
+}
+
+/**
+ * What the tooltip says at plot-relative x: the hover time snapped to the nearest sample tick (the sample
+ * nearest the cursor among those within tolerance) and, per
+ * series, its value ('—' when no sample is within tolerance) with its own time when that is further from the
+ * header than the tolerance. Returns null when no series has a sample there.
+ */
+export function tooltipRows(layout, x) {
+  const found = valuesAt(layout, x);
+  if (!found.some(Boolean)) return null;
+  const anchor = found.filter(Boolean).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
+  const hover = anchor.ts;
+  return {
+    ts: hover,
+    anchor,
+    found,
+    rows: layout.series.map((entry, index) => {
+      const point = found[index];
+      return {label: entry.label, point, sampleTs: point && Math.abs(point.ts - hover) > entry.tolerance ? point.ts : null};
+    }),
+  };
 }
 
 function legend(entries, current) {
@@ -117,8 +163,41 @@ function drawSeries(svg, layout) {
   });
 }
 
+function addHover(svg, layout, {tip, yFormat}) {
+  const {plot} = layout;
+  const cursor = svgNode('line', {y1: plot.top, y2: plot.top + plot.height}, 'cursor-line');
+  cursor.setAttribute('visibility', 'hidden');
+  const dots = layout.series.map(entry => {
+    const dot = svgNode('circle', {r: END_DOT - 1}, `hover-dot c-${entry.color ?? 'accent'}`);
+    dot.setAttribute('visibility', 'hidden');
+    return dot;
+  });
+  const hit = svgNode('rect', {x: plot.left, y: plot.top, width: plot.width, height: plot.height}, 'hit');
+  const reset = () => { [cursor, ...dots].forEach(item => item.setAttribute('visibility', 'hidden')); tip.hide(); };
+  const showAt = event => {
+    const x = Math.min(Math.max(event.clientX - svg.getBoundingClientRect().left - plot.left, 0), plot.width);
+    const at = tooltipRows(layout, x);
+    if (!at) { reset(); return; }
+    cursor.setAttribute('x1', at.anchor.x + plot.left);
+    cursor.setAttribute('x2', at.anchor.x + plot.left);
+    cursor.setAttribute('visibility', 'visible');
+    at.found.forEach((point, index) => {
+      dots[index].setAttribute('visibility', point ? 'visible' : 'hidden');
+      if (point) { dots[index].setAttribute('cx', point.x + plot.left); dots[index].setAttribute('cy', point.y + plot.top); }
+    });
+    const lines = at.rows.map(row => {
+      if (!row.point) return `${row.label}: —`;
+      return `${row.label}: ${yFormat(row.point.value)}${row.sampleTs === null ? '' : ` (at ${absoluteText(row.sampleTs * 1000)})`}`;
+    });
+    tip.show([absoluteText(at.ts * 1000), ...lines], at.anchor.x + plot.left, true);
+  };
+  ['pointermove', 'pointerdown'].forEach(name => hit.addEventListener(name, showAt));
+  hit.addEventListener('pointerleave', event => { if (event.pointerType === 'mouse') reset(); });
+  svg.append(cursor, ...dots, hit);
+}
+
 /**
- * series: [{key, label, points: [{ts, value}], dashed?, color?, thin?}] with color one of accent, text, muted;
+ * series: [{key, label, points: [{ts, value}], dashed?, color?, thin?}] with color one of accent, series-2, text, muted;
  * yMin/yMax hint the scale (ticks round outwards); yLabel is the unit shown over the axis; maxGap breaks the
  * line across missing samples; recordingSince overrides the first sample as the start of the data.
  */
@@ -135,7 +214,7 @@ export function lineChart({series, from, to, now = to, yMin, yMax, yFormat = Str
   wrap.append(box);
   const tip = tooltip(box);
   const hasData = series.some(entry => entry.points.some(point => Number.isFinite(point.value)));
-  responsive(holder, width => {
+  const paint = width => {
     holder.replaceChildren();
     const height = chartHeight(width);
     const layout = lineChartLayout({series, from, to, width, height, yMin, yMax, yFormat, maxGap, recordingSince, now, hasUnit: Boolean(yLabel)});
@@ -149,34 +228,10 @@ export function lineChart({series, from, to, now = to, yMin, yMax, yFormat = Str
       unit.textContent = yLabel;
       svg.append(unit);
     }
-    const cursor = svgNode('line', {y1: layout.plot.top, y2: layout.plot.top + layout.plot.height}, 'cursor-line');
-    cursor.setAttribute('visibility', 'hidden');
-    const dots = layout.series.map(entry => {
-      const dot = svgNode('circle', {r: END_DOT - 1}, `hover-dot c-${entry.color ?? 'accent'}`);
-      dot.setAttribute('visibility', 'hidden');
-      return dot;
-    });
-    const hit = svgNode('rect', {x: layout.plot.left, y: layout.plot.top, width: layout.plot.width, height: layout.plot.height}, 'hit');
-    const reset = () => { [cursor, ...dots].forEach(item => item.setAttribute('visibility', 'hidden')); tip.hide(); };
-    const showAt = event => {
-      const x = Math.min(Math.max(event.clientX - svg.getBoundingClientRect().left - layout.plot.left, 0), layout.plot.width);
-      const found = valuesAt(layout, x);
-      const anchor = found.filter(Boolean).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
-      if (!anchor) { reset(); return; }
-      cursor.setAttribute('x1', anchor.x + layout.plot.left);
-      cursor.setAttribute('x2', anchor.x + layout.plot.left);
-      cursor.setAttribute('visibility', 'visible');
-      found.forEach((point, index) => {
-        dots[index].setAttribute('visibility', point ? 'visible' : 'hidden');
-        if (point) { dots[index].setAttribute('cx', point.x + layout.plot.left); dots[index].setAttribute('cy', point.y + layout.plot.top); }
-      });
-      const lines = layout.series.map((entry, index) => `${entry.label}: ${found[index] ? yFormat(found[index].value) : '–'}`);
-      tip.show([absoluteText(anchor.ts * 1000), ...lines], anchor.x + layout.plot.left, true);
-    };
-    ['pointermove', 'pointerdown'].forEach(name => hit.addEventListener(name, showAt));
-    hit.addEventListener('pointerleave', event => { if (event.pointerType === 'mouse') reset(); });
-    svg.append(cursor, ...dots, hit);
+    addHover(svg, layout, {tip, yFormat});
     holder.append(svg);
-  });
+    return {layout, svg};
+  };
+  responsive(holder, width => { paint(width); });
   return wrap;
 }

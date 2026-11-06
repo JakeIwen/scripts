@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {lineChartLayout, recordingStart, valuesAt} from '../static/line_chart.mjs';
+import {lineChartLayout, recordingStart, tooltipRows, valuesAt} from '../static/line_chart.mjs';
 import {labelAnchor, niceTicks, spreadLabels, timeTicks} from '../static/chart_scale.mjs';
 import {gaugeGeometry, linePoints, nearestByX, pathData, rangeWindow, scheduleLayout, spanText, stateBands, stateGap, timeToX, xToTime} from '../static/charts.mjs';
 
@@ -208,4 +208,29 @@ test('valuesAt picks each series nearest sample and ignores time before recordin
   assert.equal(a.ts, 900);
   assert.equal(b.ts, 700);
   assert.equal(valuesAt(layout, 0).every(point => point === null), true);
+});
+
+test('valuesAt never pairs a value from a distant timestamp with another series hover time', () => {
+  const layout = lineChartLayout({...LINE, maxGap: 100, series: [
+    {key: 'a', label: 'A', points: points([0, 10], [1000, 20])},
+    {key: 'b', label: 'B', points: points([600, 30])},
+  ]});
+  const x = layout.plot.width * 0.6;
+  const [a, b] = valuesAt(layout, x);
+  assert.equal(a, null);
+  assert.equal(b.ts, 600);
+  const tip = tooltipRows(layout, x);
+  assert.deepEqual(tip.rows.map(row => [row.label, row.point?.value ?? null]), [['A', null], ['B', 30]]);
+  assert.equal(tip.ts, 600);
+});
+
+test('tooltipRows with aligned series shows every value at the rounded hover time', () => {
+  const layout = lineChartLayout({...LINE, series: [
+    {key: 'a', label: 'A', points: points([0, 10], [300, 20], [600, 30])},
+    {key: 'b', label: 'B', points: points([0, 1], [300, 2], [600, 3])},
+  ]});
+  const tip = tooltipRows(layout, layout.plot.width * 0.31);
+  assert.equal(tip.ts, 300);
+  assert.deepEqual(tip.rows.map(row => [row.point.value, row.sampleTs]), [[20, null], [2, null]]);
+  assert.equal(tooltipRows(layout, layout.plot.width * 0.9), null, 'past the last sample plus half a spacing there is nothing to show');
 });
