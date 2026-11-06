@@ -125,12 +125,41 @@ class EmittedScriptTests(unittest.TestCase):
                 *reads, (_, source) = outcome['calls']
                 self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
                 self.assertEqual(call_options(source, 'runEditingKey'),
-                                 {'kind': kind, 'directory': str(keys.DIRECTORY)})
+                                 {'kind': kind, 'directory': str(keys.DIRECTORY),
+                                  'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
 
     def test_a_refused_copy_is_reported_as_a_notification(self):
         [outcome] = run_entries([self.entry(by_note('copies the line'), '{"ok":false,"error":"fixture refusal"}')])
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
                                                 {'title': 'Copy line stopped', '': 'fixture refusal'}])
+
+    def test_paste_uses_a_stable_cmd_v_uuid_and_tagged_caret_condition(self):
+        paste = by_note('pastes above the line')
+        self.assertEqual(paste['BTTUUID'], 'A9D83EB2-3D4F-5A85-984E-511A2477E7CE')
+        self.assertEqual(paste['BTTUUID'], keys.stable_uuid('paste line'))
+        self.assertEqual((paste['BTTShortcutKeyCode'], paste['BTTShortcutModifierKeys']), (9, triggers.COMMAND))
+        self.assertEqual(paste['BTTTriggerConditionsFormat'], conditions.PASTE_CONDITION)
+        self.assertTrue(paste[triggers.PASSTHROUGH])
+        [outcome] = run_entries([self.entry(paste, '{"ok":true,"result":"pasted line","lineClipboard":true}')])
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_string_variable',
+            {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '1'}])
+        self.assertEqual(call_options(outcome['calls'][-2][1], 'runEditingKey'),
+            {'kind': 'paste-line', 'directory': str(keys.DIRECTORY),
+             'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
+
+    def test_a_raced_native_clipboard_clears_the_custom_condition_variable(self):
+        [outcome] = run_entries([self.entry(by_note('pastes above the line'),
+            '{"ok":true,"result":"pasted normally","lineClipboard":false}')])
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'set_string_variable',
+            {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '0'}])
+
+    def test_a_completed_cut_with_a_tag_warning_still_returns_success_and_notifies(self):
+        message = 'Line cut, but Cmd-V will paste it inline.'
+        [outcome] = run_entries([self.entry(by_note('cuts the line'),
+            json.dumps({'ok': True, 'result': message, 'warning': message, 'lineClipboard': False}))])
+        self.assertEqual(outcome['result'], message)
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
+            {'title': 'Cut line stopped', '': message}])
 
     def test_app_switches_prepare_text_accessibility_outside_excluded_apps(self):
         [outcome] = run_entries([self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')])
@@ -242,7 +271,26 @@ class SavedStateTests(unittest.TestCase):
             self.update('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,ZGESTURETYPE,
                 ZKEYCODE,ZMODIFIERKEYS,ZISENABLED,ZENABLEDNEW) VALUES (?,?,?,0,?,?,?,?)''',
                         index, 'other-%d' % index, preset, keycode, triggers.COMMAND, enabled, enabled)
-        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90', 'other-93'])
+        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90', 'other-93', 'other-94'])
+
+    def test_only_the_documented_disjoint_finder_uuid_is_allowed(self):
+        import install_finder_paste as finder
+        self.update('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,ZGESTURETYPE,
+            ZKEYCODE,ZMODIFIERKEYS,ZISENABLED,ZENABLEDNEW) VALUES (90,?,1,0,9,?,1,1)''',
+            finder.TRIGGER, triggers.COMMAND)
+        self.assertEqual(triggers.conflicts(self.database, self.plan), [])
+        self.assertEqual(triggers.conflicts(self.database, finder.definitions()), [])
+        self.update('UPDATE ZBTTBASEENTITY SET ZUNIQUEIDENTIFIER=? WHERE Z_PK=90', 'unreviewed-cmd-v')
+        self.assertEqual(triggers.conflicts(self.database, self.plan), ['unreviewed-cmd-v'])
+        self.assertEqual(triggers.conflicts(self.database, finder.definitions()), ['unreviewed-cmd-v'])
+
+    def test_finder_and_line_paste_conditions_never_overlap_in_the_truth_tables(self):
+        import finder_paste_condition as finder
+        variables = [{'BTTActiveAppBundleIdentifier': case.app, 'focused_element_details': case.details,
+                      conditions.LINE_CLIPBOARD_VARIABLE: '1'}
+                     for case in (*conditions.CASES, *finder.CASES)]
+        overlap = '(' + conditions.PASTE_CONDITION + ') AND (' + finder.CONDITION + ')'
+        self.assertFalse(any(conditions.evaluate(overlap, variables)['results']))
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@
 const array = values => ({count:values.length, objectAtIndex:i => values[i]});
 const mutableArray = () => {
     const values = [];
-    return {get count() { return values.length; }, objectAtIndex:i => values[i], addObject:value => values.push(value)};
+    return {values, get count() { return values.length; }, objectAtIndex:i => values[i], addObject:value => values.push(value)};
 };
 const data = value => ({value, length:value.length, get copy() { return data(value); }});
 class Item {

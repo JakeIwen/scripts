@@ -14,6 +14,31 @@ function textMarkerParameter(element, name, value, options) {
     return resolved;
 }
 
+// Whole-line paste restores carets through native marker steps, never ambiguous
+// numeric AX ranges. Kept outside the selection factory so its existing marker
+// validation logic stays separate from this new operation.
+function textMarkerLineCarets({endpoints, between, parameter, index, paragraph, same}) {
+    function startOf(range) {
+        const start = endpoints(range).start;
+        return between(start, start);
+    }
+    function forwardCaret(caret, steps) {
+        let marker = endpoints(caret).end;
+        const originalParagraph = paragraph(marker);
+        const target = index(marker) + steps;
+        // Paragraph boundaries can have duplicate flat indices; a finite budget
+        // refuses malformed/non-progressing native marker graphs.
+        for (let budget = steps * 2 + 2; index(marker) < target && budget > 0; budget--) {
+            marker = parameter('AXNextTextMarkerForTextMarker', marker, {optional:true});
+            if (marker === null) throw new Error('The editor could not resolve the restored caret.');
+        }
+        if (index(marker) !== target || !same(originalParagraph, paragraph(marker)))
+            throw new Error('The editor could not resolve the restored caret.');
+        return between(marker, marker);
+    }
+    return {startOf, forwardCaret};
+}
+
 function textMarkerSelection(element, attribute) {
     const parameter = (name, value, options) => textMarkerParameter(element, name, value, options);
     function index(marker) {
@@ -101,6 +126,7 @@ function textMarkerSelection(element, attribute) {
         same,
         collapsed,
         paragraphAt,
+        ...textMarkerLineCarets({endpoints, between, parameter, index, paragraph, same}),
         validate,
         endingAt,
         select: function (range) {

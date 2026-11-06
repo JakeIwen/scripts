@@ -20,17 +20,28 @@ PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
 KEYBOARD = 0
 SHIFT, COMMAND = 1 << 17, 1 << 20
 GLOBAL = 'BT.G'
+# Finder file focus and editing-key writable text focus are disjoint. The pair
+# alone is exempt: unrelated Cmd-V triggers must still block both installers.
+DISJOINT_TRIGGER_PAIRS = (frozenset({'EDA649C3-026B-4402-9BF9-CE339233EFB2',
+                                     'A9D83EB2-3D4F-5A85-984E-511A2477E7CE'}),)
 
 
-def runtime_action(function, entry, options, title, runtime):
+def runtime_action(function, entry, options, title, runtime, *, line_clipboard_variable=None):
     """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
     call = '\n%s(%s);' % (entry, json.dumps(options))
+    variable_update = (
+        '    if (typeof result.lineClipboard === "boolean") await callBTT("set_string_variable", '
+        + '{variable_name: ' + json.dumps(line_clipboard_variable) + ', to: result.lineClipboard ? "1" : "0"});\n'
+        if line_clipboard_variable else '')
+    # display_notification uses the unnamed body parameter, not "text":
+    # https://docs.folivora.ai/docs/scripting/cli/ (command #6).
     # A script that fails inside runJXA comes back as {NSLocalizedDescription} instead.
     script = (f'async function {function}() {{\n'
               f'    const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));\n'
               f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
-              f'    const error = result.error || result.NSLocalizedDescription;\n'
-              f'    if (!result.ok) await callBTT("display_notification", {{title: {json.dumps(title)}, "": error}});\n'
+              f'{variable_update}'
+              f'    const error = result.error || result.NSLocalizedDescription || result.warning;\n'
+              f'    if (!result.ok || result.warning) await callBTT("display_notification", {{title: {json.dumps(title)}, "": error}});\n'
               f'    return result.ok ? result.result : error;\n}}')
     # Separate contexts: triggers sharing a function name must not share state.
     return {'BTTScriptType': 3, 'BTTScriptLocation': 0, 'BTTAppleScriptUsePath': False,
@@ -112,9 +123,12 @@ def saved_errors(database, plan, enabled):
 def conflicts(database, plan):
     """Other enabled shortcuts in an active preset, in any app, on one of the plan's keys."""
     ours = {d['BTTUUID'] for d in plan}
-    keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']) for d in plan if d['BTTTriggerType'] == KEYBOARD}
+    keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']): d['BTTUUID']
+            for d in plan if d['BTTTriggerType'] == KEYBOARD}
     return sorted(row['ZUNIQUEIDENTIFIER'] for row in active_triggers(database, KEYBOARD)
-                  if row['ZUNIQUEIDENTIFIER'] not in ours and (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0) in keys)
+                  if row['ZUNIQUEIDENTIFIER'] not in ours
+                  and (key := (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0)) in keys
+                  and frozenset({row['ZUNIQUEIDENTIFIER'], keys[key]}) not in DISJOINT_TRIGGER_PAIRS)
 
 
 def wait_saved(database, plan, enabled, label):

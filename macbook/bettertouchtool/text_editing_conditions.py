@@ -1,6 +1,6 @@
 """When the editing keys fire: their BTT trigger conditions and truth table.
 
-Both conditions are NSPredicate strings over BTT's variables; text_editing_conditions.js
+The conditions are NSPredicate strings over BTT's variables; text_editing_conditions.js
 evaluates them with Foundation, the engine BTT itself uses.
 """
 from __future__ import annotations
@@ -36,6 +36,8 @@ def selection_condition(length_pattern):
 
 WRAP_CONDITION = selection_condition('[1-9][0-9]*')
 CARET_CONDITION = selection_condition('0')
+LINE_CLIPBOARD_VARIABLE = 'jacobr_editing_keys_line_clipboard'
+PASTE_CONDITION = CARET_CONDITION + ' AND ' + LINE_CLIPBOARD_VARIABLE + ' == ' + json.dumps('1')
 
 
 class ConditionCase(NamedTuple):
@@ -44,6 +46,8 @@ class ConditionCase(NamedTuple):
     details: str
     wrap: bool
     caret: bool
+    tagged: bool = False
+    paste: bool = False
 
 
 def _focused(selected_text, selected_range):
@@ -58,6 +62,10 @@ CARET = _focused('AXSelectedText (W):  ""', 'AXSelectedTextRange (W):  "pos=8 le
 CASES = (
     ConditionCase('selection', 'com.apple.TextEdit', SELECTION, wrap=True, caret=False),
     ConditionCase('caret', 'com.apple.TextEdit', CARET, wrap=False, caret=True),
+    ConditionCase('tagged caret', 'com.apple.TextEdit', CARET, False, True, True, True),
+    ConditionCase('tagged selection', 'com.apple.TextEdit', SELECTION, True, False, True, False),
+    ConditionCase('tagged code editor', 'com.microsoft.VSCode', CARET, False, False, True, False),
+    ConditionCase('tagged terminal', 'com.googlecode.iterm2', CARET, False, False, True, False),
     ConditionCase('selection starting with a quote', 'com.google.Chrome',
                   _focused('AXSelectedText (W):  ""hi""', 'AXSelectedTextRange (W):  "pos=3 len=4"'), True, False),
     ConditionCase('multi-line selection', 'org.mozilla.firefox',
@@ -91,10 +99,11 @@ def canonical(predicate):
 
 
 def truth_table_errors():
-    variables = [{'BTTActiveAppBundleIdentifier': case.app, 'focused_element_details': case.details}
+    variables = [{'BTTActiveAppBundleIdentifier': case.app, 'focused_element_details': case.details,
+                  LINE_CLIPBOARD_VARIABLE: '1' if case.tagged else '0'}
                  for case in CASES]
     errors = []
-    for key, predicate in (('wrap', WRAP_CONDITION), ('caret', CARET_CONDITION)):
+    for key, predicate in (('wrap', WRAP_CONDITION), ('caret', CARET_CONDITION), ('paste', PASTE_CONDITION)):
         for case, fired in zip(CASES, evaluate(predicate, variables)['results']):
             if fired != getattr(case, key):
                 errors.append('%s condition %s on: %s' % (key, 'fires' if fired else 'misses', case.name))

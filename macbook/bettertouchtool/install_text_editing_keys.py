@@ -2,7 +2,8 @@
 """Install system-wide editing keys through BTT's local socket API.
 
 Cmd-X with no selection cuts the caret's line, Cmd-C copies it and leaves the
-caret where it was; ' " ` ( [ { typed over a selection wrap it. Each key passes
+caret where it was; tagged Cmd-V pastes above the line; ' " ` ( [ { over a
+selection wrap it. Each key passes
 through to the app unless BTT sees an editable selection, so code editors and
 terminals keep their own behavior.
 """
@@ -33,6 +34,7 @@ RUNTIME = tuple(str(DIRECTORY / name) for name in ('text_selection.js', 'text_ed
 WRAP_KEYS = (("'", 39, 0), ('"', 39, SHIFT), ('`', 50, 0), ('(', 25, SHIFT), ('[', 33, 0), ('{', 33, SHIFT))
 CUT_KEY = (7, COMMAND)
 COPY_KEY = (8, COMMAND)
+PASTE_KEY = (9, COMMAND)
 
 
 def stable_uuid(name):
@@ -40,7 +42,8 @@ def stable_uuid(name):
 
 
 def _action(function, entry, options, title):
-    return triggers.runtime_action(function, entry, options, title, RUNTIME)
+    return triggers.runtime_action(function, entry, options, title, RUNTIME,
+                                   line_clipboard_variable=options.get('lineClipboardVariable'))
 
 
 def _keyboard(name, keycode, modifiers, condition, notes, action):
@@ -58,9 +61,14 @@ def definitions():
     for name, key, notes, kind, function, title in (
             ('cut line', CUT_KEY, 'Cmd-X with no selection cuts the line', 'cut-line', 'cutCurrentLine', 'Cut line stopped'),
             ('copy line', COPY_KEY, 'Cmd-C with no selection copies the line', 'copy-line', 'copyCurrentLine',
-             'Copy line stopped')):
-        result.append(_keyboard(name, *key, conditions.CARET_CONDITION, 'Editing keys: ' + notes,
-                                _action(function, 'runEditingKey', {'kind': kind, 'directory': directory}, title)))
+             'Copy line stopped'),
+            ('paste line', PASTE_KEY, 'Cmd-V with a line copy pastes above the line', 'paste-line', 'pasteCaretLine',
+             'Paste line stopped')):
+        condition = conditions.PASTE_CONDITION if kind == 'paste-line' else conditions.CARET_CONDITION
+        result.append(_keyboard(name, *key, condition,
+                                'Editing keys: ' + notes, _action(function, 'runEditingKey',
+                                {'kind': kind, 'directory': directory,
+                                 'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE}, title)))
     result.append({'BTTUUID': stable_uuid('prepare text accessibility'), 'BTTTriggerType': APP_CHANGED,
                    'BTTTriggerClass': 'BTTTriggerTypeOtherTriggers', 'BTTAppBundleIdentifier': 'BT.G',
                    'BTTEnabled': 0, 'BTTEnabled2': 0, 'BTTActionCategory': 0,

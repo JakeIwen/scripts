@@ -274,7 +274,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
   `install_text_editing_keys.py` (`btt.py text-keys`) owns the system-wide editing
-  keys (Cmd-X line cut, Cmd-C line copy, quote/bracket
+  keys (Cmd-X line cut, Cmd-C line copy, tagged Cmd-V whole-line paste, quote/bracket
   wrapping): conditional pass-through triggers that fire only on a settable
   focused selection outside `EXCLUDED_APPS`; `text_editing_conditions.py` owns
   those conditions and the truth table checked through `text_editing_conditions.js`
@@ -284,10 +284,25 @@ compare it with this checkout. Deployed files may differ from the repository.
   through Accessibility only while the caret is as first read, acts only on an
   exact readback with the text unchanged and focus checked last, and presses
   Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
-  trigger; Firefox blank lines are not cut. Cmd-C never touches the field: it
+  trigger; lazy NSMenu enabled flags are not a gate, and an unconfirmed cut
+  restores the caret while it still owns the selection. Firefox blank lines are
+  not cut. A confirmed cut is rewritten as plain line text plus one `\n` and
+  the private line tag; a failed tag write warns without undoing the cut. Cmd-C never touches the field: it
   writes the line's text plus `\n` to the clipboard with `text_menu_paste.js`'s
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
-  read, and a failed write puts the previous clipboard back. Never select by
+  read, and a failed write puts the previous clipboard back. Copy/cut share the
+  private type defined once as `LINE_PASTEBOARD_TYPE` in `text_editing_keys.js`.
+  Cmd-V requires a caret and the temporary BTT custom variable declared in
+  `text_editing_conditions.py`; the runtime rechecks the real tag and uses normal
+  Edit > Paste once on stale/untagged data, clearing the variable. Tagged paste
+  uses the logical line start and restores the original character caret after
+  exact text confirmation. Firefox uses paragraph-start/forward native markers;
+  blank-only pastes fail closed because flat AXValue cannot confirm them. BTT
+  restart loses the variable until the next line copy/cut. `trigger_install.py`
+  permits only the explicit disjoint Finder/non-text and editing-key/text Cmd-V
+  UUID pair; unrelated same-key triggers still conflict. BTT documents mismatch
+  pass-through but not arbitration with another matching trigger: verify one
+  paste per press live in Finder and text. Never select by
   posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the

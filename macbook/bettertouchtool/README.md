@@ -300,7 +300,7 @@ this restore covers sequences lost before a checkpoint held them.
 /usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py text-keys --disable
 ```
 
-`install_text_editing_keys.py` adds eight global keyboard triggers and one
+`install_text_editing_keys.py` adds nine global keyboard triggers and one
 "Active App Did Change" trigger to the active Master preset, under fixed UUIDs:
 
 - `'` `"` `` ` `` `(` `[` `{` typed over a selection wrap it and keep the original
@@ -314,29 +314,73 @@ this restore covers sequences lost before a checkpoint held them.
   exact match, with the text unchanged and the same app and field still focused
   (checked last, right before the press), is cut, by pressing the app's own Edit >
   Cut through Accessibility: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
+  Menu enable flags are not trusted: NSMenu validates them lazily, so a stale
+  disabled Cut is still pressed and the text is the confirmation.
   It then checks that exactly the line left the text. No keystrokes are posted,
   since a posted key's delivery cannot be confirmed; if anything stops the cut
   first, the caret goes back unless you have moved it. In Firefox a blank line is
-  refused with a notification: its flat text could not confirm the cut.
+  refused with a notification: its flat text could not confirm the cut. A confirmed
+  cut is rewritten as the line's text plus one `\n`, with the same private
+  whole-line clipboard tag as Cmd-C. A failed tag write preserves the app's
+  clipboard and reports “Line cut, but Cmd-V will paste it inline.” without
+  treating the completed cut as a failure.
 - Cmd-C with no selection copies the caret's line (as VS Code does): its text and
   one `\n`, whatever break the app uses, on the last line too, so an empty line
   copies `\n` (in Firefox, the paragraph's text plus `\n`). The runtime writes it
-  to the clipboard itself, as plain text, so the field is never selected or
+  to the clipboard itself, as plain text plus the private pasteboard type
+  `com.jacobr.editing-keys.line` on the same item, so the field is never selected or
   changed and the caret stays put; rich formatting is not copied. It notes the
   clipboard's version before reading the field and reads the caret and focus again
   after the text, and copies nothing if a key, a focus change or another copy came
   in between. If the write itself fails, the previous clipboard (every item and
   type) is put back. With a selection, or where the condition does not match,
   Cmd-C is the app's normal copy.
+- Cmd-V with our tagged line copy and no selection inserts it above the current
+  logical line and leaves the caret on its original character (shifted by the
+  inserted text's length). Empty and unterminated last lines are supported. The
+  runtime collapses the selection at the line start, verifies ownership and
+  readback, presses Edit > Paste once, and confirms the exact resulting text.
+  A failed paste restores the caret only while the original field state is still
+  ours; after a confirmed paste caret restoration is best effort. Firefox uses
+  native paragraph-start markers and forward marker steps, not numeric writes;
+  blank-only pastes are refused because its flat AXValue cannot confirm them.
+  With a selection, Cmd-V remains the app's normal paste (even with our tag).
+
+The paste condition uses the temporary custom BTT string variable
+`jacobr_editing_keys_line_clipboard` (`"1"` after a tagged copy/cut). BTT documents
+[custom variables in conditions](https://docs.folivora.ai/docs/actions/conditions/)
+and [set_string_variable](https://docs.folivora.ai/docs/1106_java_script.html), but
+[standard variables](https://docs.folivora.ai/docs/1105_variables.html) offer no
+pasteboard-type variable; live read-only probes of `clipboard_content_type` and
+`clipboard_types` were empty. The tag is authoritative at runtime. A native copy
+may leave the BTT variable stale: the next caret paste then performs normal
+Edit > Paste once and clears the variable. Restarting BTT loses the variable;
+copy/cut a line again to re-enable whole-line paste. Clipboard managers must
+preserve the private type for it to remain a line copy.
+
+The explicit disjoint-UUID pair in `trigger_install.py` allows the Finder paste
+trigger (non-text focus) beside this text-only Cmd-V trigger; all other shortcut
+conflicts still refuse installation, in either installer. BTT's
+[conditions docs](https://docs.folivora.ai/docs/actions/conditions/) allow identical
+shortcuts with different conditions, while its
+[JSON reference](https://docs.folivora.ai/docs/2002_trigger_json.html) documents
+per-trigger pass-through on mismatch. Neither specifies whether a mismatching
+trigger passes through while another matches: single-paste coexistence needs a
+live check in Finder and a text field.
+
+Notifications retain BTT's documented unnamed body parameter (`""`), not `text`:
+[CLI command reference, display_notification](https://docs.folivora.ai/docs/scripting/cli/).
+The payload keys are correct; delivery/visibility of the reported TextEdit error
+has not been verified live.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
 `focused_element_details` shows a settable `AXSelectedText` with a nonempty range
-(wrapping) or an empty one (Cmd-X, Cmd-C), in an app outside
+(wrapping) or an empty one (Cmd-X, Cmd-C, tagged Cmd-V), in an app outside
 `text_editing_conditions.EXCLUDED_APPS` (code editors
 and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
 no text tree never match. Checking the condition adds about 20 ms to each of these
-keystrokes; keys typed quickly stay in order. The installer evaluates both
+keystrokes; keys typed quickly stay in order. The installer evaluates all three
 conditions against `text_editing_conditions.CASES` with Foundation's NSPredicate
 before any write.
 
@@ -352,7 +396,8 @@ single insertion point.
 `--apply` backs up to `.local/text-editing-key-backups/`, creates any missing or
 changed trigger disabled, verifies the API readback and the saved store, then
 enables all of them and advances the Guard checkpoint. It refuses when another
-enabled shortcut in an active preset uses one of these keys.
+enabled shortcut in an active preset uses one of these keys, except the explicit
+Finder/line-paste pair above.
 
 ### Finder paste
 
