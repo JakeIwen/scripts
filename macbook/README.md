@@ -326,7 +326,9 @@ list of what needs attention (a log past twice its limit, a
 total over the warning level, errors in the last run, a stale run), which
 `status` and the Mac Panel's Logs section both show as sent. Refused paths
 stay visible in the table with their reason, but do not need attention except
-for `unrecorded archives; adopt to continue`: these require explicit recovery.
+for `unrecorded archives; adopt to continue` or `archive record unreadable`:
+these require explicit recovery. Any enabled log over twice its limit also
+raises a rotation-failing error, even while refused.
 
 - Defaults (rotate above 10 MB, keep 5, gzip, warn above 500 MB total) are
   declared in `shared/settings/log-rotate.json` and edited in the Mac Panel's
@@ -340,8 +342,14 @@ for `unrecorded archives; adopt to continue`: these require explicit recovery.
   Publication records the destination before linking, and removes the source's
   record after unlinking, so interrupted publication can leave extra records
   rather than unrecorded archives. Missing paths are pruned at each run's start.
-  Missing, corrupt or mismatched records never authorize automatic deletion:
-  the log is `refused` with `unrecorded archives; adopt to continue`.
+  Missing or mismatched records never authorize automatic deletion: an enabled
+  log is `refused` with `unrecorded archives; adopt to continue`. A corrupt or
+  unreadable `archives.json` refuses every log with archives as `archive record
+  unreadable`, and blocks all rotation and adoption without rewriting the record.
+  Repair the file by hand, or preserve it with
+  `mv ~/.local/state/log-rotate/archives.json ~/.local/state/log-rotate/archives.json.saved`
+  (choose an unused backup name), then explicitly adopt each log's archives as
+  described below. Removing the corrupt record does not authorize archive deletion.
 - Recovery: `adopt --revision REV PATH` explicitly records all existing
   `<PATH>.N[.gz]` archives after checking each is regular, owned by you,
   non-symlinked, not hard-linked and inside the same allowed locations. It

@@ -159,31 +159,56 @@ class ArchiveRecoveryTests(LogRotateCase):
         with gzip.open(path + '.2.gz', 'rb') as source:
             self.assertEqual(source.read(), original + b'late\n')
 
-    def test_missing_and_corrupt_records_require_explicit_revision_checked_adoption(self):
+    def test_missing_records_require_explicit_revision_checked_adoption(self):
         path = self.make_log()
         self.rotate(path)
         archive = path + '.1.gz'
-        for mode in ('missing', 'corrupt'):
-            with self.subTest(mode=mode):
-                ledger_path = state.state_dir(self.home) / state.ARCHIVES_FILE
-                if mode == 'missing':
-                    ledger_path.unlink()
-                else:
-                    ledger_path.write_text('{broken')
-                before = self.read(archive)
-                snapshot = self.inventory()
-                entry = self.entry(path, snapshot)
-                self.assertEqual((entry['state'], entry['note']), ('refused', archives.UNRECORDED_NOTE))
-                self.assertTrue(any(problem.get('path') == path for problem in snapshot['problems']))
-                code, _, _ = self.run_cli('adopt', '--revision', 'stale', path, '--json')
-                self.assertEqual(code, 3)
-                self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE), {})
-                self.adopt(path)
-                self.assertEqual(self.read(archive), before)
-                archives.require_owned(archive, state.read_json(self.home, state.ARCHIVES_FILE))
+        (state.state_dir(self.home) / state.ARCHIVES_FILE).unlink()
+        before = self.read(archive)
+        snapshot = self.inventory()
+        entry = self.entry(path, snapshot)
+        self.assertEqual((entry['state'], entry['note']), ('refused', archives.UNRECORDED_NOTE))
+        self.assertTrue(any(problem.get('path') == path for problem in snapshot['problems']))
+        code, _, _ = self.run_cli('adopt', '--revision', 'stale', path, '--json')
+        self.assertEqual(code, 3)
+        self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE), {})
+        self.adopt(path)
+        self.assertEqual(self.read(archive), before)
+        archives.require_owned(archive, state.read_json(self.home, state.ARCHIVES_FILE))
         Path(path).write_bytes(payload('second'))
         self.rotate(path)
         self.assertTrue(Path(path + '.2.gz').exists())
+
+    def test_corrupt_record_blocks_all_rotation_and_adoption_without_rewriting_it(self):
+        path = self.make_log()
+        other = self.write('.local/state/other/job.log', payload('other'))
+        self.set_policy(other, '--max-mb', '1')
+        self.rotate(path)
+        self.rotate(other)
+        fresh = self.write('.local/state/fresh/job.log', payload('fresh'))
+        self.set_policy(fresh, '--max-mb', '1')
+        ledger_path = state.state_dir(self.home) / state.ARCHIVES_FILE
+        saved = ledger_path.read_bytes()
+        for corrupt in (b'{broken', b'[]', b'null', b'\xff'):
+            with self.subTest(corrupt=corrupt):
+                ledger_path.write_bytes(corrupt)
+                with self.assertRaises(LogRotateError):
+                    state.read_json(self.home, state.ARCHIVES_FILE)
+                snapshot = self.inventory()
+                for log in (path, other):
+                    entry = self.entry(log, snapshot)
+                    self.assertEqual((entry['state'], entry['note'], entry['reason']),
+                                     ('refused', state.ARCHIVES_UNREADABLE_NOTE, 'archive_record_unreadable'))
+                for args in (('rotate',), ('rotate', '--only', fresh, '--force'),
+                             ('adopt', '--revision', snapshot['revision'], path)):
+                    code, value, _ = self.run_cli(*args, '--json')
+                    self.assertEqual((code, value['error']), (1, state.ARCHIVES_UNREADABLE_NOTE))
+                    self.assertEqual(ledger_path.read_bytes(), corrupt)
+                self.assertEqual(self.read(fresh), payload('fresh'))
+        ledger_path.write_bytes(saved)  # A repaired record preserves both logs' ownership.
+        self.rotate(fresh)
+        for log in (path, other, fresh):
+            archives.require_owned(log + '.1.gz', state.read_json(self.home, state.ARCHIVES_FILE))
 
     def test_adoption_refuses_symlinks_hard_links_and_excluded_logs(self):
         path = self.make_log()

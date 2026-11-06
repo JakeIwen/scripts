@@ -29,7 +29,7 @@ def find_problems(snapshot: Snapshot, last_run: Dict[str, Any], now: float) -> L
     found = []  # type: List[Dict[str, Any]]
     for entry in snapshot.entries:
         name = os.path.basename(entry.path)
-        if entry.reason in (LogReason.UNRECORDED_ARCHIVES,):
+        if entry.reason in (LogReason.UNRECORDED_ARCHIVES, LogReason.ARCHIVE_RECORD_UNREADABLE):
             found.append(_problem(WARN, "{}: {}".format(name, entry.note), entry.path))
         if entry.policy.enabled and entry.bytes > OVERSIZE_FACTOR * entry.policy.max_mb * MB:
             found.append(_problem(ERROR, "{} is {} (limit {} MB): rotation is failing".format(

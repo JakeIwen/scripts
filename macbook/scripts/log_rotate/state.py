@@ -12,9 +12,10 @@ from typing import Any, Dict, Iterator
 
 import tool_settings
 
-from .records import EXIT_BUSY, LogRotateError
+from .records import EXIT_BUSY, EXIT_ERROR, LogRotateError
 
 ARCHIVES_FILE = "archives.json"
+ARCHIVES_UNREADABLE_NOTE = "archive record unreadable"
 SIZES_FILE = "last_sizes.json"
 ROTATED_FILE = "last_rotated.json"
 RUN_FILE = "last_run.json"
@@ -51,9 +52,15 @@ def run_lock(home: str) -> Iterator[None]:
 def read_json(home: str, name: str) -> Dict[str, Any]:
     try:
         value = json.loads((state_dir(home) / name).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError):
+        if not isinstance(value, dict):
+            raise ValueError("expected an object")
+    except FileNotFoundError:
         return {}
-    return value if isinstance(value, dict) else {}
+    except (OSError, UnicodeDecodeError, ValueError):
+        if name == ARCHIVES_FILE:
+            raise LogRotateError(EXIT_ERROR, ARCHIVES_UNREADABLE_NOTE) from None
+        return {}
+    return value
 
 
 def write_json(home: str, name: str, value: Dict[str, Any]) -> None:

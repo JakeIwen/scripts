@@ -57,7 +57,7 @@ def _entry_state(size: int, existing: bool, entry_policy) -> str:
 
 def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, Any],
                  config: policy.FilesConfig, ledger: Dict[str, Any], rotated: Dict[str, Any],
-                 listings: Dict[str, Dict[str, List[Archive]]], archive_ledger: dict, now: float) -> LogEntry:
+                 listings: Dict[str, Dict[str, List[Archive]]], archive_ledger: Optional[dict], now: float) -> LogEntry:
     path = candidate.path
     entry_policy = policy.effective_policy(defaults, config, path)
     third_party = policy.is_unopted_third_party(candidate.source, path, home, config)
@@ -77,7 +77,9 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
     entry_state = _entry_state(size, info is not None, entry_policy)
     note = THIRD_PARTY_NOTE if third_party else None
     reason = LogReason.THIRD_PARTY if third_party else None
-    if entry_policy.enabled:
+    if archive_ledger is None and archives:
+        entry_state, note, reason = STATE_REFUSED, state.ARCHIVES_UNREADABLE_NOTE, LogReason.ARCHIVE_RECORD_UNREADABLE
+    elif entry_policy.enabled and archive_ledger is not None:
         try:
             archive_records.rotation_plan(directory, base, entry_policy.keep, entry_policy.compress, archive_ledger)
         except (FileNotFoundError, NotADirectoryError):
@@ -99,7 +101,10 @@ def take_snapshot(home: str, now: Optional[float] = None) -> Snapshot:
     ledger = state.read_json(home, state.SIZES_FILE).get("paths")
     ledger = ledger if isinstance(ledger, dict) else {}
     rotated = state.read_json(home, state.ROTATED_FILE)
-    archive_ledger = state.read_json(home, state.ARCHIVES_FILE)
+    try:
+        archive_ledger = state.read_json(home, state.ARCHIVES_FILE)
+    except LogRotateError:
+        archive_ledger = None
     ignored = [path for path in (eligibility.normalize(raw, home) for raw in config.ignored) if path]
     listings = {}  # type: Dict[str, Dict[str, List[Archive]]]
     entries = [_build_entry(candidate, home, defaults, config, ledger, rotated, listings, archive_ledger, now)
