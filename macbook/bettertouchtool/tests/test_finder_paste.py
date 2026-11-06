@@ -163,6 +163,19 @@ class DefinitionTests(unittest.TestCase):
         self.assertEqual(trigger['BTTTriggerConditionsFormat'], condition.CONDITION)
         self.assertEqual(trigger['BTTAdditionalActionData']['BTTScriptFunctionToCall'], 'pasteInFinder')
 
+    def test_finder_definition_keeps_the_original_literal_action_script(self):
+        # Only the checkout path varies: the action itself is a saved BTT contract.
+        expected = r'''async function pasteInFinder() {
+    const sources = await Promise.all(["ROOT/text_selection.js", "ROOT/text_menu_paste.js", "ROOT/finder_paste.js"].map(path => readFile(path)));
+    const result = JSON.parse(await runJXA(sources.join("\n") + "\nrunFinderPaste({});"));
+    const error = result.error || result.NSLocalizedDescription;
+    if (!result.ok) await callBTT("display_notification", {title: "Finder paste stopped", "": error});
+    return result.ok ? result.result : error;
+}'''
+        [definition] = finder_paste.definitions()
+        script = definition['BTTAdditionalActionData']['BTTAppleScriptString']
+        self.assertEqual(script.replace(str(finder_paste.DIRECTORY), 'ROOT'), expected)
+
     def test_the_runtime_files_exist(self):
         for path in finder_paste.RUNTIME:
             self.assertTrue(Path(path).is_file(), path)

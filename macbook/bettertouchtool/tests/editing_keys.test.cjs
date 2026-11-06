@@ -495,12 +495,19 @@ test('a tagged paste whose selection changed uses normal Paste once', () => {
     assert.deepEqual(state.presses, ['paste']);
 });
 
-test('paste refuses a newer caret or focus while finding the Edit menu', () => {
+test('P2: a user caret moved to line start before select is not mistaken for ours', () => {
     for (const change of [(state, field) => { field.selection.location = 9; },
+        (state, field) => { field.selection.location = 4; },
         state => { state.focused = state.other.element; }]) {
         const field = cocoaField(THREE, 5);
+        let menuRead = false, moved = false;
         const {run, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}],
-            onAttribute:(state, element, name) => { if (name === 'AXMenuBar') change(state, field); }});
+            onAttribute:(state, element, name) => {
+                if (name === 'AXMenuBar') menuRead = true;
+                if (menuRead && !moved && element === field.element && name === 'AXSelectedTextRange') {
+                    moved = true; change(state, field);
+                }
+            }});
         assert.equal(run('paste-line').ok, false);
         assert.deepEqual(state.presses, []);
         assert.equal(field.writes, 0);
@@ -517,13 +524,17 @@ test('a newer clipboard before Paste restores the caret and pastes that copy nor
     assert.deepEqual(state.presses, ['paste']);
 });
 
-test('an unconfirmed paste restores the original caret', () => {
-    const field = cocoaField(THREE, 5, {pastes:false});
+test('P3: a late paste lands at the line start after confirmation times out', () => {
+    const field = cocoaField(THREE, 5), paste = field.paste;
+    let pending;
+    field.paste = text => { pending = text; };
     const {run, state} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
     assert.deepEqual(run('paste-line'), {ok:false, error:'The app did not confirm the paste; check the text.'});
     assert.equal(field.text, THREE);
-    assert.deepEqual(field.selection, {location:5, length:0});
+    assert.deepEqual(field.selection, {location:4, length:0});
     assert.deepEqual(state.presses, ['paste']);
+    paste(pending);
+    assert.equal(field.text, 'one\ncopy\ntwo\nthree');
 });
 
 test('Firefox pastes at the native paragraph start and restores a marker caret', () => {
@@ -602,13 +613,13 @@ test('a newer caret or focus before Paste is left alone without pressing Paste',
     }
 });
 
-test('Firefox restores the caret after a no-op Paste without numeric range writes', () => {
+test('Firefox leaves the line-start caret after an unconfirmed Paste', () => {
     const field = firefoxField(['first', 'middle', 'last'], 1, 3);
     field.paste = () => {};
     const {run} = keyFixture(field, {bundle:'org.mozilla.firefox',
         clipboard:[{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}]});
     assert.deepEqual(run('paste-line'), {ok:false, error:'The app did not confirm the paste; check the text.'});
-    assert.deepEqual(field.document.state.selection, {start:{node:1, offset:3}, end:{node:1, offset:3}});
+    assert.deepEqual(field.document.state.selection, {start:{node:1, offset:0}, end:{node:1, offset:0}});
 });
 
 test('a confirmed paste remains successful if the app refuses the restored caret', () => {
@@ -647,8 +658,9 @@ test('a clipboard that loses the private tag restores the previous data', () => 
 const TRACK_CLIPBOARD = {lineClipboardVariable:'fixture'};
 const TAGGED_LINE = [{[PLAIN_TEXT]:'copy\n', [LINE_TYPE]:'1'}];
 
-test('no Edit menu releases conditional Cmd-V even though a private tag remains', () => {
+test('P4: a menu-less field releases interception if the runtime is reached', () => {
     const field = cocoaField(THREE, 5);
+    field.role = 'AXTextField';
     const {run, state} = keyFixture(field, {clipboard:TAGGED_LINE, onAttribute:(_s, _e, name) => {
         if (name === 'AXMenuBar') throw new Error('Cannot read AXMenuBar (-25212).');
     }});
@@ -659,14 +671,14 @@ test('no Edit menu releases conditional Cmd-V even though a private tag remains'
     assert.deepEqual(state.presses, []);
 });
 
-test('fields without string AXValue and single-line roles use normal Paste at the caret', () => {
+test('P1: unsupported fields fall back once and release interception even with the tag', () => {
     for (const role of ['AXTextField', 'AXComboBox', 'AXTextArea']) {
         const field = cocoaField('search terms', 7);
         field.role = role;
         const attribute = field.attribute;
         if (role === 'AXTextArea') field.attribute = name => name === 'AXValue' ? 123 : attribute(name);
         const {run, state} = keyFixture(field, {clipboard:TAGGED_LINE});
-        assert.equal(run('paste-line', TRACK_CLIPBOARD).result, 'pasted normally');
+        assert.deepEqual(run('paste-line', TRACK_CLIPBOARD), {ok:true, result:'pasted normally', lineClipboard:false});
         assert.equal(field.text, 'search copy\nterms');
         assert.equal(field.writes, 0);
         assert.deepEqual(state.presses, ['paste']);
@@ -694,8 +706,8 @@ test('Cut waits for a later clipboard tick and tags the app’s rich items witho
     }
 });
 
-test('an armed paste waits for a pending copy tag, or times out to one normal Paste', () => {
-    for (const arrives of [true, false]) {
+test('only an in-flight copy waits for a tag; stale native copies paste without delay', () => {
+    for (const waitForTag of [true, false]) for (const arrives of [true, false]) {
         const field = cocoaField(THREE, 5);
         let ticks = 0;
         const {run, state} = keyFixture(field, {onDelay:state => {
@@ -704,11 +716,12 @@ test('an armed paste waits for a pending copy tag, or times out to one normal Pa
                 state.board.writeObjects(TAGGED_LINE.map(values => new Item(values)));
             }
         }});
-        const result = run('paste-line', TRACK_CLIPBOARD);
-        assert.equal(result.result, arrives ? 'pasted line' : 'pasted normally');
-        assert.equal(result.lineClipboard, arrives);
-        assert.equal(field.text, arrives ? 'one\ncopy\ntwo\nthree' : 'one\ntearlierwo\nthree');
-        assert.equal(ticks, arrives ? 3 : 20);
+        const result = run('paste-line', {...TRACK_CLIPBOARD, waitForTag});
+        const tagged = waitForTag && arrives;
+        assert.equal(result.result, tagged ? 'pasted line' : 'pasted normally');
+        assert.equal(result.lineClipboard, tagged);
+        assert.equal(field.text, tagged ? 'one\ncopy\ntwo\nthree' : 'one\ntearlierwo\nthree');
+        assert.equal(ticks, waitForTag ? (arrives ? 3 : 20) : 0);
         assert.deepEqual(state.presses, ['paste']);
     }
 });

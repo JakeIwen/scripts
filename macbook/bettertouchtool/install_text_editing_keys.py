@@ -47,14 +47,16 @@ def stable_uuid(name):
 # notification when one completes with a warning.
 TAGGING_KINDS = {'copy-line': 'Line copied with a warning', 'cut-line': 'Line cut with a warning',
                  'paste-line': 'Line pasted with a warning'}
+LINE_COPY_STARTED_VARIABLE = 'jacobr_editing_keys_line_copy_started_ms'
+TAG_WAIT_WINDOW_MS = 1500
 SET_VARIABLE = 'await callBTT("set_persistent_string_variable", {variable_name: %s, to: %s});\n'
 
 
 def _line_clipboard_hook(entry, options):
     """JS around the runtime that keeps the persistent line-clipboard variable in step.
 
-    Copy and cut set ON before their background runtime, so a fast Cmd-V enters
-    the bounded tag wait instead of pasting inline. Every tagging kind then ends
+    Copy and cut timestamp the start before setting ON, so only a fast Cmd-V
+    enters the bounded tag wait instead of pasting inline. Every tagging kind then ends
     OFF unless the runtime confirms a tag. App switches only bind a missing variable.
     """
     name = options.get('lineClipboardVariable')
@@ -69,9 +71,18 @@ def _line_clipboard_hook(entry, options):
             f'    if (lineClipboard == null || lineClipboard === "") ' + SET_VARIABLE % (variable, off))
     if kind not in TAGGING_KINDS:
         return triggers.RuntimeHook()
-    before = '    ' + SET_VARIABLE % (variable, on) if kind != 'paste-line' else ''
+    started = json.dumps(LINE_COPY_STARTED_VARIABLE)
+    runtime_options = None
+    if kind == 'paste-line':
+        before = (f'    const start = Number(await callBTT("get_string_variable", {{variable_name: {started}}}));\n'
+                  '    const age = Date.now() - start;\n'
+                  f'    const waitForTag = start > 0 && age >= 0 && age < {TAG_WAIT_WINDOW_MS};\n')
+        runtime_options = '{...' + json.dumps(options) + ', waitForTag}'
+    else:
+        before = ('    ' + SET_VARIABLE % (started, 'String(Date.now())')
+                  + '    ' + SET_VARIABLE % (variable, on))
     after = '    ' + SET_VARIABLE % (variable, f'result.ok === true && result.lineClipboard === true ? {on} : {off}')
-    return triggers.RuntimeHook(before, after, TAGGING_KINDS[kind])
+    return triggers.RuntimeHook(before, after, TAGGING_KINDS[kind], runtime_options)
 
 
 def _action(function, entry, options, title):

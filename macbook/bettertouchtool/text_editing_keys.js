@@ -291,9 +291,9 @@ function restoreLinePasteCaret(editor, expected, insertionOffset, pasted, offset
 }
 
 // A line transport sets ON before its background copy finishes. Give that
-// bounded publication window a chance before treating the board as native data.
-function lineClipboardReady(board) {
-    return waitFor(() => ObjC.unwrap(board.stringForType(LINE_PASTEBOARD_TYPE)) === '1', 20);
+// bounded publication window a chance only when its start timestamp is recent.
+function lineClipboardReady(board, waitForTag) {
+    return waitFor(() => ObjC.unwrap(board.stringForType(LINE_PASTEBOARD_TYPE)) === '1', waitForTag ? 20 : 0);
 }
 
 function prepareLinePaste(directory, board, target) {
@@ -314,9 +314,9 @@ function prepareLinePaste(directory, board, target) {
     return {editor, start, pasted, version, flatPaste, command};
 }
 
-function pasteCaretLine(directory) {
+function pasteCaretLine(directory, waitForTag) {
     const board = $.NSPasteboard.generalPasteboard, target = pasteTarget(directory);
-    if (!lineClipboardReady(board)) return normalMenuPaste(directory, target);
+    if (!lineClipboardReady(board, waitForTag)) return normalMenuPaste(directory, target);
     let plan;
     try {
         plan = prepareLinePaste(directory, board, target);
@@ -329,11 +329,12 @@ function pasteCaretLine(directory) {
 }
 
 function pastePreparedLine(directory, board, target, {editor, start, pasted, version, flatPaste, command}) {
-    let expected, offset, flatStart, pressed = false;
+    let expected, offset, flatStart, pressed = false, selectedStart = false;
     const selected = {...editor, line:{range:start, text:''}};
     try {
         const caretOffset = selectionOffsets(selectionAttribute(editor.element, 'AXSelectedTextRange')).location;
         if (!editorHolds(editor, editor.caret, '')) throw new Error('The caret, text or focus changed; nothing was pasted.');
+        selectedStart = true;
         editor.lines.select(start);
         if (!waitFor(() => editorHolds(editor, start, ''), 10)) throw new Error('The app did not confirm the line start.');
         flatStart = selectionOffsets(selectionAttribute(editor.element, 'AXSelectedTextRange')).location;
@@ -355,7 +356,11 @@ function pastePreparedLine(directory, board, target, {editor, start, pasted, ver
             return candidates.includes(expected);
         }, 20)) throw new Error('The app did not confirm the paste; check the text.');
     } catch (error) {
-        if (!pressed && restoreCaret(selected)) return normalMenuPaste(directory, target);
+        // A delivered press can land after our confirmation deadline. Never
+        // move its insertion point back into the old line while it is pending.
+        if (pressed) throw new Error(error.message.includes('check the text') ? error.message : error.message + ' Check the text.');
+        if (!selectedStart) throw new Error(error.message + ' The selection was left as it is.');
+        if (restoreCaret(selected)) return normalMenuPaste(directory, target);
         throw new Error(error.message + caretRestoreNote(selected));
     }
     restoreLinePasteCaret(editor, expected, flatStart + expected.length - editor.text.length, pasted, offset);
@@ -368,7 +373,7 @@ var EDITING_KEYS = {
     'wrap': options => wrapSelection(options.open, options.directory),
     'cut-line': options => cutSelectedLine(options.directory),
     'copy-line': options => copyCaretLine(options.directory),
-    'paste-line': options => pasteCaretLine(options.directory)
+    'paste-line': options => pasteCaretLine(options.directory, options.waitForTag)
 };
 
 function runEditingKey(options) {
@@ -381,7 +386,7 @@ function runEditingKey(options) {
         // A refusal/crash must release conditional Cmd-V even if an older tag
         // remains. Copy/cut only arm it when this run actually wrote a line.
         const wroteLine = ['copied line', 'cut line'].includes(outcome.result);
-        outcome.lineClipboard = Boolean(outcome.ok && (options.kind === 'paste-line' || wroteLine)
+        outcome.lineClipboard = Boolean(outcome.ok && (outcome.result === 'pasted line' || wroteLine)
             && ObjC.unwrap($.NSPasteboard.generalPasteboard.stringForType(LINE_PASTEBOARD_TYPE)) === '1');
     }
     return JSON.stringify(outcome);

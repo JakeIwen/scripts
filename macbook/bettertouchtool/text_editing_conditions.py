@@ -38,10 +38,11 @@ def app_condition():
     return 'NOT (BTTActiveAppBundleIdentifier IN {' + apps + '} OR ' + prefixes + ')'
 
 
-def details_condition(length_pattern):
+def details_condition(length_pattern, *, text_area=False):
     # BTT's focused-element dump marks settable attributes "(W)": read-only text
     # (terminal output, web pages) and apps without a text tree never match.
-    return ("focused_element_details MATCHES '(?s)(?=.*AXSelectedText [(]W[)]:  \").*"
+    role = '(?=.*AXRole:  "AXTextArea")' if text_area else ''
+    return ("focused_element_details MATCHES '(?s)" + role + "(?=.*AXSelectedText [(]W[)]:  \").*"
             "AXSelectedTextRange [(]W[)]:  \"pos=[0-9]+ len=" + length_pattern + "\".*'")
 
 
@@ -55,7 +56,7 @@ CARET_CONDITION = selection_condition('0')
 # comparisons, so the costly focused-element regex only runs for a tagged paste
 # in an allowed app.
 PASTE_CONDITION = (app_condition() + ' AND ' + LINE_CLIPBOARD_VARIABLE + ' == ' + json.dumps(LINE_CLIPBOARD_ON)
-                   + ' AND ' + details_condition('0'))
+                   + ' AND ' + details_condition('0', text_area=True))
 
 
 class ConditionCase(NamedTuple):
@@ -80,7 +81,11 @@ CARET = _focused('AXSelectedText (W):  ""', 'AXSelectedTextRange (W):  "pos=8 le
 CASES = (
     ConditionCase('selection', 'com.apple.TextEdit', SELECTION, wrap=True, caret=False),
     ConditionCase('caret', 'com.apple.TextEdit', CARET, wrap=False, caret=True),
-    ConditionCase('tagged caret', 'com.apple.TextEdit', CARET, False, True, True, True),
+    ConditionCase('tagged AXTextArea caret', 'com.apple.TextEdit', CARET, False, True, True, True),
+    ConditionCase('tagged AXTextField caret', 'com.apple.TextEdit',
+                  CARET.replace('AXTextArea', 'AXTextField'), False, True, True, False),
+    ConditionCase('tagged menu-less search caret', 'com.runningwithcrayons.Alfred',
+                  CARET.replace('AXTextArea', 'AXTextField'), False, True, True, False),
     ConditionCase('tagged selection', 'com.apple.TextEdit', SELECTION, True, False, True, False),
     ConditionCase('tagged code editor', 'com.microsoft.VSCode', CARET, False, False, True, False),
     ConditionCase('tagged terminal', 'com.googlecode.iterm2', CARET, False, False, True, False),

@@ -30,11 +30,13 @@ class RuntimeHook(NamedTuple):
     before runs ahead of the source reads; after runs once `result` holds the
     outcome (a parsed {ok, ...} object, or a synthesized failure when the
     runtime threw or returned nothing usable). warning_title, when set, titles
-    the notification for an ok outcome that carries a warning.
+    the notification for an ok outcome that carries a warning. runtime_options
+    supplies a JS options expression when the action must read dynamic inputs.
     """
     before: str = ''
     after: str = ''
     warning_title: str | None = None
+    runtime_options: str | None = None
 
 
 def runtime_action(function, entry, options, title, runtime, *, hook=None):
@@ -53,7 +55,11 @@ def runtime_action(function, entry, options, title, runtime, *, hook=None):
     # Only a hook that consumes failures needs normalized outcomes. Preserve the
     # existing no-hook transport verbatim (Finder's installed action is a contract).
     reads = f'const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));'
-    outcome = f'JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}))'
+    invocation = json.dumps(call)
+    if extra.runtime_options is not None:
+        invocation = '%s + JSON.stringify(%s) + ");"' % (json.dumps('\n' + entry + '('), extra.runtime_options)
+    outcome = f'JSON.parse(await runJXA(sources.join("\\n") + {invocation}))'
+    warning = ' || result.warning' if hook else ''
     load = f'    {reads}\n    const result = {outcome};\n'
     if extra.after:
         load = (f'    let result;\n    try {{\n        {reads}\n'
@@ -65,8 +71,8 @@ def runtime_action(function, entry, options, title, runtime, *, hook=None):
     script = (f'async function {function}() {{\n'
               f'{extra.before}{load}'
               f'{extra.after}'
-              f'    const error = result.error || result.NSLocalizedDescription || result.warning;\n'
-              f'    if (!result.ok || result.warning) await callBTT("display_notification", {{title: {notify_title}, "": error}});\n'
+              f'    const error = result.error || result.NSLocalizedDescription{warning};\n'
+              f'    if (!result.ok{warning}) await callBTT("display_notification", {{title: {notify_title}, "": error}});\n'
               f'    return result.ok ? result.result : error;\n}}')
     # Separate contexts: triggers sharing a function name must not share state.
     return {'BTTScriptType': 3, 'BTTScriptLocation': 0, 'BTTAppleScriptUsePath': False,

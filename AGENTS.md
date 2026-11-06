@@ -294,14 +294,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
   read, and a failed write puts the previous clipboard back. Copy/cut share the
   private type defined once as `LINE_PASTEBOARD_TYPE` in `text_editing_keys.js`.
-  Cmd-V requires a caret and the persistent BTT custom variable declared in
+  Cmd-V requires an `AXTextArea` caret in the condition and runtime, plus the
+  persistent BTT custom variable declared in
   `text_editing_conditions.py`; the runtime rechecks the real tag and uses normal
   Edit > Paste once on stale/untagged data, setting the variable to off. Copy/cut
-  transport arms the variable before background runJXA; paste waits up to one
-  second in 50 ms steps for the tag. Missing/non-boolean outcomes and crashes
-  disarm it. Tagged line paste requires `AXTextArea`; single-line/search/URL fields
-  paste normally (copy/cut unchanged). It uses the logical line start and restores
-  the original character caret after exact confirmation. Firefox uses native
+  transport records a persistent start timestamp before arming the variable;
+  only the paste action reads it, allowing the up-to-one-second tag wait only
+  within 1.5 seconds of a line copy/cut. An unset timestamp is harmless because
+  no condition reads it. Every normal fallback, failed/non-boolean outcome or
+  crash disarms the line variable. Single-line/search/URL fields pass through
+  natively (copy/cut unchanged). It uses the logical line start and restores
+  the original character caret after exact confirmation. An unconfirmed press
+  never restores the old caret, because a delayed paste may still land; before
+  a press, restoration requires this run to have issued the selection. Firefox uses native
   paragraph-start/forward markers and accepts pasted breaks with or without a
   newline leaf. Blank-only/unsupported shapes fall back to normal Paste; pre-press
   fallback preserves newer focus/selection and never replays a press. A failed

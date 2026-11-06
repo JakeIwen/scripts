@@ -341,27 +341,34 @@ this restore covers sequences lost before a checkpoint held them.
 - Cmd-V with our tagged line copy and no selection inserts it above the current
   logical line only in an `AXTextArea`, leaving the caret on its original character
   (shifted by the inserted text's length). Single-line fields, search fields and
-  URL bars use normal Paste at the caret; copy/cut behavior in those fields is
+  URL bars pass through natively without running the script; copy/cut behavior there is
   unchanged. Empty and unterminated last lines are supported. The
   runtime collapses the selection at the line start, verifies ownership and
   readback, presses Edit > Paste once, and confirms the exact resulting text.
-  A failed paste restores the caret only while the original field state is still
-  ours; after a confirmed paste caret restoration is best effort. Firefox uses
+  Before a press, a refused paste restores the caret only if this run actually
+  selected the line start and still owns it. After any attempted press, an
+  unconfirmed paste leaves the caret where the press left it and says “check the
+  text”: a busy renderer may still deliver that paste there. After a confirmed
+  paste, restoring the original character caret is best effort. Firefox uses
   native paragraph-start markers and forward marker steps, not numeric writes;
   confirmation accepts the pasted break either omitted or exposed as a newline
   leaf. Blank-only Firefox pastes and unsupported AX text shapes fall back to
-  normal Paste once. Other pre-press refusals also fall back when the original
+  normal Paste once and disarm the BTT variable (a copied blank line pastes inline
+  in Firefox). Other pre-press refusals also fall back when the original
   focus and any owned selection can be confirmed; newer focus/selection is never
   overwritten. No fallback replays an attempted press. A missing Edit menu or
   failed runtime turns interception OFF, so the next Cmd-V passes through.
   With a selection, Cmd-V remains the app's normal paste (even with our tag).
 
 The paste condition uses the persistent custom BTT string variable
-`jacobr_editing_keys_line_clipboard`. Copy/cut set it to `"1"` before starting
-background `runJXA`, closing the quick Cmd-C/Cmd-X then Cmd-V race; a paste that
-arrives before the tag waits up to one second in 50 ms steps, then falls back
-normally. The same wait applies to a stale ON after a native copy: the first
-caret paste can be delayed by up to one second. The transport sets it OFF unless the runtime confirms a tag, including
+`jacobr_editing_keys_line_clipboard`. Copy/cut first persist their start time in
+`jacobr_editing_keys_line_copy_started_ms`, then set the line variable to `"1"`
+before background `runJXA`. The paste action (never a condition) reads that
+start time: only a paste within 1.5 seconds of a line copy/cut waits for its tag,
+up to one second in 50 ms steps. Missing, invalid or older timestamps do not wait,
+so a stale ON after an ordinary copy normally falls back immediately rather than
+letting a later Return overtake the paste. A fallback always sets the line variable
+OFF, even if the board still has a tag. The transport also sets it OFF on
 missing/non-boolean results, malformed JSON and runJXA failures. BTT documents
 [custom variables in conditions](https://docs.folivora.ai/docs/actions/conditions/)
 and [set_persistent_string_variable](https://docs.folivora.ai/docs/1106_java_script.html), but
@@ -401,9 +408,12 @@ live check in Finder and a text field.
 
 Live checks still owed to Jacob (offline fixtures are not proof of BTT delivery):
 - Chrome and Firefox contenteditable fields must expose `AXTextArea` for whole-line
-  paste; confirm the caret stays on its character with both ordinary and quick copy/paste.
+  paste; if the role is different, line paste simply does not apply there.
+  Confirm the caret stays on its character with both ordinary and quick copy/paste.
   In Firefox also paste a rich HTML line cut and verify it creates a separate
   paragraph rather than merging inline (flat AXValue alone cannot prove this).
+- In Messages, make an ordinary copy after a line copy, wait over 1.5 seconds,
+  then press Cmd-V followed immediately by Return: paste must precede send.
 - Confirm search/URL fields paste normally; check Cmd-V with a selection and in VS Code.
 - Finder must paste only once, with both native data and a stale tagged clipboard.
 - After a BTT relaunch, normal Cmd-V must still work; with nothing focused (for
@@ -422,8 +432,8 @@ fail, let the shortcut pass through" option: the key behaves normally unless
 (wrapping) or an empty one (Cmd-X, Cmd-C, tagged Cmd-V), in an app outside
 `text_editing_conditions.EXCLUDED_APPS` (code editors
 and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
-no text tree never match. Checking the condition adds about 20 ms to each of these
-keystrokes; keys typed quickly stay in order. The installer evaluates all three
+no text tree never match. Earlier condition checks measured about 20 ms per keystroke; ordering with a
+background paste still needs the Messages live check above. The installer evaluates all three
 conditions against `text_editing_conditions.CASES` with Foundation's NSPredicate
 before any write.
 

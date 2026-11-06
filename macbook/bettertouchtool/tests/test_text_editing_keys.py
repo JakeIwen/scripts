@@ -30,6 +30,7 @@ const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
     for (const {script, name, jxa, variable, failRead, failJxa} of entries) {
         const calls = [];
         const context = vm.createContext({
+            Date: {now: () => 100000},
             readFile: async path => {
                 calls.push(['readFile', path]);
                 if (failRead) throw new Error('fixture read failure');
@@ -80,6 +81,17 @@ class ConditionTests(unittest.TestCase):
         self.assertNotEqual(loose, conditions.CARET_CONDITION)
         with patch.object(conditions, 'CARET_CONDITION', loose):
             self.assertIn('caret condition fires on: read-only text', conditions.truth_table_errors())
+
+    def test_p4_single_line_roles_never_intercept_even_in_a_menu_less_app(self):
+        cases = [{'BTTActiveAppBundleIdentifier': app,
+                  'focused_element_details': conditions.CARET.replace('AXTextArea', role),
+                  conditions.LINE_CLIPBOARD_VARIABLE: '1'}
+                 for app in ('com.apple.TextEdit', 'com.apple.Spotlight', 'com.runningwithcrayons.Alfred', 'com.raycast.macos')
+                 for role in ('AXTextField', 'AXTextArea')]
+        self.assertEqual(conditions.evaluate(conditions.PASTE_CONDITION, cases)['results'], [False, True] * 4)
+        loose = conditions.PASTE_CONDITION.replace('(?=.*AXRole:  "AXTextArea")', '')
+        with patch.object(conditions, 'PASTE_CONDITION', loose):
+            self.assertIn('paste condition fires on: tagged AXTextField caret', conditions.truth_table_errors())
 
     def test_stored_conditions_compare_in_nspredicate_format(self):
         reserialized = conditions.CARET_CONDITION.replace(' AND ', '  AND  ')
@@ -188,7 +200,7 @@ class EmittedScriptTests(unittest.TestCase):
             {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': '1'}])
         self.assertEqual(call_options(outcome['calls'][-2][1], 'runEditingKey'),
             {'kind': 'paste-line', 'directory': str(keys.DIRECTORY),
-             'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
+             'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE, 'waitForTag': False})
 
     def test_the_disjoint_pair_is_built_from_the_one_finder_and_paste_line_ids(self):
         self.assertEqual(keys.DISJOINT_TRIGGER_PAIRS, (frozenset({finder.TRIGGER, keys.PASTE_LINE_ID}),))
@@ -211,7 +223,8 @@ class EmittedScriptTests(unittest.TestCase):
 
     def variable_writes(self, outcome):
         return [call[2]['to'] for call in outcome['calls']
-                if call[0] == 'callBTT' and call[1] == 'set_persistent_string_variable']
+                if call[0] == 'callBTT' and call[1] == 'set_persistent_string_variable'
+                and call[2]['variable_name'] == conditions.LINE_CLIPBOARD_VARIABLE]
 
     def test_copy_and_cut_mark_the_tag_before_reading_sources_and_end_off_without_one(self):
         on, off = conditions.LINE_CLIPBOARD_ON, conditions.LINE_CLIPBOARD_OFF
@@ -227,7 +240,10 @@ class EmittedScriptTests(unittest.TestCase):
                 with self.subTest(note=note, jxa=jxa):
                     [outcome] = run_entries([self.entry(definition, jxa)])
                     self.assertEqual(outcome['calls'][0][:2], ['callBTT', 'set_persistent_string_variable'])
-                    self.assertEqual(outcome['calls'][0][2]['to'], on)
+                    self.assertEqual(outcome['calls'][0][2],
+                                     {'variable_name': keys.LINE_COPY_STARTED_VARIABLE, 'to': '100000'})
+                    self.assertEqual(outcome['calls'][1][2],
+                                     {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': on})
                     self.assertEqual(self.variable_writes(outcome), [on, final])
                     self.assertGreater([c[0] for c in outcome['calls']].index('readFile'), 0)
 
@@ -243,6 +259,26 @@ class EmittedScriptTests(unittest.TestCase):
                     self.assertEqual(outcome['calls'][-1][:2], ['callBTT', 'display_notification'])
                     self.assertEqual(outcome['calls'][-1][2]['title'], title)
                     self.assertIn('fixture', outcome['result'])
+
+    def test_paste_waits_only_with_a_recent_copy_start_read_by_the_action(self):
+        for value, wait in ((None, False), ('', False), ('bad', False), ('0', False), ('98500', False),
+                            ('98501', True), ('100000', True), ('100001', False), ('1', False)):
+            with self.subTest(value=value):
+                entry = self.entry(by_note('pastes above the line'), '{"ok":true,"result":"pasted normally"}')
+                entry['variable'] = value
+                [outcome] = run_entries([entry])
+                self.assertEqual(outcome['calls'][0], ['callBTT', 'get_string_variable',
+                                 {'variable_name': keys.LINE_COPY_STARTED_VARIABLE}])
+                [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
+                self.assertIs(call_options(source, 'runEditingKey')['waitForTag'], wait)
+
+    def test_trigger_layer_and_shared_ids_do_not_import_their_installers(self):
+        subprocess.run([sys.executable, '-c',
+            'import trigger_install, editing_key_ids, sys; '
+            'trigger_install.active_triggers = lambda *args: []; '
+            'trigger_install.conflicts(None, []); '
+            'assert "install_text_editing_keys" not in sys.modules; '
+            'assert "install_finder_paste" not in sys.modules'], check=True)
 
     def test_paste_does_not_mark_before_running_and_follows_the_reported_tag(self):
         for jxa, final in (('{"ok":true,"result":"x","lineClipboard":true}', '1'), ('{"ok":true,"result":"x"}', '0'),
