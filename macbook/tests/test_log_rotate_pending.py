@@ -134,3 +134,22 @@ cli.main(['rotate', '--only', path, '--json'])
                         self.assert_bytes(archive, payload('gen5', 1_400_000), compress)
                         self.assert_bytes(self.archive(path, 3, compress), payload('gen3'), compress)
                         self.assert_published(path, compress)
+
+    def test_missing_pending_source_drops_marker_with_actionable_diagnostic(self):
+        for compress in (True, False):
+            with self.subTest(compress=compress):
+                path = self.history('changed-%s' % compress, compress)
+                fixtures.RetryRetentionTests.crash_rotation(self, path, 'published')
+                archive = str(self.archive(path, 1, compress))
+                ledger = state.read_json(self.home, state.ARCHIVES_FILE)
+                ledger[archive]['pending_truncate'].pop('source')
+                state.write_json(self.home, state.ARCHIVES_FILE, ledger)
+                Path(path).write_bytes(payload('gen5'))
+                code, value, _ = self.run_cli('rotate', '--only', path, '--json')
+                self.assertEqual(code, 1)
+                self.assertEqual(value['errors'], [
+                    {'path': path, 'error': 'pending rotation source changed; marker dropped'}])
+                self.assert_bytes(self.archive(path, 1, compress), payload('gen5'), compress)
+                self.assert_bytes(self.archive(path, 2, compress), payload('gen4'), compress)
+                self.assert_bytes(self.archive(path, 3, compress), payload('gen3'), compress)
+                self.assert_published(path, compress)

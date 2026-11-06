@@ -201,11 +201,12 @@ def _resume_pending(source: int, info: os.stat_result, existing: list,
         pending = ledger[item.path].get("pending_truncate")
         if not isinstance(pending, dict):
             continue
-        original = pending["source"]
-        if (info.st_ino, getattr(info, "st_birthtime", None)) != (original["st_ino"], original["st_birthtime"]):
-            # The archive still belongs to the old inode; the replacement has its own bytes.
-            ledger[item.path] = archives.identity(item.path)
-            state.write_json(home, state.ARCHIVES_FILE, ledger)
+        original = pending.get("source")
+        if (not isinstance(original, dict)
+                or (info.st_ino, getattr(info, "st_birthtime", None))
+                != (original.get("st_ino"), original.get("st_birthtime"))):
+            _keep_pending(item.path, ledger, home, warnings,
+                          "pending rotation source changed; marker dropped")
             continue
         copied = pending["source_size"]
         try:

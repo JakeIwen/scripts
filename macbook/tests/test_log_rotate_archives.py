@@ -642,7 +642,10 @@ class PendingRecoveryFixTests(LogRotateCase):
                 self.crash_rotation(path, stage)
                 os.rename(path, path + '.old')
                 Path(path).write_bytes(payload('gen5'))
-                self.rotate(path)
+                code, value, _ = self.run_cli('rotate', '--only', path, '--json')
+                self.assertEqual(code, 1)
+                self.assertEqual(value['errors'], [
+                    {'path': path, 'error': 'pending rotation source changed; marker dropped'}])
                 self.assert_retained(path, True, (5, 4, 3))
                 os.unlink(path + '.old')
                 for item in Path(path).parent.glob('job.log.[0-9]*'):
