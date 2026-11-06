@@ -29,7 +29,7 @@ test('arming twice never dispatches a click or runs a handler, and Escape/blur/t
   assert.equal(calls, 1, 'only a confirming user click runs');
 });
 
-test('search retries only arm an already-armed replacement, never execute it', context => {
+test('search retry arms an unarmed replacement after an armed button disappears', context => {
   context.mock.timers.enable({apis: ['setTimeout']});
   let calls = 0;
   setSearchTarget(button('Run', () => { calls++; }, {confirm: 'Confirm: run'}));
@@ -38,10 +38,24 @@ test('search retries only arm an already-armed replacement, never execute it', c
   assert.equal(searchTarget.textContent, 'Confirm: run');
   searchTarget.isConnected = false;
   setSearchTarget(button('Run', () => { calls++; }, {confirm: 'Confirm: run'}));
-  arm(searchTarget);
   context.mock.timers.tick(400);
   assert.equal(searchTarget.textContent, 'Confirm: run');
   assert.equal(calls, 0);
   searchTarget.click();
+  assert.equal(calls, 1);
+});
+
+test('search retry does not re-arm after confirmation', context => {
+  context.mock.timers.enable({apis: ['setTimeout']});
+  let calls = 0;
+  const original = button('Run', () => { calls++; }, {confirm: 'Confirm: run'});
+  setSearchTarget(original);
+  stageAction('crontab', 'fixture', 'run', {arm: true});
+  context.mock.timers.tick(100);
+  original.click();
+  original.isConnected = false;
+  setSearchTarget(button('Run', () => { calls++; }, {confirm: 'Confirm: run'}));
+  context.mock.timers.tick(400);
+  assert.equal(searchTarget.textContent, 'Run');
   assert.equal(calls, 1);
 });

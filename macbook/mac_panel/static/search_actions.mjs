@@ -19,7 +19,7 @@ export function stageAction(section, anchorId, key, {arm = false} = {}) {
       target.focus({preventScroll: true});
       if (arm) armButton(target);
       // A refresh that began before navigation can replace the button; try once more if it vanished.
-      if (arm) setTimeout(() => { if (!target.isConnected && Date.now() < deadline) attempt(); }, RETRY_MS);
+      if (arm) setTimeout(() => { if (!target.isConnected && target.classList.contains('armed') && Date.now() < deadline) attempt(); }, RETRY_MS);
     } else if (Date.now() < deadline) {
       setTimeout(attempt, POLL_MS);
     }
