@@ -113,7 +113,7 @@ def _display_redirect_targets(command, variables, home):
 def redirect_targets(command, variables, home):
     """Only literal output redirections are safe inputs to unattended rotation."""
     # Refuse dynamic shell syntax rather than guessing which words become filenames.
-    if any(mark in command for mark in ('`', '$(', '<', '\\')):
+    if any(mark in command for mark in ('`', '$(', '${', '%', '<', '\\')):
         return []
     quote = None
     for index, char in enumerate(command):
@@ -135,7 +135,7 @@ def redirect_targets(command, variables, home):
         tokens = list(lexer)
     except ValueError:
         return []
-    if 'eval' in tokens:
+    if any(token in tokens for token in ('eval', '[[', '((')):
         return []
     targets = []
     for index, token in enumerate(tokens[:-1]):

@@ -125,6 +125,10 @@ class SourceTests(LogRotateCase):
             'cmd > $HOME/a#b.log': [self.path('a#b.log')],
             'cmd # > $HOME/important.db': [],
             'cmd > "$HOME"/a.log': [],
+            'echo hi % > /x.db': [],
+            '[[ a > /x.db ]]': [],
+            '(( a > /x.db ))': [],
+            'echo ${X:-> /x.db }': [],
         }
         for command, expected in cases.items():
             with self.subTest(command=command):
