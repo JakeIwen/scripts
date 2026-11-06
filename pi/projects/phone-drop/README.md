@@ -6,7 +6,7 @@ radio protocol, which the Pi's Wi-Fi chip cannot speak.
 
 | | |
 |---|---|
-| Upload URL (van Wi-Fi) | `http://vanpi.lan:8793/upload` |
+| Upload URL (van Wi-Fi) | `http://vanpi:8793/upload` |
 | Upload URL (elsewhere, via Tailscale) | `http://<tailscale ip -4 vanpi>:8793/upload` |
 | Inbox on the Pi | `/home/pi/Documents/agent-shared/from-phone/` |
 | Inbox on the Mac | `/Volumes/pihome/Documents/agent-shared/from-phone/` |
@@ -56,7 +56,7 @@ Copy the header value to the Mac clipboard, then paste it on the iPhone through
 Universal Clipboard within about two minutes:
 
 ```bash
-ssh vanpi.lan 'printf "Bearer %s" "$(cat .config/phone-drop/token)"' | pbcopy
+ssh vanpi 'printf "Bearer %s" "$(cat .config/phone-drop/token)"' | pbcopy
 ```
 
 Build a Shortcut named **Send to vanpi**:
@@ -67,7 +67,7 @@ Build a Shortcut named **Send to vanpi**:
    run it from the Shortcuts app.
 2. **Get Network Details**: Network Name of Wi-Fi.
 3. **If** Network Details **is** `dendelion`:
-   **Text** `http://vanpi.lan:8793/upload`.
+   **Text** `http://vanpi:8793/upload`.
    **Otherwise**: **Text** `http://<tailscale ip>:8793/upload`.
    **End If**.
 4. **Repeat with Each** item in **Shortcut Input**:

@@ -42,6 +42,8 @@ class SonosCommandRepairTests(unittest.TestCase):
     def test_remote_intent_is_retained_without_remote_alias_dependency(self):
         self.assertEqual(self.rewritten("ssh pi@vanpi.local 'sns partymode'"),
                          [str(self.launcher), '--pi', 'partymode'])
+        self.assertEqual(self.rewritten("ssh pi@vanpi 'sns pink noise'"),
+                         [str(self.launcher), '--pi', 'pink_noise'])
 
     def test_quoted_arguments_and_negative_seek_remain_literal(self):
         args = ['play_from_faves', "A name with ' and $(touch nope)", 'False']

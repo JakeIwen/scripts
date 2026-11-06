@@ -202,7 +202,7 @@ encryption. Never put credentials in Git, logs, chat, or command arguments.
 Run from a private Terminal session:
 
 ```sh
-ssh -t pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --login'
+ssh -t pi@vanpi 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --login'
 ```
 
 In rclone's interactive menu, create a remote named **icloud**, type
@@ -240,7 +240,7 @@ see [Apple's web-access instructions](https://support.apple.com/102630).
 Retry just the test, without requesting another login, with:
 
 ```sh
-ssh pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --verify-login'
+ssh pi@vanpi 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --verify-login'
 ```
 
 Before relying on recovery, keep the Borg passphrase and Apple account recovery
@@ -255,10 +255,10 @@ existing settings. `no_progress_timeout_seconds` defaults to 900. The former
 `local_backup_window_*` settings are ignored.
 
 ```sh
-ssh pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --preflight'
-ssh pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --status'
-ssh pi@vanpi.lan 'systemctl list-timers vanpi-icloud-backup.timer --all'
-ssh pi@vanpi.lan 'sudo journalctl -u vanpi-icloud-backup.service -n 40 --no-pager'
+ssh pi@vanpi 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --preflight'
+ssh pi@vanpi 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --status'
+ssh pi@vanpi 'systemctl list-timers vanpi-icloud-backup.timer --all'
+ssh pi@vanpi 'sudo journalctl -u vanpi-icloud-backup.service -n 40 --no-pager'
 ```
 
 Status is `/var/lib/vanpi-icloud-backup/state.json`, with active transfer counters,

@@ -6,7 +6,7 @@
 # The copy keeps repo paths (shared/...), because `run` puts its grandparent
 # on sys.path and tool_settings finds declarations in ../settings. The
 # previous install is kept as codex-autocontinue.previous for rollback:
-#   ssh vanpi.lan 'cd ~/.local/share && rm -rf codex-autocontinue &&
+#   ssh vanpi 'cd ~/.local/share && rm -rf codex-autocontinue &&
 #     mv codex-autocontinue.previous codex-autocontinue'
 # --test also runs the feature's tests there, including the real-TUI ones.
 set -eu -o pipefail

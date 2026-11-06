@@ -10,7 +10,7 @@ earlier sections retain the original installation and migration history.
 Verification date: 2026-09-30 UTC. Release
 `network-20260930T022426Z-10d451d2` was deployed through the checked targeted
 installer. The live history view is verified at
-`http://vanpi.lan:8788/#network-history?hours=1`, including fresh source coverage,
+`http://vanpi:8788/#network-history?hours=1`, including fresh source coverage,
 CLI/UI agreement, a real retained incident and bundle download. Recorder-only
 restart, retained-row integrity and steady-state resource checks also passed.
 Historical import continues with explicit pending coverage. Isolated test
@@ -512,7 +512,7 @@ Validation and operational evidence:
   was 1.37 seconds for CLI and 2.91 seconds for HTTP. The database was about
   61.5 MiB; existing limits remain in effect.
 - `browser_clean` verified the live history modal at
-  `http://vanpi.lan:8788/#network-history?hours=24`, including a 390-pixel
+  `http://vanpi:8788/#network-history?hours=24`, including a 390-pixel
   viewport. The RAM warning cleared and history requests returned HTTP 200.
   The only console error was the pre-existing, unrelated Sonos artwork 502.
 

@@ -29,12 +29,12 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
     @mock.patch.object(worker, "remote", return_value=None)
     @mock.patch.object(worker.subprocess, "run")
     def test_idle_poll_does_not_open_browser(self, run, _remote):
-        self.assertFalse(worker.refresh("pi@vanpi.lan"))
+        self.assertFalse(worker.refresh("pi@vanpi"))
         run.assert_not_called()
 
     @mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(stdout='{"ok":true}'))
     def test_headers_travel_only_in_ssh_stdin(self, run):
-        worker.remote("pi@vanpi.lan", "install", {"headers": "Cookie: private=value"})
+        worker.remote("pi@vanpi", "install", {"headers": "Cookie: private=value"})
         self.assertNotIn("private=value", " ".join(run.call_args.args[0]))
         self.assertIn("private=value", run.call_args.kwargs["input"])
 
@@ -43,8 +43,8 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
              mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
                  stdout=json.dumps(self.PAGE))):
             with self.assertRaises(ValueError):
-                worker.refresh("pi@vanpi.lan")
-        self.assertEqual(remote.call_args_list[-1].args, ("pi@vanpi.lan", "failed", self.REQUEST))
+                worker.refresh("pi@vanpi")
+        self.assertEqual(remote.call_args_list[-1].args, ("pi@vanpi", "failed", self.REQUEST))
 
     def test_success_submits_browser_page_and_leaves_local_credentials_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -58,8 +58,8 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
                  mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, self.RECEIPT]) as remote, \
                  mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
                      stdout=json.dumps(self.PAGE))), contextlib.redirect_stdout(output):
-                self.assertTrue(worker.refresh("pi@vanpi.lan"))
-            self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "results", {**self.REQUEST, **self.PAGE}))
+                self.assertTrue(worker.refresh("pi@vanpi"))
+            self.assertEqual(remote.call_args.args, ("pi@vanpi", "results", {**self.REQUEST, **self.PAGE}))
             self.assertEqual((headers.read_bytes(), headers.stat().st_mtime_ns), before)
             self.assertNotIn("private=value", output.getvalue())
             self.assertNotIn(self.PAGE["html"], output.getvalue())
@@ -69,8 +69,8 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
             self.REQUEST, {"ok": True, "renewal_needed": False},
         ]) as remote, mock.patch.object(worker.subprocess, "run") as run, \
              contextlib.redirect_stdout(io.StringIO()):
-            self.assertFalse(worker.refresh("pi@vanpi.lan"))
-        self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "recheck", self.REQUEST))
+            self.assertFalse(worker.refresh("pi@vanpi"))
+        self.assertEqual(remote.call_args.args, ("pi@vanpi", "recheck", self.REQUEST))
         run.assert_not_called()
 
     def test_browser_page_cannot_override_the_claim(self):
@@ -78,8 +78,8 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
              mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
                  stdout=json.dumps({**self.PAGE, "search_id": 42}))):
             with self.assertRaises(ValueError):
-                worker.refresh("pi@vanpi.lan")
-        self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "failed", self.REQUEST))
+                worker.refresh("pi@vanpi")
+        self.assertEqual(remote.call_args.args, ("pi@vanpi", "failed", self.REQUEST))
 
     def test_failed_or_invalid_recheck_does_not_start_browser(self):
         for response in ({"ok": False}, {"ok": True, "renewal_needed": "true"},
@@ -88,7 +88,7 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
                  mock.patch.object(worker, "remote", side_effect=[self.REQUEST, response, {"ok": True}]), \
                  mock.patch.object(worker.subprocess, "run") as run:
                 with self.assertRaises((ValueError, worker.RefreshFailure)):
-                    worker.refresh("pi@vanpi.lan")
+                    worker.refresh("pi@vanpi")
                 run.assert_not_called()
 
     def test_worker_failure_does_not_log_captured_secrets(self):
@@ -108,7 +108,7 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
         }))
         with mock.patch.object(worker.subprocess, "run", side_effect=error):
             with self.assertRaises(worker.RefreshFailure) as failed:
-                worker.remote("pi@vanpi.lan", "install", {"headers": "Cookie: private=value"})
+                worker.remote("pi@vanpi", "install", {"headers": "Cookie: private=value"})
         self.assertIn("SearchCookieError", str(failed.exception))
         self.assertNotIn("private=value", str(failed.exception))
 

@@ -10,7 +10,7 @@ from btt_common import ROOT, records
 LAUNCHER = 'macbook/scripts/sns.sh'
 LEGACY_LAUNCHERS = ('sh/sns.sh', 'pi/sns.sh', LAUNCHER)
 SHELL_PREFIXES = {'.', 'source', 'sh', '/bin/sh', 'bash', '/bin/bash', 'zsh', '/bin/zsh'}
-SSH_HOSTS = {'pi@vanpi.local', 'pi@vanpi.lan', 'vanpi', 'vanpi.lan'}
+SSH_HOSTS = {'pi@vanpi', 'pi@vanpi.local', 'pi@vanpi.lan', 'vanpi', 'vanpi.lan'}
 TASK_REPLACEMENTS = {
     ('pink', 'noise'): ('pink_noise',),
     ('brown', 'noise'): ('brown_noise',),

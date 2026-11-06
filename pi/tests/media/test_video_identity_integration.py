@@ -591,7 +591,7 @@ class LocalOnlyIdentityRouteTests(unittest.TestCase):
             "/api/play-local",
             {"path": str(self.local_file)},
             remote_addr="192.168.6.55",
-            base_url="http://vanpi.lan:8789",
+            base_url="http://vanpi:8789",
         )
         self.assertEqual(remote_play.status_code, 403)
         self.assertEqual(self.player.launch_calls, [])
@@ -624,7 +624,7 @@ class LocalOnlyIdentityRouteTests(unittest.TestCase):
             "/api/torrents/reconcile",
             {},
             remote_addr="192.168.6.55",
-            base_url="http://vanpi.lan:8789",
+            base_url="http://vanpi:8789",
         )
         self.assertEqual(remote_reconcile.status_code, 403)
         self.assertEqual(

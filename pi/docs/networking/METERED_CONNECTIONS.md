@@ -246,7 +246,7 @@ The third compact `policyctl read` column stays zero for existing backup readers
    torrent switches, removes the old indefinite exemption, and never grants a new
    approval.
 6. Enable and start the independent reconciler:
-   `ssh vanpi.lan 'sudo systemctl enable --now vanpi-metered.service'`.
+   `ssh vanpi 'sudo systemctl enable --now vanpi-metered.service'`.
    Verify fresh state, the actual uplink verdict, every Pi consumer's permission
    and several evaluations without tracebacks. Unknown must be held, not permitted.
    Restore the saved requested torrent setting, including after a later failure
@@ -256,7 +256,7 @@ The third compact `policyctl read` column stays zero for existing backup readers
    cleared fallback ownership. Do not leave seeding stopped by a deployment hold.
 7. Update the dashboard from its own repo (`~/dev/van-dashboard`,
    `scripts/deploy.py`; it deploys the backend and frontend together).
-   Check `http://vanpi.lan:8788/api/metered`, the service journal and registry/state
+   Check `http://vanpi:8788/api/metered`, the service journal and registry/state
    decoding, then open the OpenWrt sheet's Metered section in the browser. Neither
    the backend nor reconciler requires a frontend build to start, but the old
    switch must not be presented as a functioning permission control.

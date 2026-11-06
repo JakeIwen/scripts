@@ -247,7 +247,7 @@ binds F13 to showing and hiding its sidebar.
 `scripts/display_cab_dimmer.py` watches for the external Lenovo Q24h-10 monitor
 and dims the van's cab Wiz lights to the configured brightness once, only for
 cab lights that are already on, through the Pi dashboard API at
-`http://vanpi.lan:8788` (`GET /api/lights` and `POST
+`http://vanpi:8788` (`GET /api/lights` and `POST
 /api/lights/brightness`). It runs as the LaunchAgent
 `com.jacobr.display-cab-dimmer`, uses CoreGraphics display change notifications
 with a 20-second fallback poll, and waits for the display list to settle before
@@ -283,8 +283,8 @@ Read-only Mac Panel/CLI status rendering lives in `status.py`.
   matching monitors, the latest plug-in, and the latest automatic or manual
   outcome. The Mac Panel's Automations section shows this status and provides a
   **Dim now** button.
-- Log: `tmp/display-cab-dimmer/agent.log`. Away from the van LAN,
-  `vanpi.lan` does not resolve; an unreachable dashboard or unavailable light
+- Log: `tmp/display-cab-dimmer/agent.log`. Away from the van LAN
+  the dashboard is reached over Tailscale; an unreachable dashboard or unavailable light
   is logged and the agent waits. A failed run is shown on its status field but
   does not raise the automation's overall status.
 - Stop it: `launchctl bootout gui/$(id -u)/com.jacobr.display-cab-dimmer`.

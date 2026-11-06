@@ -102,7 +102,7 @@ From the Mac, copy it into a new private file without printing it:
 
 ```sh
 umask 077
-ssh vanpi.lan 'sudo cat /root/.config/restic/vanpi-offsite.password' \
+ssh vanpi 'sudo cat /root/.config/restic/vanpi-offsite.password' \
   > "$HOME/vanpi-offsite.password"
 chmod 600 "$HOME/vanpi-offsite.password"
 pbcopy < "$HOME/vanpi-offsite.password"

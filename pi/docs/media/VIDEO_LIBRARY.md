@@ -6,7 +6,7 @@
 port `8789`:
 
 ```text
-http://vanpi.lan:8789/
+http://vanpi:8789/
 ```
 
 The Van Dashboard links to the same port while preserving the hostname or
@@ -160,8 +160,8 @@ cd /Users/jacobr/dev/scripts
 .local/test-venv/bin/python run_tests.py
 python3 pi/deploy_python.py --dry-run --update --service video-library.service
 python3 pi/deploy_python.py --update --service video-library.service
-ssh pi@vanpi.lan 'systemctl --no-pager --full status video-library.service'
-ssh pi@vanpi.lan 'curl -fsS http://localhost:8789/api/status | python3 -m json.tool'
+ssh pi@vanpi 'systemctl --no-pager --full status video-library.service'
+ssh pi@vanpi 'curl -fsS http://localhost:8789/api/status | python3 -m json.tool'
 ```
 
 See [deployment](../deployment.md) for activation prerequisites, release records,

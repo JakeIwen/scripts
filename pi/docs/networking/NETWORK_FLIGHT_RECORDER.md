@@ -4,7 +4,7 @@
 
 The recorder turns the existing router, antenna and Pi observations into a
 durable incident timeline. Open **Network History** in the dashboard at
-`http://vanpi.lan:8788/#network-history?hours=6`. Select a range, uplink, device
+`http://vanpi:8788/#network-history?hours=6`. Select a range, uplink, device
 or text search, then select an incident to inspect its observations, hypotheses
 and underlying evidence. Each observation exposes its source, timing quality,
 receipt/import timestamps and physical-record provenance. The address-bar link
@@ -21,55 +21,55 @@ Run these from the Mac. They affect only the recorder when a service operation
 is requested:
 
 ```bash
-ssh pi@vanpi.lan 'systemctl status network-flight-recorder.service --no-pager'
+ssh pi@vanpi 'systemctl status network-flight-recorder.service --no-pager'
 ```
 
 ```bash
-ssh pi@vanpi.lan 'sudo systemctl start network-flight-recorder.service'
+ssh pi@vanpi 'sudo systemctl start network-flight-recorder.service'
 ```
 
 ```bash
-ssh pi@vanpi.lan 'sudo systemctl stop network-flight-recorder.service'
+ssh pi@vanpi 'sudo systemctl stop network-flight-recorder.service'
 ```
 
 ```bash
-ssh pi@vanpi.lan 'sudo systemctl restart network-flight-recorder.service'
+ssh pi@vanpi 'sudo systemctl restart network-flight-recorder.service'
 ```
 
 ```bash
-ssh pi@vanpi.lan 'python3 /home/pi/scripts/network_flight_recorder.py status --hours 1'
+ssh pi@vanpi 'python3 /home/pi/scripts/network_flight_recorder.py status --hours 1'
 ```
 
 For an explicit storage-aware status check that fails if its configuration is
 missing:
 
 ```bash
-ssh pi@vanpi.lan 'python3 /home/pi/scripts/network_flight_recorder.py --storage-config /etc/vanpi-network-storage.json status --hours 1 --json'
+ssh pi@vanpi 'python3 /home/pi/scripts/network_flight_recorder.py --storage-config /etc/vanpi-network-storage.json status --hours 1 --json'
 ```
 
 Readable reports accept a recent range or explicit timestamps. Explicit ISO
 timestamps require an offset; UTC epoch seconds are also supported. Examples:
 
 ```bash
-ssh pi@vanpi.lan 'python3 /home/pi/scripts/network_flight_recorder.py report --hours 24 --uplink clientwan --limit 100'
+ssh pi@vanpi 'python3 /home/pi/scripts/network_flight_recorder.py report --hours 24 --uplink clientwan --limit 100'
 ```
 
 ```bash
-ssh pi@vanpi.lan 'python3 /home/pi/scripts/network_flight_recorder.py report --start 2026-09-24T09:00:00Z --end 2026-09-24T10:00:00Z --search gateway --json'
+ssh pi@vanpi 'python3 /home/pi/scripts/network_flight_recorder.py report --start 2026-09-24T09:00:00Z --end 2026-09-24T10:00:00Z --search gateway --json'
 ```
 
 Use an incident ID from the report or dashboard link for export. Replace the
 quoted ID below with that ID and choose an unused output filename:
 
 ```bash
-ssh pi@vanpi.lan 'python3 /home/pi/scripts/network_flight_recorder.py export --incident INCIDENT_ID_FROM_REPORT --limit 500 --json' > /private/tmp/van-network-incident.json
+ssh pi@vanpi 'python3 /home/pi/scripts/network_flight_recorder.py export --incident INCIDENT_ID_FROM_REPORT --limit 500 --json' > /private/tmp/van-network-incident.json
 ```
 
 This observed antenna incident was verified during installation; the command
 is runnable while that incident remains within retention:
 
 ```bash
-ssh pi@vanpi.lan 'python3 /home/pi/scripts/network_flight_recorder.py export --incident 6e549b26183cdfab1308525b --limit 500 --json'
+ssh pi@vanpi 'python3 /home/pi/scripts/network_flight_recorder.py export --incident 6e549b26183cdfab1308525b --limit 500 --json'
 ```
 
 Exports contain schema version, clock semantics, source coverage, limitations,
@@ -199,7 +199,7 @@ A RAM warning can also mean a receiver permission error or failed replay while
 the drive remains mounted. Inspect the current error category and operation:
 
 ```bash
-ssh pi@vanpi.lan 'cat /run/vanpi-network/storage-status.json; journalctl -u network-flight-recorder --since "1 hour ago" --no-pager'
+ssh pi@vanpi 'cat /run/vanpi-network/storage-status.json; journalctl -u network-flight-recorder --since "1 hour ago" --no-pager'
 ```
 
 Errors expose fixed diagnostic categories, not exception contents or raw logs.

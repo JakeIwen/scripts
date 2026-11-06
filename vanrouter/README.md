@@ -27,7 +27,7 @@ Inspect the current router-side log and durable vanpi history with:
 
 ```sh
 ssh root@192.168.6.1 'logread -e clientwan-path'
-ssh pi@vanpi.lan "sudo grep 'clientwan-path' /var/log/openwrt/dendelion.log | tail -n 30"
+ssh pi@vanpi "sudo grep 'clientwan-path' /var/log/openwrt/dendelion.log | tail -n 30"
 ```
 
 ## Connection-tracking cleanup
@@ -96,7 +96,7 @@ Google curl exit code, Cloudflare HTTP status, and Cloudflare curl exit code.
 
 ```sh
 ssh root@192.168.6.1 'cat /tmp/uplink-https/*; logread -e uplink-https'
-ssh pi@vanpi.lan "sudo grep 'uplink-https' /var/log/openwrt/dendelion.log | tail -n 30"
+ssh pi@vanpi "sudo grep 'uplink-https' /var/log/openwrt/dendelion.log | tail -n 30"
 python3 vanrouter/tests/test_uplink_https_monitor.py
 python3 -m unittest pi.tests.network.test_connectivity_status
 ```

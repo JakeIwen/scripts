@@ -126,7 +126,7 @@ def named_dependency(name, candidates, saved, preset):
     if uid in saved:
         raise RuntimeError('Named dependency UUID already exists outside active resolution: '+name)
     script, _ = rewrite_command(original['ZLAUNCHPATH'])
-    script = script.replace('ssh pi@vanpi.local ', 'ssh pi@vanpi.lan ')
+    script = script.replace('ssh pi@vanpi.local ', 'ssh pi@vanpi ')
     order = 1+max((r['ZORDER'] or 0 for r in saved.values()
                    if r['ZBELONGSTOPRESET2'] == preset['Z_PK'] and r['parent'] is None), default=-1)
     node = {'BTTUUID': uid, 'BTTTriggerType': 643, 'BTTTriggerClass': 'BTTTriggerTypeOtherTriggers',

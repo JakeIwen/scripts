@@ -229,10 +229,10 @@ are under `/var/lib/vanpi-time-machine-icloud`; Apple credentials and sign-in
 renewal reuse the existing Pi job, with no additional Apple login.
 
 ```sh
-ssh pi@vanpi.lan 'sudo /usr/bin/python3 /home/pi/scripts/backup/time_machine_icloud_status.py'
-ssh pi@vanpi.lan 'systemctl list-timers vanpi-time-machine-icloud.timer --all'
-ssh pi@vanpi.lan 'sudo systemctl start --no-block vanpi-time-machine-icloud.service'
-ssh pi@vanpi.lan 'sudo systemctl stop vanpi-time-machine-icloud.service'
+ssh pi@vanpi 'sudo /usr/bin/python3 /home/pi/scripts/backup/time_machine_icloud_status.py'
+ssh pi@vanpi 'systemctl list-timers vanpi-time-machine-icloud.timer --all'
+ssh pi@vanpi 'sudo systemctl start --no-block vanpi-time-machine-icloud.service'
+ssh pi@vanpi 'sudo systemctl stop vanpi-time-machine-icloud.service'
 ```
 
 ## Installation and recovery

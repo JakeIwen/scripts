@@ -167,8 +167,8 @@ cd /Users/jacobr/dev/scripts
 git status --short
 python3 pi/deploy_python.py --dry-run
 python3 pi/deploy_python.py --dry-run --update
-ssh pi@vanpi.lan 'for u in video-library audiobooks bme280-mqtt; do /usr/bin/systemctl cat "$u.service"; /usr/bin/systemctl is-active "$u.service"; done'
-ssh pi@vanpi.lan '/usr/bin/python3 --version; /home/pi/pyvenv/bin/python --version; test -r /home/pi/sns.sh; test -x /usr/bin/vlc; test -r /home/pi/scripts/python-automation/video_library_server.py; test -r /home/pi/scripts/python-automation/audiobook_server.py; test -r /home/pi/scripts/python-automation/bme280_mqtt.py'
+ssh pi@vanpi 'for u in video-library audiobooks bme280-mqtt; do /usr/bin/systemctl cat "$u.service"; /usr/bin/systemctl is-active "$u.service"; done'
+ssh pi@vanpi '/usr/bin/python3 --version; /home/pi/pyvenv/bin/python --version; test -r /home/pi/sns.sh; test -x /usr/bin/vlc; test -r /home/pi/scripts/python-automation/video_library_server.py; test -r /home/pi/scripts/python-automation/audiobook_server.py; test -r /home/pi/scripts/python-automation/bme280_mqtt.py'
 python3 pi/deploy_python.py
 ```
 
@@ -182,7 +182,7 @@ Do not start parallel media/sensor production workers as a smoke.
 ```bash
 python3 pi/deploy_python.py --dry-run --activate --service video-library.service
 python3 pi/deploy_python.py --activate --service video-library.service
-ssh pi@vanpi.lan '/usr/bin/systemctl is-active video-library.service; /usr/bin/journalctl -u video-library.service -n 60 --no-pager; curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8789/api/status'
+ssh pi@vanpi '/usr/bin/systemctl is-active video-library.service; /usr/bin/journalctl -u video-library.service -n 60 --no-pager; curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8789/api/status'
 ```
 
 Expect `active`, HTTP 200 JSON on 8789, no import/precheck errors, and a saved
@@ -194,7 +194,7 @@ volume need an intentional owner playback test, not an automated mutation.
 
 ```bash
 python3 pi/deploy_python.py --activate --service audiobooks.service
-ssh pi@vanpi.lan '/usr/bin/systemctl is-active audiobooks.service; /usr/bin/journalctl -u audiobooks.service -n 60 --no-pager; curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8787/ > /dev/null'
+ssh pi@vanpi '/usr/bin/systemctl is-active audiobooks.service; /usr/bin/journalctl -u audiobooks.service -n 60 --no-pager; curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8787/ > /dev/null'
 ```
 
 Expect `active`, HTTP 200 on 8787 and unchanged audiobook/resume state.
@@ -203,8 +203,8 @@ Expect `active`, HTTP 200 on 8787 and unchanged audiobook/resume state.
 
 ```bash
 python3 pi/deploy_python.py --activate --service bme280-mqtt.service
-ssh pi@vanpi.lan '/usr/bin/systemctl is-active bme280-mqtt.service; /usr/bin/journalctl -u bme280-mqtt.service -n 100 --no-pager'
-ssh pi@vanpi.lan "/usr/bin/timeout 30 /home/pi/pyvenv/bin/python -c 'import paho.mqtt.subscribe as s; [print(m.payload.decode()) for m in s.simple(\"vanpi/sensors/vanpi_bme280_1/state\", hostname=\"127.0.0.1\", msg_count=2, retained=False)]'"
+ssh pi@vanpi '/usr/bin/systemctl is-active bme280-mqtt.service; /usr/bin/journalctl -u bme280-mqtt.service -n 100 --no-pager'
+ssh pi@vanpi "/usr/bin/timeout 30 /home/pi/pyvenv/bin/python -c 'import paho.mqtt.subscribe as s; [print(m.payload.decode()) for m in s.simple(\"vanpi/sensors/vanpi_bme280_1/state\", hostname=\"127.0.0.1\", msg_count=2, retained=False)]'"
 ```
 
 Expect `active`, no import, I2C, broker connection or restart-loop errors, and two
@@ -217,10 +217,10 @@ venv/interpreter.
 **4. All records, idempotence, then utility/home-file sync**.
 
 ```bash
-ssh pi@vanpi.lan 'for u in video-library audiobooks bme280-mqtt; do /usr/bin/systemctl show -p ActiveState -p MainPID -p InvocationID "$u.service"; /usr/bin/python3 -m json.tool "/run/$u/package-release"; done'
+ssh pi@vanpi 'for u in video-library audiobooks bme280-mqtt; do /usr/bin/systemctl show -p ActiveState -p MainPID -p InvocationID "$u.service"; /usr/bin/python3 -m json.tool "/run/$u/package-release"; done'
 python3 pi/deploy_python.py --update
 bash pi/sync_scripts.sh
-ssh pi@vanpi.lan '/usr/bin/readlink -e /home/pi/scripts/python-packages/current; /usr/bin/readlink -e /home/pi/scripts/python-packages/previous'
+ssh pi@vanpi '/usr/bin/readlink -e /home/pi/scripts/python-packages/current; /usr/bin/readlink -e /home/pi/scripts/python-packages/previous'
 ```
 
 Each active record must match systemd PID/invocation and name
@@ -269,7 +269,7 @@ FLAT=bme280_mqtt.py
 Then execute this single command (not a heredoc):
 
 ```bash
-ssh pi@vanpi.lan "bash -s -- '$UNIT' '$FLAT'" < pi/rollback_python_service.sh
+ssh pi@vanpi "bash -s -- '$UNIT' '$FLAT'" < pi/rollback_python_service.sh
 ```
 
 The reviewed rollback script restores `pre-package-units/<unit>.backup/<unit>`.
@@ -324,7 +324,7 @@ Custom long-lived package consumers must hold a shared `.install.lock` for their
 entire lifetime and stop before deployment:
 
 ```bash
-ssh pi@vanpi.lan '/usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /bin/bash'
+ssh pi@vanpi '/usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /bin/bash'
 ```
 
 Short flat-import utility subprocesses use standalone modules; do not hold the

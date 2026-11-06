@@ -761,7 +761,7 @@ playf() {
     fi
   done
 }
-### VAN TV ### (youtube-cast.service, port 8795 — http://vanpi.lan:8795)
+### VAN TV ### (youtube-cast.service, port 8795 — http://vanpi:8795)
 # While a cast is loaded, the transport commands the Mac's BTT media buttons send
 # over ssh (vlcmd, pp, play_status, kill_media) drive Van TV instead of VLC.
 vantv_status() { curl -s -m 1 "$VANTVAPI/status" 2>/dev/null; }
@@ -785,7 +785,7 @@ vantv_vlcmd() { # MPRIS-style vlcmd arguments, as the BTT buttons send them
     *) echo "Van TV has no $1" >&2; return 1 ;;
   esac
 }
-### AUDIOBOOKS ### (audiobooks.service, port 8787 — web UI at http://vanpi.lan:8787)
+### AUDIOBOOKS ### (audiobooks.service, port 8787 — web UI at http://vanpi:8787)
 book() { # book <fuzzy title> | book (status) | -p pause/play | -b/-f skip 60s | -l list | -B/-F chapter
   case "${1:-}" in
     "")   curl -s "$BOOKAPI/status" | python3 -m json.tool ;;
@@ -801,7 +801,7 @@ print(json.load(sys.stdin).get("message",""))' ;;
   esac
   echo
 }
-### MOVIES & TV ### (video-library.service, port 8789 — web UI at http://vanpi.lan:8789)
+### MOVIES & TV ### (video-library.service, port 8789 — web UI at http://vanpi:8789)
 vid() { # vid <fuzzy title> | -p play/pause | -b/-f 20s | -B/-F 5m | -n/-N next/prev | -x stop | -l <query>
   case "${1:-}" in
     "")   curl -sS "$VIDEOAPI/status" | python3 -m json.tool ;;

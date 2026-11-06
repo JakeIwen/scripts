@@ -1535,7 +1535,7 @@ class ApiRouteTests(unittest.TestCase):
             self.assertNotIn(private_field, response_player)
 
     def test_csrf_rejects_cross_origin_and_requires_header_for_browser_origin(self):
-        base_url = "http://vanpi.lan:8789"
+        base_url = "http://vanpi:8789"
         cross_origin = self.post(
             "control",
             {"action": "toggle"},
