@@ -339,6 +339,16 @@ class EmittedScriptTests(unittest.TestCase):
                 ['callBTT', 'set_persistent_string_variable',
                  {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': conditions.LINE_CLIPBOARD_OFF}]])
 
+    def test_app_switch_repairs_a_rejected_variable_read(self):
+        entry = self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')
+        entry['failVariableRead'] = True
+        [outcome] = run_entries([entry])
+        self.assertEqual(outcome['calls'][:2], [
+            ['callBTT', 'get_string_variable', {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE}],
+            ['callBTT', 'set_persistent_string_variable',
+             {'variable_name': conditions.LINE_CLIPBOARD_VARIABLE, 'to': conditions.LINE_CLIPBOARD_OFF}]])
+        self.assertEqual(outcome['result'], 'enabled')
+
     def test_app_switch_preserves_an_existing_bound_variable(self):
         for variable in (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON):
             entry = self.entry(by_note('on app switch'), '{"ok":true,"result":"excluded"}')

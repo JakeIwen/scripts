@@ -67,7 +67,7 @@ def _line_clipboard_hook(entry, options):
     off, on = map(json.dumps, (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON))
     if entry == 'runAppSwitch':
         return triggers.RuntimeHook(
-            f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {variable}}});\n'
+            f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {variable}}}).catch(() => "");\n'
             f'    if (lineClipboard == null || lineClipboard === "") ' + SET_VARIABLE % (variable, off))
     if kind not in TAGGING_KINDS:
         return triggers.RuntimeHook()
