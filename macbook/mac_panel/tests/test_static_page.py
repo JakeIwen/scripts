@@ -62,9 +62,7 @@ class StaticPageTests(unittest.TestCase):
                 self.assertTrue(STATIC_NAME.fullmatch(name), f'{module.name} imports unservable {name}')
                 self.assertTrue((STATIC / name).is_file(), f'{module.name} imports missing {name}')
                 imported.add(name)
-        # charts.mjs is built and Node-tested ahead of the sections that will draw with it; drop it
-        # from this set when the first section imports it.
-        self.assertEqual({module.name for module in modules} - imported, {'app.mjs', 'charts.mjs'})
+        self.assertEqual({module.name for module in modules} - imported, {'app.mjs'})
 
     def test_only_tokens_define_colours(self):
         literal = re.compile(r'#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch)\(')
