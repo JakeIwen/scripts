@@ -51,6 +51,8 @@ Flags:
                excerpt (the default; undoes an earlier -e or -d).
   -d, --dirs   Group by directory and tool, with total matches and the latest
                hit. The last -d, -g or -e flag wins.
+  -D, --here   Only sessions started in the current directory or below it
+               (with --index, from the index's 200 newest hits).
   --index      Use the fast whole-word index of prompts and visible replies.
   --grep       Use the default full substring scan (undoes an earlier --index).
                The last --index or --grep flag wins.
@@ -136,14 +138,15 @@ llmsearch_print_results() {
 # start on a busy Pi.
 llmsearch_print_index() {
     jq -nj -L "$llmsearch_scripts" --argjson group "$session_search_group" \
-        --argjson dirs "$session_search_dirs" '
-        include "session_search_records"; session_search_index_fields($group; $dirs)
+        --argjson dirs "$session_search_dirs" --arg here "$session_search_here" '
+        include "session_search_records"; session_search_index_fields($group; $dirs; $here)
     ' | llmsearch_print_results
 }
 
 # -f: the matching sessions' fork families instead of their matches.
 llmsearch_print_forks() {
-    jq -nj -L "$llmsearch_scripts" 'include "session_search_records"; session_search_index_ids' |
+    jq -nj -L "$llmsearch_scripts" --arg here "$session_search_here" \
+        'include "session_search_records"; session_search_index_ids($here)' |
         session_search_fork_families claude "$llmsearch_claude" codex "$llmsearch_codex"
 }
 

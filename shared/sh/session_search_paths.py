@@ -2,18 +2,57 @@
 """List Claude and Codex session transcripts in newest-activity order."""
 
 import argparse
+import json
 import os
 from pathlib import Path
+import re
 import signal
 import stat
 import sys
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 PathRecord = Tuple[int, bytes, str, Path]
 
 
-def claude_paths(root: Path) -> Iterable[Path]:
+def cwd_within(cwd: Optional[str], root: Optional[str]) -> bool:
+    """True when a session's directory is `root` or below it (no `root`: always)."""
+    if not root:
+        return True
+    if not cwd:
+        return False
+    cwd, root = os.path.realpath(cwd), os.path.realpath(root)
+    return cwd == root or cwd.startswith(root.rstrip("/") + "/")
+
+
+def claude_project_name(cwd: str) -> str:
+    """Claude Code names a project folder after its cwd with every other character as `-`."""
+    return re.sub(r"[^a-zA-Z0-9]", "-", cwd)
+
+
+def claude_project_may_be_within(name: str, root: str) -> bool:
+    # The folder name loses the path's punctuation, so this only rules folders
+    # out; the extractor checks the cwd each transcript records.
+    root = os.path.realpath(root)
+    return name == claude_project_name(root) or \
+        name.startswith(claude_project_name(root.rstrip("/") + "/"))
+
+
+def codex_session_cwd(path: Path) -> Optional[str]:
+    """The cwd from a transcript's leading session_meta line, or None when unknown."""
+    try:
+        with path.open("rb") as source:
+            event = json.loads(source.readline().decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(event, dict) or event.get("type") != "session_meta":
+        return None
+    payload = event.get("payload")
+    cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    return cwd if isinstance(cwd, str) else None
+
+
+def claude_paths(root: Path, under: Optional[str] = None) -> Iterable[Path]:
     projects = root / "projects"
     if not projects.is_dir():
         return
@@ -24,6 +63,8 @@ def claude_paths(root: Path) -> Iterable[Path]:
     for project in project_entries:
         try:
             if not project.is_dir(follow_symlinks=False):
+                continue
+            if under and not claude_project_may_be_within(project.name, under):
                 continue
             sessions = os.scandir(project.path)
         except OSError as error:
@@ -37,7 +78,7 @@ def claude_paths(root: Path) -> Iterable[Path]:
             raise RuntimeError(f"cannot read Claude project directory {project.path}: {error}") from error
 
 
-def codex_paths(root: Path) -> Iterable[Path]:
+def codex_paths(root: Path, under: Optional[str] = None) -> Iterable[Path]:
     sessions = root / "sessions"
     if not sessions.is_dir():
         return
@@ -56,16 +97,24 @@ def codex_paths(root: Path) -> Iterable[Path]:
                 if not name.endswith(".jsonl"):
                     continue
                 path = Path(directory, name)
-                if not path.is_symlink():
-                    yield path
+                if path.is_symlink():
+                    continue
+                # A transcript whose first line names no cwd is kept for the
+                # extractor to judge, like one Claude's folder name can't rule out.
+                if under:
+                    cwd = codex_session_cwd(path)
+                    if cwd is not None and not cwd_within(cwd, under):
+                        continue
+                yield path
     except OSError as error:
         raise RuntimeError(f"cannot read Codex sessions directory {sessions}: {error}") from error
 
 
-def sorted_records(sources: Sequence[Tuple[str, Path]]) -> List[PathRecord]:
+def sorted_records(sources: Sequence[Tuple[str, Path]],
+                   under: Optional[str] = None) -> List[PathRecord]:
     records: List[PathRecord] = []
     for provider, root in sources:
-        paths = claude_paths(root) if provider == "claude" else codex_paths(root)
+        paths = (claude_paths if provider == "claude" else codex_paths)(root, under)
         for path in paths:
             try:
                 metadata = os.stat(path, follow_symlinks=False)
@@ -82,11 +131,13 @@ def sorted_records(sources: Sequence[Tuple[str, Path]]) -> List[PathRecord]:
     return records
 
 
-def parse_sources(arguments: Sequence[str]) -> Sequence[Tuple[str, Path]]:
+def parse_arguments(arguments: Sequence[str]) -> Tuple[Sequence[Tuple[str, Path]], Optional[str]]:
     parser = argparse.ArgumentParser(
         description="emit NUL-delimited provider/path pairs, newest first",
-        usage="%(prog)s PROVIDER ROOT [PROVIDER ROOT ...]",
+        usage="%(prog)s [--under DIR] PROVIDER ROOT [PROVIDER ROOT ...]",
     )
+    parser.add_argument("--under", metavar="DIR",
+                        help="leave out transcripts known to come from outside DIR")
     parser.add_argument("sources", nargs="+")
     parsed = parser.parse_args(arguments)
     if len(parsed.sources) % 2:
@@ -97,13 +148,18 @@ def parse_sources(arguments: Sequence[str]) -> Sequence[Tuple[str, Path]]:
         if provider not in ("claude", "codex"):
             parser.error(f"unsupported provider: {provider}")
         sources.append((provider, Path(root)))
-    return sources
+    return sources, parsed.under
+
+
+def parse_sources(arguments: Sequence[str]) -> Sequence[Tuple[str, Path]]:
+    """The provider/root pairs alone, for the fork lister, which walks whole stores."""
+    return parse_arguments(arguments)[0]
 
 
 def main(arguments: Sequence[str] = None) -> int:
-    sources = parse_sources(sys.argv[1:] if arguments is None else arguments)
+    sources, under = parse_arguments(sys.argv[1:] if arguments is None else arguments)
     try:
-        records = sorted_records(sources)
+        records = sorted_records(sources, under)
     except RuntimeError as error:
         print(f"session_search_paths: {error}", file=sys.stderr)
         return 1

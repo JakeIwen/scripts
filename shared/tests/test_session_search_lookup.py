@@ -162,7 +162,7 @@ class InterruptTests(LookupTestCase):
     def test_extractor_stops_without_a_traceback(self):
         command = ['python3', str(fixtures.SCRIPTS / 'session_search_extract.py'), '--title',
                    '--ids', '--codex-root', str(self.root / 'codex'), 'first']
-        transcript = self.root / 'claude/projects/project/first.jsonl'
+        transcript = self.claude_transcript('first')
         with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE) as process:
             process.stdin.write(b'claude\0' + bytes(transcript) + b'\0')

@@ -16,6 +16,7 @@ import time
 from typing import Iterator, Optional
 
 from session_search_display import SearchRecord, header_color, record_text
+from session_search_paths import cwd_within
 
 
 EXCERPT_PROGRAM = Path(__file__).with_name("session_search_excerpt.awk")
@@ -27,6 +28,8 @@ class Session:
     path: Path
     identifier: str
     cwd: Optional[str] = None
+    # The cwd exactly as recorded; `cwd` keeps the old readers' trimming quirks.
+    recorded_cwd: Optional[str] = None
     custom: str = ""
     ai: str = ""
 
@@ -106,7 +109,7 @@ def metadata(session: Session, event: object) -> None:
         return
     if session.provider == "claude":
         if session.cwd is None and isinstance(event.get("cwd"), str):
-            session.cwd = event["cwd"]
+            session.cwd = session.recorded_cwd = event["cwd"]
         for kind, field, attribute in (("custom-title", "customTitle", "custom"),
                                        ("ai-title", "aiTitle", "ai")):
             if event.get("type") == kind and isinstance(event.get(field), str) and event[field]:
@@ -118,7 +121,8 @@ def metadata(session: Session, event: object) -> None:
         if identifier is None or identifier is False:
             identifier = payload.get("id")
         session.identifier = (identifier or session.identifier).rstrip("\n")
-        session.cwd = (payload.get("cwd") or "").rstrip("\n")
+        session.recorded_cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else ""
+        session.cwd = session.recorded_cwd.rstrip("\n")
 
 
 def codex_titles(root: Path) -> dict:
@@ -308,6 +312,8 @@ def main() -> int:
     parser.add_argument("--before", default="0")
     parser.add_argument("--after", default="0")
     parser.add_argument("--codex-root", type=Path, required=True)
+    parser.add_argument("--under", metavar="DIR",
+                        help="show only sessions whose cwd is DIR or below it")
     parser.add_argument("query")
     args = parser.parse_args()
     sys.stdout.reconfigure(errors="surrogateescape")
@@ -320,6 +326,8 @@ def main() -> int:
             continue
         session = Session(provider, path, identifier)
         title, matches = extract(session, query, args.title or args.session, titles)
+        if not cwd_within(session.recorded_cwd, args.under):
+            continue
         if args.session:
             matches = [Match(session.identifier.encode("utf-8"))]
         print_session(session, title, matches, args, color)

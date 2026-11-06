@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import tempfile
@@ -17,13 +18,28 @@ GREP_ONLY_ENVIRONMENT = ('CLAUDESEARCH_ROOT', 'CODEXSEARCH_ROOT', 'CLAUDE_CONFIG
 NOT_BUILT_NOTE = 'llmsearch: the transcript index is not built yet, so searching with grep (slow)\n'
 
 
+def claude_project_folder(cwd):
+    """Claude Code's project folder name: the cwd with every other character as `-`."""
+    return re.sub(r'[^a-zA-Z0-9]', '-', cwd)
+
+
 class SessionFixtureTestCase(unittest.TestCase):
     """Claude and Codex session stores under a temporary root."""
+
+    @property
+    def project(self):
+        """The default session directory, under the fixture home."""
+        return str(self.home / 'dev/my project')
+
+    def claude_transcript(self, session_id, cwd=None):
+        cwd = self.project if cwd is None else cwd
+        return self.root / 'claude/projects' / claude_project_folder(cwd) / (session_id + '.jsonl')
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        # Transcripts record physical paths (macOS's temp folder is a symlink).
+        self.root = Path(self.temporary.name).resolve()
         self.home = self.root / 'home'
         self.home.mkdir()
         for tool in ('claude', 'codex'):
@@ -32,9 +48,10 @@ class SessionFixtureTestCase(unittest.TestCase):
 
     def write_session(self, tool, session_id, messages, cwd=None, timestamps=()):
         store = self.root / tool
-        cwd = str(self.home / 'dev/my project') if cwd is None else cwd
+        cwd = self.project if cwd is None else cwd
         if tool == 'claude':
-            folder = store / 'projects/project'
+            # A transcript with no cwd still needs a folder; Claude never writes one.
+            folder = store / 'projects' / (claude_project_folder(cwd) or 'unknown')
             events = [{'type': 'custom-title', 'customTitle': session_id}]
             events += [{'type': 'user', 'cwd': cwd, 'message': {'content': text}}
                        for text in messages]
@@ -203,7 +220,7 @@ class SessionSearchTests(SessionFixtureTestCase):
             stream.write(json.dumps({'id': 'stale', 'thread_name': 'Current'}) + '\n')
         for tool in ('claude', 'codex'):
             self.write_session(tool, 'untitled', ['body needle'], cwd='/tmp/fallback')
-        untitled = self.root / 'claude/projects/project/untitled.jsonl'
+        untitled = self.claude_transcript('untitled', cwd='/tmp/fallback')
         untitled.write_text(untitled.read_text().split('\n', 1)[1])
         index = self.root / 'codex/session_index.jsonl'
         index.write_text(''.join(line + '\n' for line in index.read_text().splitlines()

@@ -36,9 +36,16 @@ def session_search_index_record:
     {provider: .tool, cwd, id, name: session_search_index_name, mtime, modified: $modified,
      matched_at: (.matched_at // $modified | floor), count, context: (.context // .excerpt)};
 
+# -D: only sessions started in $here or below it; "" keeps every session.
+# A session with no recorded cwd is never within a directory, as in grep mode.
+def session_search_within($here):
+    ($here | sub("/$"; "")) as $root |
+    $here == "" or (.cwd != "" and
+        ((.cwd | sub("/$"; "")) == $root or (.cwd | startswith($root + "/"))));
+
 # Each local result's tool and id, NUL-terminated, for the fork lookup.
-def session_search_index_ids:
-    inputs | select((.host // "") == "") | [.tool, .id] |
+def session_search_index_ids($here):
+    inputs | select((.host // "") == "" and session_search_within($here)) | [.tool, .id] |
     map(tostring | gsub("\u0000"; "") + "\u0000") | add;
 
 # Index rows can contain several matches for a session; keep their total and
@@ -51,8 +58,8 @@ def session_search_index_sessions:
 # NUL-terminated fields for the shell to label and print: tool, cwd, id, name,
 # mtime (empty when unknown), count and excerpt. Ungrouped rows keep the index's
 # newest-match order; directory roll-ups retain their existing print order.
-def session_search_index_fields($group; $dirs):
-    [inputs | session_search_index_record] |
+def session_search_index_fields($group; $dirs; $here):
+    [inputs | select(session_search_within($here)) | session_search_index_record] |
     if $dirs then session_search_group(.[]; .id)
     elif $group then session_search_index_sessions
     else .[] end |

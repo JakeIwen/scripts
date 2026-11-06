@@ -576,6 +576,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   All three commands accept `-t`/`--title` (alias `-n`/`--name`) for literal,
   case-insensitive saved titles only, one hit per session with no directory fallback. `-N`, `-a N` and
   `-b N` select context inside a matching message; `--` ends flag parsing.
+  `-D`/`--here` keeps only sessions started in the shell's directory (`pwd -P`)
+  or below it: `session_search_paths.py --under` rules out Claude project
+  folders by their encoded name and Codex transcripts by their first line's
+  cwd, the extractor checks each recorded cwd, and `session_search_within` in
+  the jq filters index results the same way.
   `llmsearch` defaults to the same literal, case-insensitive substring scan as
   `claudesearch` and `codexsearch`, including thinking and tool output, so a
   partial word does not silently lose matches. `--index` opts into this machine's

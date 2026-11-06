@@ -19,6 +19,7 @@ Flags:
   -e, --single Show every matching excerpt instead of one result per session.
   -g, --group  One result per session, with the match count and latest
                excerpt (the default; undoes an earlier -e).
+  -D, --here   Only sessions started in the current directory or below it.
   -N           Show N message lines before and after each match (e.g. -2).
   -a N, -aN    Show N lines after; later context flags override each side.
   -b N, -bN    Show N lines before (non-negative integers).
@@ -40,7 +41,8 @@ session_search_files() {
         fi
         return 0
     fi
-    python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_paths.py" "$@" |
+    python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_paths.py" \
+        ${session_search_here:+--under "$session_search_here"} "$@" |
     while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
         if [ -f "$file" ] && [ ! -L "$file" ] &&
             { [ "$session_search_title" = true ] || [ "$session_search_session" = true ] ||
@@ -68,6 +70,13 @@ session_search_group_flag() {
     return 0
 }
 
+# The physical path, since transcripts record resolved directories. The
+# sentinel keeps a trailing newline that belongs to the directory's name.
+session_search_here_from_pwd() {
+    session_search_here=$(pwd -P && printf x) || return 1
+    session_search_here=${session_search_here%$'\n'x}
+}
+
 # A caller that offers --grep/--index sets session_search_grep to its default
 # before parsing; for the others these flags are search text. The query is also
 # kept split at --, into words before it and literal text after it.
@@ -77,6 +86,7 @@ session_search_parse_args() {
     session_search_session=false
     session_search_forks=false
     session_search_help=false
+    session_search_here=""
     session_search_query=""
     session_search_words=""
     session_search_literal=""
@@ -115,6 +125,7 @@ session_search_parse_args() {
                 -t|--title|-n|--name) session_search_title=true; continue ;;
                 -s|--session) session_search_session=true; continue ;;
                 -f|--forks) session_search_forks=true; continue ;;
+                -D|--here) session_search_here_from_pwd || return 2; continue ;;
                 -h|--help) session_search_help=true; continue ;;
                 --grep|--index)
                     if [ -n "${session_search_grep+set}" ]; then
@@ -219,6 +230,7 @@ session_search_extract() {
     [ "$session_search_forks" = false ] || flags+=(--ids)
     [ "$session_search_context_requested" = false ] || flags+=(--context)
     [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] || flags+=(--records)
+    [ -z "$session_search_here" ] || flags+=(--under "$session_search_here")
     python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_extract.py" \
         ${flags[@]+"${flags[@]}"} --before "$session_search_before" --after "$session_search_after" \
         --codex-root "${CODEXSEARCH_ROOT:-$HOME/.codex}" -- "$session_search_query"

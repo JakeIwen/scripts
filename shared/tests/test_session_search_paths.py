@@ -102,5 +102,50 @@ class SessionSearchPathsTests(unittest.TestCase):
                 self.assertIn(b"usage:", result.stderr)
 
 
+class UnderDirectoryTests(SessionSearchPathsTests):
+    """--under leaves out transcripts whose folder name or first line rules them out."""
+
+    def claude_project(self, cwd, name, modified_ns):
+        folder = "projects/" + "".join(c if c.isalnum() else "-" for c in cwd)
+        return self.transcript("claude", folder + "/" + name + ".jsonl", modified_ns)
+
+    def codex_session(self, name, first_line, modified_ns):
+        path = self.transcript("codex", "sessions/2026/11/05/" + name + ".jsonl", modified_ns)
+        path.write_text(first_line + "\n")
+        os.utime(path, ns=(modified_ns, modified_ns))
+        return path
+
+    def test_claude_folders_are_kept_only_when_their_name_can_lie_within(self):
+        base = str(self.root.resolve() / "work")
+        kept = [self.claude_project(base, "same", 9),
+                self.claude_project(base + "/sub.dir", "below", 8)]
+        self.claude_project(base + "2", "sibling", 7)
+        self.claude_project(str(self.root.resolve()), "parent", 6)
+        self.transcript("claude", "projects/unknown/no-cwd.jsonl", 5)
+        result = self.run_helper("--under", base, "claude", self.claude)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.records(result), [("claude", str(path)) for path in kept])
+
+    def test_codex_first_lines_rule_sessions_out_only_when_they_name_a_cwd(self):
+        base = str(self.root.resolve() / "work")
+        meta = '{"type": "session_meta", "payload": {"cwd": "%s"}}'
+        kept = [self.codex_session("same", meta % base, 9),
+                self.codex_session("below", meta % (base + "/sub"), 8),
+                self.codex_session("unknown", '{"type": "event_msg"}', 7),
+                self.codex_session("unparsable", "not json", 6)]
+        self.codex_session("sibling", meta % (base + "2"), 5)
+        self.codex_session("elsewhere", meta % "/tmp", 4)
+        result = self.run_helper("--under", base, "codex", self.codex)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.records(result), [("codex", str(path)) for path in kept])
+
+    def test_the_root_directory_keeps_everything(self):
+        paths = [self.claude_project("/Users/x", "a", 9),
+                 self.codex_session("b", '{"type": "session_meta", "payload": {"cwd": "/x"}}', 8)]
+        result = self.run_helper("--under", "/", "claude", self.claude, "codex", self.codex)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([path for _, path in self.records(result)], list(map(str, paths)))
+
+
 if __name__ == "__main__":
     unittest.main()
