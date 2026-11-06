@@ -6,7 +6,8 @@ from panel_contracts import ApiError, Section
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, auth, json_command, request, running_server
 from sampler import samples
-from usage_adapter import COMMAND, UsageAdapter, WINDOWS
+from cli_runner import CommandResult
+from usage_adapter import COMMAND, MODE_COMMAND, MODES, UsageAdapter, WINDOWS
 
 
 def facts():
@@ -160,3 +161,61 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(value['codex_weekly_left']['level'], 'warn')
         self.assertEqual(value['claude_weekly_left']['value'], 80)
         self.assertEqual(value['lean']['text'], 'gpt-heavy')
+
+
+class ModeTests(unittest.TestCase):
+    REPORT = 'mode: gpt-conserve (manual; expires Thu Nov 12 00:46)'
+
+    def adapter(self, *results):
+        runner = FakeRunner(list(results))
+        return UsageAdapter(runner), runner
+
+    def test_every_mode_name_is_accepted_and_returns_fresh_facts(self):
+        self.assertEqual(len(MODES), 7)
+        for mode in MODES:
+            adapter, runner = self.adapter(CommandResult(0, self.REPORT + '\n'), json_command(LIVE))
+            with self.subTest(mode=mode):
+                result = adapter.mutate({'action': 'mode', 'mode': mode, 'confirmed': True})
+                self.assertEqual(runner.calls, [(MODE_COMMAND + (mode,), 20), (COMMAND, 20)])
+                self.assertEqual(result['message'], self.REPORT)
+                self.assertEqual(result['lean'], 'balanced-burn')
+
+    def test_bad_name_and_bad_shape_are_refused_before_any_cli_call(self):
+        for body in ({'action': 'mode', 'mode': 'turbo', 'confirmed': True},
+                     {'action': 'mode', 'mode': 'gpt-burn; rm -rf', 'confirmed': True},
+                     {'action': 'mode', 'mode': 7, 'confirmed': True},
+                     {'action': 'other', 'mode': 'gpt-burn', 'confirmed': True},
+                     {'action': 'mode', 'mode': 'gpt-burn', 'confirmed': True, 'hours': 4},
+                     {'action': 'mode'}):
+            adapter, runner = self.adapter()
+            with self.subTest(body=body), self.assertRaises(ApiError) as caught:
+                adapter.mutate(body)
+            self.assertEqual(caught.exception.status, 400)
+            self.assertEqual(runner.calls, [])
+
+    def test_missing_confirmation_is_a_400_without_a_cli_call(self):
+        for body in ({'action': 'mode', 'mode': 'gpt-burn'}, {'action': 'mode', 'mode': 'gpt-burn', 'confirmed': 'yes'}):
+            adapter, runner = self.adapter()
+            with self.subTest(body=body), self.assertRaises(ApiError) as caught:
+                adapter.mutate(body)
+            self.assertEqual((caught.exception.status, runner.calls), (400, []))
+
+    def test_cli_failure_text_is_relayed_as_400(self):
+        usage = 'usage: usage_budget.py mode gpt-burn|claude-burn|auto'
+        for result, text in ((CommandResult(2, '', usage + '\n'), usage),
+                             (CommandResult(1, '', 'could not save mode to /state'), 'could not save mode to /state'),
+                             (CommandResult(2, 'stdout only\n', ''), 'stdout only')):
+            adapter, runner = self.adapter(result)
+            with self.subTest(text=text), self.assertRaises(ApiError) as caught:
+                adapter.mutate({'action': 'mode', 'mode': 'gpt-conserve', 'confirmed': True})
+            self.assertEqual((caught.exception.status, str(caught.exception)), (400, text))
+            self.assertEqual(len(runner.calls), 1)
+
+    def test_post_route_reaches_the_adapter(self):
+        routes = PanelRoutes(runner=FakeRunner([CommandResult(0, self.REPORT), json_command(LIVE)]))
+        self.addCleanup(routes.close)
+        with running_server(routes) as server:
+            code, _, raw = request(server, '/api/usage', 'POST',
+                                   json.dumps({'action': 'mode', 'mode': 'auto', 'confirmed': True}), auth(server, post=True))
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(raw)['message'], self.REPORT)

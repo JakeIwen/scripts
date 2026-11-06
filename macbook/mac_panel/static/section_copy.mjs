@@ -7,7 +7,7 @@ export const GROUPS = [
   {id: 'jobs', title: 'Jobs & services', sections: ['services', 'deferred', 'crontab', 'automations', 'llm-restore']},
   {id: 'network', title: 'Network', sections: ['metered']},
   {id: 'mac', title: 'Mac', sections: ['amphetamine', 'guard', 'ntfy', 'logs']},
-  {id: 'usage', title: 'Usage', sections: ['usage']},
+  {id: 'usage', title: 'LLM', sections: ['usage']},
   {id: 'settings', title: 'Settings', sections: ['settings']},
 ];
 
@@ -57,8 +57,8 @@ export const SECTION_COPY = {
     info: 'Every log the Mac\'s jobs write, found from LaunchAgent plists, the tracked crontab and a scan of the state folders. The rotator keeps each one under its size limit by archiving the old part beside it. Sizes and paths only; contents are never read here.',
   },
   usage: {
-    title: 'Usage',
-    info: 'Claude and Codex allowance left in the current windows against an even spend line, with the routing the usage-budget script chose from them.',
+    title: 'LLM',
+    info: 'Claude and Codex allowance left in the current windows against an even spend line, the routing the usage-budget script chose from them, and that script\'s settings.',
   },
   settings: {
     title: 'Settings',
@@ -72,7 +72,10 @@ export function groupOf(id) {
   return GROUPS.find(group => group.sections.includes(id));
 }
 
-// ---- per-section copy for Metered, Amphetamine, BTT guard, ntfy, Usage and Settings ----
+// The one tool whose settings card lives in the LLM section (internal id `usage`) instead of Settings.
+export const USAGE_SETTINGS_TOOL = 'usage-budget';
+
+// ---- per-section copy for Metered, Amphetamine, BTT guard, ntfy, LLM and Settings ----
 
 export const METERED_COPY = {
   ssidsTitle: 'Metered SSIDs',
@@ -135,16 +138,31 @@ export const USAGE_COPY = {
   routingTitle: 'Routing',
   routingInfo: 'The usage-budget script weighs the windows and picks which family does the work and which reviews it.',
   historyTitle: 'History',
-  historyInfo: 'Allowance left over time, sampled every 15 minutes while the panel runs.',
+  historyInfo: 'Allowance left over time, sampled every 15 minutes while the panel runs. The dashed line is Claude\'s even-spend line for the week: a line below it means spending is ahead of schedule. Hover or tap for the values at one moment. Nothing is drawn before the panel started recording.',
+  historyAllowanceTitle: 'Allowance left',
+  historyAllowanceUnit: '% left',
+  historyCreditsTitle: 'Credits left',
+  historyCreditsUnit: 'credits',
+  historySeries: {
+    claude_weekly_left: 'Claude week',
+    claude_session_left: 'Claude five-hour',
+    codex_weekly_left: 'Codex week',
+    claude_line_left: 'Claude even spend',
+    credits: 'Credits',
+  },
   creditsInfo: 'Credits left against what the daily allowance would use before they expire. Short of full means they would run out early.',
   noData: 'The usage tool gave no snapshot',
   noHistory: 'No usage history recorded for this range yet',
+  settingsAnchor: 'budget-settings',
+  settingsTitle: 'Usage budget',
+  settingsUnavailable: 'The usage budget settings could not be loaded',
   staleMinutes: 120,
 };
 
 export const LOGS_COPY = {
-  historyTitle: 'Total live size',
-  historyInfo: 'Bytes in live log files, sampled every 15 minutes while the panel runs. A steady climb with no drops means rotation is not keeping up.',
+  historyTitle: 'Log footprint',
+  historySeries: 'Live + archived',
+  historyInfo: 'Megabytes in live log files plus their archives (one combined line: the history records only the total), sampled every 15 minutes while the panel runs. A steady climb with no drops means rotation is not keeping up.',
   noHistory: 'No log history recorded for this range yet',
   logsTitle: 'Logs',
   whatCounts: 'A log is a file a LaunchAgent or cron job redirects its output to, a .log, .out or .err file found under the scanned state folders, or a path you add. Symlinks, files outside your home folder and files you do not own are never rotated.',
@@ -170,9 +188,30 @@ export const LOGS_COPY = {
   },
 };
 
+// The usage-budget script's modes, in the order the picker lists them; `kind` is whether the script can pick
+// the mode itself (auto) or only a person can (manual). `auto` is the choice that clears a manual mode.
+export const MODE_COPY = {
+  title: 'Mode',
+  info: 'The delegation mode the usage-budget script picked from the spend lines. Choosing one here overrides that automatic choice until it expires (the targeted provider\'s next weekly reset); Automatic clears the override. There is no duration to set.',
+  automatic: {label: 'Automatic', text: 'Clear any manual mode; the script picks from the spend lines again.'},
+  modes: {
+    'claude-conserve': {kind: 'auto', text: 'Claude in deficit, GPT in surplus. GPT builds at the cheapest fit, Opus reviews its work, new sessions start on Astra.'},
+    'gpt-conserve': {kind: 'auto', text: 'GPT in deficit, Claude in surplus. Claude builds at the cheapest fit, Astra reviews, new sessions start on Opus.'},
+    'balanced-conserve': {kind: 'auto', text: 'Both in deficit. The family less deep in deficit builds, required reviews only, its frontier model parents.'},
+    'balanced-burn': {kind: 'auto', text: 'Both in surplus. Either family builds by fit, step-ups are free on T2 and T3, optional reviews are added, either parent.'},
+    'gpt-burn': {kind: 'manual', text: 'GPT builds everything, parents included, Opus still reviews, extra GPT reviews are added, sessions start on Astra.'},
+    'claude-burn': {kind: 'manual', text: 'Claude builds everything, parents included, Astra still reviews, extra Opus reviews are added, sessions start on Fable or Opus.'},
+  },
+  apply: 'Apply',
+  confirm: mode => `set mode ${mode}`,
+  searchTitle: 'Set LLM mode',
+  searchInfo: 'Pick a delegation mode, or clear it back to automatic',
+};
+
 export const SETTINGS_COPY = {
   empty: 'No tools declare settings',
   resetInfo: 'Restores every field of this tool to its declared default.',
+  usagePointer: 'Usage budget settings live in LLM',
 };
 
 // ---- Jobs & services: strings the section renderers use, kept out of the render functions ----

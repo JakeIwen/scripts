@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {formatBytes, formatGrowth, hasChanges, policyBody, policyText, problemsFromError, validateAddPath, validatePolicy, bySize} from '../static/logs_format.mjs';
+import {formatMegabytes, megabytePoints, formatBytes, formatGrowth, hasChanges, policyBody, policyText, problemsFromError, validateAddPath, validatePolicy, bySize} from '../static/logs_format.mjs';
 
 const MB = 1024 * 1024;
 const entry = (path, bytes, extra = {}) => ({path, bytes, state: 'ok', note: null, policy: {max_mb: 10, keep: 5, compress: true, enabled: true, override: false}, ...extra});
@@ -50,4 +50,13 @@ test('add path must be absolute and server messages map to a field', () => {
   assert.deepEqual(Object.keys(problemsFromError('max_mb out of range')), ['max_mb']);
   assert.deepEqual(Object.keys(problemsFromError('keep must be 0-30')), ['keep']);
   assert.deepEqual(Object.keys(problemsFromError('path is outside HOME')), ['form']);
+});
+
+test('footprint points convert to megabytes and niceTicks gives round MB ticks', async () => {
+  const {niceTicks} = await import('../static/chart_scale.mjs');
+  const points = megabytePoints([{ts: 1, value: 0}, {ts: 2, value: null}, {ts: 3, value: 88 * 1024 * 1024}]);
+  assert.deepEqual(points, [{ts: 1, value: 0}, {ts: 3, value: 88}]);
+  const ticks = niceTicks(0, 88, 5).ticks;
+  assert.deepEqual(ticks, [0, 25, 50, 75, 100]);
+  assert.deepEqual(ticks.map(formatMegabytes), ['0 MB', '25 MB', '50 MB', '75 MB', '100 MB']);
 });

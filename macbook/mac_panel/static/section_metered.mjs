@@ -1,4 +1,5 @@
 // Host-local controls; remote consumers are telemetry, never editable here.
+import {stateLegend, timeAxis} from './chart_axes.mjs';
 import {sparkline, stateStrip} from './charts.mjs';
 import {historyPanel} from './history_panel.mjs';
 import {METERED_COPY as COPY} from './section_copy.mjs';
@@ -181,12 +182,15 @@ function advancedCard(data) {
 
 const toBands = rows => rows.map(({ts, level, text}) => ({ts, level, text: text ?? level}));
 
+const strip = (rows, window) => stateStrip({samples: toBands(rows), ...window, maxGap: HISTORY_MAX_GAP, legend: false});
+
+// A group of strips shares one time axis and one key to the band colours.
+const groupFooter = window => [timeAxis(window), stateLegend()];
+
 function drawHistory(data, series, window) {
   const charts = [];
   const verdict = series.verdict ?? [];
-  if (verdict.length) {
-    charts.push(node('h4', 'Metered or not'), stateStrip({samples: toBands(verdict), ...window, maxGap: HISTORY_MAX_GAP}));
-  }
+  if (verdict.length) charts.push(node('h4', 'Metered or not'), strip(verdict, window));
   const lowData = series.low_data_mode ?? [];
   if (lowData.some(point => point.value !== null)) {
     charts.push(node('h4', 'Low Data Mode'), sparkline({
@@ -194,13 +198,16 @@ function drawHistory(data, series, window) {
       format: value => (value ? 'on' : 'off'), maxGap: HISTORY_MAX_GAP,
     }));
   }
+  if (charts.length) charts.push(...groupFooter(window));
   const labels = new Map(data.registry.map(row => [row.id, row.label]));
   const perConsumer = node('div');
   Object.entries(series).filter(([key]) => key.startsWith('consumer:')).forEach(([key, rows]) => {
-    perConsumer.append(node('h4', labels.get(key.slice('consumer:'.length)) ?? key.slice('consumer:'.length)),
-      stateStrip({samples: toBands(rows), ...window, maxGap: HISTORY_MAX_GAP}));
+    perConsumer.append(node('h4', labels.get(key.slice('consumer:'.length)) ?? key.slice('consumer:'.length)), strip(rows, window));
   });
-  if (perConsumer.childElementCount) charts.push(details(COPY.consumerHistoryTitle, perConsumer, 'consumer-history'));
+  if (perConsumer.childElementCount) {
+    perConsumer.append(...groupFooter(window));
+    charts.push(details(COPY.consumerHistoryTitle, perConsumer, 'consumer-history'));
+  }
   return charts;
 }
 
