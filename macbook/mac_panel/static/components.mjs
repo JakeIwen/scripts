@@ -129,9 +129,9 @@ export function info(text) {
     trigger.setAttribute('aria-expanded', String(opening));
     if (opening) {
       openInfos.add(item);
-      // Keep the popover inside the viewport whichever side the icon is on (CSSOM, so no inline-style attribute).
+      // Keep the popover inside the viewport whichever side the icon is on.
       const edge = root.getBoundingClientRect().left;
-      pop.style.left = `${Math.max(8, Math.min(edge, innerWidth - pop.offsetWidth - 8)) - edge}px`;
+      pop.style.setProperty('--popover-left', `${Math.max(8, Math.min(edge, innerWidth - pop.offsetWidth - 8)) - edge}px`);
     } else {
       openInfos.delete(item);
     }

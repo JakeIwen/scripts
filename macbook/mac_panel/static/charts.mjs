@@ -167,7 +167,7 @@ function tooltip(wrap) {
     show(lines, x) {
       box.replaceChildren(...lines.map((line, index) => html('div', index ? 'chart-tip-detail' : 'chart-tip-value', line)));
       box.hidden = false;
-      box.style.left = `${clamp(x - box.offsetWidth / 2, 0, Math.max(0, wrap.clientWidth - box.offsetWidth))}px`;
+      box.style.setProperty('--tip-left', `${clamp(x - box.offsetWidth / 2, 0, Math.max(0, wrap.clientWidth - box.offsetWidth))}px`);
       activeTips.add(tip);
     },
     hide() {
