@@ -119,7 +119,7 @@ export async function refresh(id, {whenIdle = false} = {}) {
   }
 }
 
-export async function action(id, path, body, {after, onError, reloadOnError = true} = {}) {
+export async function action(id, path, body, {after, onError, reloadOnError = true, whenIdle = false} = {}) {
   if (busy.has(id)) {
     notice(id, 'Section is busy; try again shortly', 'error');
     return undefined;
@@ -139,6 +139,7 @@ export async function action(id, path, body, {after, onError, reloadOnError = tr
     return undefined;
   } finally {
     busy.delete(id);
-    if (completed || reloadOnError) await refresh(id);
+    // whenIdle defers the reload while the section holds unsaved edits (the next idle poll picks it up).
+    if (completed || reloadOnError) await refresh(id, {whenIdle: completed && whenIdle});
   }
 }

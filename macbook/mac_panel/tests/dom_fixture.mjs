@@ -19,6 +19,7 @@ export class Element extends EventTarget {
   querySelector() { return null; }
   contains(element) { return this.childNodes.includes(element); }
   closest() { return null; }
+  replaceWith(next) { this.replacedWith = next; }
   focus() { document.activeElement = this; }
   click() { if (!this.disabled) this.dispatchEvent(new Event('click')); }
 }

@@ -42,7 +42,11 @@ export function modeBlock(data, section) {
   const manual = data.mode_source !== 'auto' && data.lean in COPY.modes;
   const selected = manual ? data.lean : AUTOMATIC;
   const list = node('div', null, 'mode-options');
-  const send = mode => action(section, '/api/usage', {action: 'mode', mode, confirmed: true});
+  // A failure refreshes nothing, and a success never replaces the settings card beside this block while it holds
+  // unsaved edits: this block alone is redrawn from the response, and the section reload waits for idle.
+  const send = mode => action(section, '/api/usage', {action: 'mode', mode, confirmed: true}, {
+    reloadOnError: false, whenIdle: true, after: result => root.replaceWith(modeBlock(result, section)),
+  });
   let apply = applyButton(selected, send);
   const choose = mode => { const next = applyButton(mode, send); apply.replaceWith(next); apply = next; };
   const choices = [
