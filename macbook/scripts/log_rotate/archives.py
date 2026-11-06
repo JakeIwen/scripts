@@ -61,8 +61,13 @@ def identity(path: str, info: os.stat_result = None) -> dict:
 def require_owned(path: str, ledger: dict) -> None:
     current, recorded = identity(path), ledger.get(path)
     # macOS can assign a different device number after reboot.
-    if not isinstance(recorded, dict) or any(current[key] != recorded.get(key)
-                                             for key in ("path", "st_ino", "size", "st_birthtime")):
+    keys = ("path", "st_ino", "size", "st_birthtime")
+    if isinstance(recorded, dict) and isinstance(recorded.get("pending_truncate"), dict):
+        # A late catch-up may have been fsynced before its size record could be saved.
+        keys = ("path", "st_ino", "st_birthtime")
+        if current["size"] < recorded.get("size", 0):
+            raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
+    if not isinstance(recorded, dict) or any(current[key] != recorded.get(key) for key in keys):
         raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
 
 
@@ -87,6 +92,23 @@ def rotation_plan(directory: str, base: str, keep: int, compress: bool, ledger: 
         if os.path.lexists(path):
             require_owned(path, ledger)
     return existing
+
+
+def unique_archives(existing: list, ledger: dict, home: str) -> list:
+    """An interrupted link/unlink is one generation at its higher-numbered position."""
+    seen, survivors = set(), []
+    for item in reversed(existing):
+        require_owned(item.path, ledger)
+        info = os.lstat(item.path)
+        key = (info.st_dev, info.st_ino)
+        if key in seen:
+            os.unlink(item.path)
+            ledger.pop(item.path, None)
+            state.write_json(home, state.ARCHIVES_FILE, ledger)
+        else:
+            seen.add(key)
+            survivors.append(item)
+    return list(reversed(survivors))
 
 
 def publish(source: str, destination: str) -> None:

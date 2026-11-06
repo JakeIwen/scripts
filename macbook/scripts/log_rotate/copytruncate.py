@@ -94,9 +94,12 @@ def _shift_archives(existing: list, directory: str, base: str, keep: int,
         state.write_json(home, state.ARCHIVES_FILE, ledger)
 
 
-def _publish_recorded(source: str, destination: str, ledger: dict, home: str) -> None:
+def _publish_recorded(source: str, destination: str, ledger: dict, home: str,
+                      pending: Optional[dict] = None) -> None:
     # Record before linking: a failed write never leaves a published archive foreign.
     ledger[destination] = {**archives.identity(source), "path": destination}
+    if pending is not None:
+        ledger[destination]["pending_truncate"] = pending
     state.write_json(home, state.ARCHIVES_FILE, ledger)
     archives.publish(source, destination)
 
@@ -154,46 +157,97 @@ def _check_temporary(path: str, descriptor: int) -> bool:
             and (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino))
 
 
+def _finish_pending(source: int, output: int, archive: str, copied: int,
+                    compress: bool, ledger: dict, home: str) -> None:
+    copied = _catch_up(source, output, copied, compress)
+    pending = {**ledger[archive]["pending_truncate"], "source_size": copied}
+    ledger[archive] = {**archives.identity(archive, os.fstat(output)), "pending_truncate": pending}
+    state.write_json(home, state.ARCHIVES_FILE, ledger)
+    # No durable write between the last catch-up and truncation: record writers may append.
+    _catch_up(source, output, copied, compress)
+    os.ftruncate(source, 0)
+    os.fsync(source)
+    ledger[archive] = archives.identity(archive, os.fstat(output))
+    state.write_json(home, state.ARCHIVES_FILE, ledger)
+
+
+def _matches_prefix(source: int, archive: str, copied: int, compress: bool) -> bool:
+    reader = gzip.open if compress else open
+    with reader(archive, "rb") as recorded:
+        offset = 0
+        while offset < copied:
+            chunk = recorded.read(min(CHUNK_BYTES, copied - offset))
+            if not chunk or chunk != os.pread(source, len(chunk), offset):
+                return False
+            offset += len(chunk)
+    return True
+
+
+def _resume_pending(source: int, info: os.stat_result, existing: list,
+                    ledger: dict, home: str) -> Optional[str]:
+    for item in existing:
+        pending = ledger[item.path].get("pending_truncate")
+        if not isinstance(pending, dict):
+            continue
+        original = pending["source"]
+        if (info.st_ino, getattr(info, "st_birthtime", None)) != (original["st_ino"], original["st_birthtime"]):
+            raise _fail("pending rotation source changed")
+        copied = pending["source_size"]
+        if info.st_size < copied or not _matches_prefix(source, item.path, copied, item.gzipped):
+            # The source was truncated or rewritten since publication. Archive its new bytes normally.
+            ledger[item.path] = archives.identity(item.path)
+            state.write_json(home, state.ARCHIVES_FILE, ledger)
+            continue
+        output = os.open(item.path, os.O_RDWR | os.O_NOFOLLOW)
+        try:
+            archives.require_owned(item.path, ledger)
+            if archives.identity(item.path) != archives.identity(item.path, os.fstat(output)):
+                raise _fail("pending archive changed while opening")
+            # Discard only an uncommitted catch-up; its bytes still exist in the source.
+            os.ftruncate(output, ledger[item.path]["size"])
+            os.fsync(output)
+            _finish_pending(source, output, item.path, copied, item.gzipped, ledger, home)
+        finally:
+            os.close(output)
+        return item.path
+    return None
+
+
 def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, Optional[str]]:
     """Archive and truncate `path`; returns (bytes before, archive or None for keep 0)."""
     descriptor, info = _open_checked(path, home)
     directory, base = os.path.split(path)
     temporary = None
     temporary_fd = None
-    archive = None
-    final_append = False
     try:
         ledger = archives.prune(home)
         existing = archives.rotation_plan(directory, base, keep, compress, ledger)
-        if keep > 0:
-            _require_space(directory, info.st_size)
-            temporary_fd, temporary = tempfile.mkstemp(dir=directory, prefix=".{}.rotating.".format(base))
-            try:
-                copied = _write_archive(descriptor, temporary_fd, compress)
-                if not _check_temporary(temporary, temporary_fd):
-                    raise _fail("foreign file at {}".format(temporary))
-                _check_source(path, descriptor, info, copied)
-                _shift_archives(existing, directory, base, keep, ledger, home)
-                archive = archive_path(directory, base, 1, compress)
-                _publish_recorded(temporary, archive, ledger, home)
-                temporary = None
-            except OSError as error:
-                raise _fail("archive failed: {}".format(error.strerror or error)) from None
-            _sync_directory(directory)
-            copied = _catch_up(descriptor, temporary_fd, copied, compress)
-            ledger[archive] = archives.identity(archive, os.fstat(temporary_fd))
-            state.write_json(home, state.ARCHIVES_FILE, ledger)
-            # One bounded pass catches writes during the record update; truncate next.
-            final_append = _catch_up(descriptor, temporary_fd, copied, compress) > copied
-        else:
+        existing = archives.unique_archives(existing, ledger, home)
+        resumed = _resume_pending(descriptor, info, existing, ledger, home)
+        if resumed is not None:
+            return info.st_size, resumed
+        if keep == 0:
             _check_source(path, descriptor, info, None)
             _shift_archives(existing, directory, base, 0, ledger, home)
-        os.ftruncate(descriptor, 0)
-        os.fsync(descriptor)
-        if final_append:
-            # Persist after truncation so another record write cannot reopen the loss window.
-            ledger[archive] = archives.identity(archive, os.fstat(temporary_fd))
-            state.write_json(home, state.ARCHIVES_FILE, ledger)
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+            return info.st_size, None
+        _require_space(directory, info.st_size)
+        temporary_fd, temporary = tempfile.mkstemp(dir=directory, prefix=".{}.rotating.".format(base))
+        try:
+            copied = _write_archive(descriptor, temporary_fd, compress)
+            if not _check_temporary(temporary, temporary_fd):
+                raise _fail("foreign file at {}".format(temporary))
+            _check_source(path, descriptor, info, copied)
+            _shift_archives(existing, directory, base, keep, ledger, home)
+            archive = archive_path(directory, base, 1, compress)
+            pending = {"source": archives.identity(path, info), "source_size": copied}
+            _publish_recorded(temporary, archive, ledger, home, pending)
+            temporary = None
+        except OSError as error:
+            raise _fail("archive failed: {}".format(error.strerror or error)) from None
+        _sync_directory(directory)
+        _finish_pending(descriptor, temporary_fd, archive, copied, compress, ledger, home)
         return info.st_size, archive
     except OSError as error:
         raise _fail("rotation failed: {}".format(error.strerror or error)) from None

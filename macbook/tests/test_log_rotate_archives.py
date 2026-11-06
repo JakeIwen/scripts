@@ -8,7 +8,7 @@ from unittest import mock
 
 from log_rotate import archives, copytruncate, eligibility, state
 from log_rotate.records import MB, LogRotateError
-from test_log_rotate import LogRotateCase, payload
+from test_log_rotate import PYTHON, REPOSITORY, LogRotateCase, payload
 
 
 class ArchiveRecoveryTests(LogRotateCase):
@@ -133,7 +133,7 @@ class ArchiveRecoveryTests(LogRotateCase):
         self.assertEqual(set(state.read_json(self.home, state.ARCHIVES_FILE)),
                          {path + '.1.gz', path + '.2.gz'})
 
-    def test_failed_postpublication_size_record_can_be_adopted(self):
+    def test_failed_postpublication_size_record_resumes_without_adoption(self):
         path = self.make_log()
         original = self.read(path)
         real_write, real_sync = state.write_json, copytruncate._sync_directory
@@ -153,11 +153,11 @@ class ArchiveRecoveryTests(LogRotateCase):
             code, _, _ = self.run_cli('rotate', '--only', path, '--json')
         self.assertEqual(code, 1)
         self.assertEqual(self.read(path), original + b'late\n')
-        self.assertEqual(self.entry(path)['note'], archives.UNRECORDED_NOTE)
-        self.assertNotEqual(self.adopt(path)['log']['state'], 'refused')
+        self.assertEqual(self.entry(path)['state'], 'due')
         self.rotate(path)
-        with gzip.open(path + '.2.gz', 'rb') as source:
+        with gzip.open(path + '.1.gz', 'rb') as source:
             self.assertEqual(source.read(), original + b'late\n')
+        self.assertFalse(Path(path + '.2.gz').exists())
 
     def test_missing_records_require_explicit_revision_checked_adoption(self):
         path = self.make_log()
@@ -434,3 +434,109 @@ class InventoryIsolationTests(LogRotateCase):
                     self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE)[locked + '.1.gz'], recorded)
                 finally:
                     os.chmod(os.path.dirname(locked), 0o700)
+
+
+class RetryRetentionTests(LogRotateCase):
+    make_log = ArchiveRecoveryTests.make_log
+    rotate = ArchiveRecoveryTests.rotate
+    def full_history(self, compress):
+        path = self.make_log(compress)
+        for number in range(1, 4):
+            Path(path).write_bytes(payload('gen%d' % number))
+            self.rotate(path)
+        Path(path).write_bytes(payload('gen4'))
+        return path
+
+    def assert_retained(self, path, compress, generations=(4, 3, 2)):
+        suffix = '.gz' if compress else ''
+        inodes = set()
+        ledger = state.read_json(self.home, state.ARCHIVES_FILE)
+        for position, generation in enumerate(generations, 1):
+            archive = path + '.%d%s' % (position, suffix)
+            with (gzip.open(archive, 'rb') if compress else open(archive, 'rb')) as source:
+                self.assertEqual(source.read(), payload('gen%d' % generation))
+            info = os.stat(archive)
+            inodes.add((info.st_dev, info.st_ino))
+            archives.require_owned(archive, ledger)
+            self.assertNotIn('pending_truncate', ledger[archive])
+        self.assertEqual(len(inodes), 3)
+        self.assertEqual(os.path.getsize(path), 0)
+        self.assertEqual(len(list(Path(path).parent.glob(Path(path).name + '.[0-9]*'))), 3)
+
+    def crash_rotation(self, path, stage):
+        script = """
+import os, sys
+from log_rotate import archives, cli
+path, stage = sys.argv[1:]
+real_publish = archives.publish
+def crash(source, destination):
+    if stage == 'shift' and source in (path + '.2', path + '.2.gz'):
+        os.link(source, destination, follow_symlinks=False)
+        os._exit(91)
+    real_publish(source, destination)
+    if stage == 'published' and destination in (path + '.1', path + '.1.gz'):
+        os._exit(91)
+archives.publish = crash
+cli.main(['rotate', '--only', path, '--json'])
+"""
+        environment = dict(os.environ, PYTHONPATH=os.pathsep.join(
+            str(REPOSITORY / part) for part in ('macbook/scripts', 'shared/python')))
+        result = subprocess.run([PYTHON, '-c', script, path, stage], env=environment,
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 91, result.stderr)
+
+    def test_retry_after_late_catchup_or_record_failure_keeps_three_generations(self):
+        for compress in (True, False):
+            for failure in ('catchup', 'record'):
+                with self.subTest(compress=compress, failure=failure):
+                    path = self.full_history(compress)
+                    real_write = state.write_json
+                    archive = path + ('.1.gz' if compress else '.1')
+                    def fail_record(home, name, value):
+                        record = value.get(archive, {})
+                        if name == state.ARCHIVES_FILE and 'pending_truncate' in record and Path(archive).exists():
+                            raise OSError(28, 'fixture postpublication record failure')
+                        return real_write(home, name, value)
+                    patcher = (mock.patch.object(copytruncate, '_catch_up', side_effect=OSError(28, 'fixture catchup'))
+                               if failure == 'catchup' else mock.patch.object(state, 'write_json', side_effect=fail_record))
+                    with patcher:
+                        self.assertEqual(self.run_cli('rotate', '--only', path, '--json')[0], 1)
+                    self.rotate(path)
+                    self.assert_retained(path, compress)
+                    for item in Path(path).parent.glob(Path(path).name + '.[0-9]*'):
+                        item.unlink()
+                    archives.prune(self.home)
+
+    def test_retry_after_crash_at_publication_or_during_shift_keeps_three_generations(self):
+        for compress in (True, False):
+            for stage in ('published', 'shift'):
+                with self.subTest(compress=compress, stage=stage):
+                    path = self.full_history(compress)
+                    self.crash_rotation(path, stage)
+                    self.rotate(path)
+                    self.assert_retained(path, compress)
+                    for item in Path(path).parent.glob(Path(path).name + '.[0-9]*'):
+                        item.unlink()
+                    archives.prune(self.home)
+
+
+    def test_failed_marker_clear_does_not_confuse_regrown_log_with_pending_bytes(self):
+        for compress in (True, False):
+            with self.subTest(compress=compress):
+                path = self.full_history(compress)
+                archive = path + ('.1.gz' if compress else '.1')
+                real_write = state.write_json
+                def fail_clear(home, name, value):
+                    if (name == state.ARCHIVES_FILE and archive in value
+                            and 'pending_truncate' not in value[archive] and os.path.getsize(path) == 0):
+                        raise OSError(28, 'fixture marker clear failure')
+                    return real_write(home, name, value)
+                with mock.patch.object(state, 'write_json', side_effect=fail_clear):
+                    self.assertEqual(self.run_cli('rotate', '--only', path, '--json')[0], 1)
+                self.assertEqual(os.path.getsize(path), 0)
+                Path(path).write_bytes(payload('gen5'))
+                self.rotate(path)
+                self.assert_retained(path, compress, (5, 4, 3))
+                for item in Path(path).parent.glob(Path(path).name + '.[0-9]*'):
+                    item.unlink()
+                archives.prune(self.home)
