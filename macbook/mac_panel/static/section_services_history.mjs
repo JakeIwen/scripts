@@ -26,7 +26,7 @@ export function fillSlots(root) {
     slots.forEach(slot => {
       if (slot.dataset.range !== asked) return;
       const samples = series[slot.dataset.label] ?? [];
-      slot.replaceChildren(samples.length ? stateStrip({samples, from, to, spacing: spacing?.[slot.dataset.label]})
+      slot.replaceChildren(samples.length ? stateStrip({samples, from, to, spacing: spacing?.[slot.dataset.label], axis: true})
         : emptyState('No history recorded for this range yet'));
     });
   }).catch(() => {

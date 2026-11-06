@@ -1,6 +1,7 @@
 // Inline-SVG charts. The geometry functions are pure (tested under Node); the renderers draw them at the
 // element's measured pixel width so strokes stay 2 px and markers stay round. Colours come from classes
 // in charts.css, which read the tokens. Times are epoch seconds, as the history API returns them.
+import {levelWord, timeAxis} from './chart_axes.mjs';
 import {bindTip, html, responsive, svgNode, tooltip} from './chart_dom.mjs';
 import {clamp, round, timeToX, xToTime} from './chart_scale.mjs';
 import {absoluteText} from './relative_time.mjs';
@@ -10,6 +11,7 @@ const MIN_BAND_PX = 1.5;
 const TIP_HIT_PX = 24;
 const MARKER_RADIUS = 4;
 const MIN_STATE_GAP = 5 * 60;
+const LABEL_PX = 110;
 
 export const stateGap = spacing => Math.max(MIN_STATE_GAP, 3 * (spacing ?? 0));
 
@@ -117,16 +119,16 @@ export const spanText = seconds => {
   return `${Math.round(seconds / 86400)} d`;
 };
 
-const levelWord = level => ({nodata: 'no data', ok: 'ok', idle: 'idle', unknown: 'unknown', warn: 'needs attention', error: 'failing'}[level] ?? level);
 const timeSpan = (start, end) => `${absoluteText(start * 1000)} to ${absoluteText(end * 1000)}`;
 
 // ---- renderers ----
 
-/** Coloured bands over time. samples: [{ts, level, text?}]. */
-export function stateStrip({samples, from, to, height = 22, spacing, maxGap = stateGap(spacing)}) {
+/** Coloured bands over time. samples: [{ts, level, text?}]. `axis` adds its own time row; groups share one via timeAxis. */
+export function stateStrip({samples, from, to, height = 22, spacing, maxGap = stateGap(spacing), legend: showLegend = true, axis = false}) {
   const wrap = html('div', 'chart chart-strip');
   const holder = html('div', 'chart-plot');
   wrap.append(holder);
+  if (axis) wrap.append(timeAxis({from, to}));
   const tip = tooltip(wrap);
   const legend = html('div', 'chart-legend');
   const present = new Set();
@@ -152,7 +154,7 @@ export function stateStrip({samples, from, to, height = 22, spacing, maxGap = st
       return item;
     }));
   });
-  wrap.append(legend);
+  if (showLegend) wrap.append(legend);
   return wrap;
 }
 
@@ -235,10 +237,9 @@ export function gauge({value, max, marker, label, format = String, markerLabel =
 export function scheduleStrip({events, from, to, now, laneOrder}) {
   const wrap = html('div', 'chart chart-schedule');
   const holder = html('div', 'chart-plot');
-  wrap.append(holder);
+  wrap.append(holder, timeAxis({from, to, inset: LABEL_PX}));
   const tip = tooltip(wrap);
   const ROW = 20;
-  const LABEL_PX = 110;
   responsive(holder, width => {
     holder.replaceChildren();
     const plotWidth = Math.max(width - LABEL_PX, 40);
