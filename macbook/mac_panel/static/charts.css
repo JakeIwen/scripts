@@ -34,3 +34,41 @@
 .range-choice { border: 0; border-radius: 0; background: none; padding: 2px 10px; font-size: var(--text-small); }
 .range-choice + .range-choice { border-left: 1px solid var(--line-strong); }
 .range-choice[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+/* ---- axes, grid and the labelled line chart ---- */
+.axis-label, .axis-unit, .end-label, .recording-note { font: var(--text-small) var(--font); }
+.axis-label { fill: var(--muted); }
+.axis-label.major { fill: var(--text); font-weight: 600; }
+.axis-unit { fill: var(--muted); }
+.axis-line { stroke: var(--line-strong); stroke-width: 1; }
+.axis-tick { stroke: var(--line-strong); stroke-width: 1; }
+.grid-line { stroke: var(--line); stroke-width: 1; }
+.chart-axis { margin-top: 0; }
+.plot-box { position: relative; }
+.chart-line .chart-tip { bottom: auto; top: 6px; }
+.chart-line .hit { touch-action: pan-y; }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.line.thin { stroke-width: 1.5; }
+.line.dashed { stroke-dasharray: 5 4; }
+.line.c-accent { stroke: var(--accent); }
+.line.c-series-2 { stroke: var(--series-2); }
+.line.c-text { stroke: var(--text); }
+.line.c-muted { stroke: var(--muted); }
+.end-dot, .hover-dot { stroke: var(--panel); stroke-width: 2; }
+.end-dot.c-accent, .hover-dot.c-accent { fill: var(--accent); }
+.end-dot.c-series-2, .hover-dot.c-series-2 { fill: var(--series-2); }
+.end-dot.c-text, .hover-dot.c-text { fill: var(--text); }
+.end-dot.c-muted, .hover-dot.c-muted { fill: var(--muted); }
+.end-label { fill: var(--text); }
+.cursor-line { stroke: var(--line-strong); stroke-width: 1; pointer-events: none; }
+.recording-gap { fill: var(--soft); }
+.recording-note { fill: var(--muted); font-style: italic; }
+.line-legend { gap: var(--space-1) var(--space-4); margin: 0 0 var(--space-1); }
+.line-legend .legend-item { gap: 6px; }
+.legend-value { color: var(--text); font-weight: 600; }
+.swatch { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; }
+.swatch.c-accent { border-color: var(--accent); }
+.swatch.c-series-2 { border-color: var(--series-2); }
+.swatch.c-text { border-color: var(--text); }
+.swatch.c-muted { border-color: var(--muted); }
+.swatch.dashed { border-top-style: dashed; }

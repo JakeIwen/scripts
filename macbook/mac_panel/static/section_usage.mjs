@@ -1,11 +1,16 @@
 // Usage: allowance left in each window as gauges against the even-spend line, the routing the usage-budget
 // script chose, and the sampled history. Shows only what the sanitized facts carry; no account identity.
-import {gauge, sparkline} from './charts.mjs';
+import {gauge} from './charts.mjs';
+import {lineChart} from './line_chart.mjs';
+import {api} from './panel_api.mjs';
 import {historyPanel} from './history_panel.mjs';
-import {card, emptyState, info, kv, node, tag, timeNode} from './panel_dom.mjs';
-import {USAGE_COPY as COPY} from './section_copy.mjs';
+import {card, emptyState, fieldError, info, kv, node, tag, timeNode} from './panel_dom.mjs';
+import {MODE_COPY, USAGE_COPY as COPY, USAGE_SETTINGS_TOOL} from './section_copy.mjs';
+import {toolCard} from './settings_card.mjs';
+import {stageAction} from './search_actions.mjs';
 import {goTo} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
+import {APPLY_KEY, MODE_ANCHOR, modeBlock} from './usage_mode.mjs';
 
 const SECTION = 'usage';
 const PERCENT = 100;
@@ -103,6 +108,10 @@ function routingCard(data) {
     ['Expires', data.expires_at],
     ['Snapshot', snapshotAge(data)],
   ]));
+  const mode = node('div');
+  mode.dataset.anchor = MODE_ANCHOR;
+  mode.append(titled(MODE_COPY.title, MODE_COPY.info), modeBlock(data, SECTION));
+  body.append(mode);
   const notes = [...(data.lines ?? []), ...(data.reasons ?? [])];
   if (notes.length) {
     const list = node('ul', null, 'findings');
@@ -118,22 +127,58 @@ function snapshotAge(data) {
   return result;
 }
 
+// ---- usage-budget settings (the form moved here from Settings) ----
+
+// Not reused from the Settings payload: a save there or here changes the revision, and a stale one would only conflict.
+export async function load() {
+  const [usage, settings] = await Promise.all([
+    api('/api/usage'),
+    api('/api/settings').catch(() => null),
+  ]);
+  const tool = settings?.tools.find(entry => entry.tool === USAGE_SETTINGS_TOOL);
+  return {...usage, budget_settings: tool ? {tools: [tool]} : null};
+}
+
+function settingsCard(data) {
+  const tool = data.budget_settings?.tools[0];
+  if (!tool || tool.error) {
+    return card({title: COPY.settingsTitle, body: fieldError(tool?.error ?? COPY.settingsUnavailable), anchor: COPY.settingsAnchor});
+  }
+  const result = toolCard(tool, SECTION);
+  result.dataset.anchor = COPY.settingsAnchor;
+  return result;
+}
+
 // ---- history ----
 
-const SERIES = [
-  ...WINDOWS.map(spec => ({key: `${spec.key}_left`, label: spec.label, format: percent, min: 0, max: PERCENT})),
-  {key: 'claude_line_left', label: 'Claude even-spend line', format: percent, min: 0, max: PERCENT},
-  {key: 'credits', label: 'Credits left', format: value => String(Math.round(value))},
+// Two charts: the percentage windows share one 0-100 axis, credits get a count axis of their own.
+const ALLOWANCE_SERIES = [
+  {key: 'claude_weekly_left', color: 'accent'},
+  {key: 'claude_session_left', color: 'series-2'},
+  {key: 'codex_weekly_left', color: 'text'},
+  {key: 'claude_line_left', color: 'muted', dashed: true},
 ];
+const CREDITS_HEADROOM = 1.1;
+const count = value => Math.round(value).toLocaleString();
+
+function historyLines(series, keys) {
+  return keys.map(spec => ({...spec, label: COPY.historySeries[spec.key],
+    points: (series[spec.key] ?? []).filter(point => point.value !== null)})).filter(entry => entry.points.length);
+}
 
 function drawHistory(series, window) {
   const charts = [];
-  SERIES.forEach(spec => {
-    const points = (series[spec.key] ?? []).filter(point => point.value !== null);
-    if (!points.length) return;
-    charts.push(node('h4', spec.label), sparkline({points, ...window, min: spec.min, max: spec.max,
-      format: spec.format, maxGap: HISTORY_MAX_GAP}));
-  });
+  const allowance = historyLines(series, ALLOWANCE_SERIES);
+  if (allowance.length) {
+    charts.push(node('h4', COPY.historyAllowanceTitle), lineChart({series: allowance, ...window, yMin: 0, yMax: PERCENT,
+      yFormat: percent, yLabel: COPY.historyAllowanceUnit, maxGap: HISTORY_MAX_GAP}));
+  }
+  const credits = historyLines(series, [{key: 'credits', color: 'accent'}]);
+  if (credits.length) {
+    const peak = Math.max(...credits[0].points.map(point => point.value));
+    charts.push(node('h4', COPY.historyCreditsTitle), lineChart({series: credits, ...window, yMin: 0, yMax: peak * CREDITS_HEADROOM,
+      yFormat: count, yLabel: COPY.historyCreditsUnit, maxGap: HISTORY_MAX_GAP}));
+  }
   return charts;
 }
 
@@ -161,7 +206,9 @@ export function render(data) {
   const line = node('p', null, 'summary-line');
   line.append(status(level, summary));
   root.append(line);
-  root.append(budgetsCard(data), routingCard(data), historyCard());
+  const top = node('div', null, 'usage-top');
+  top.append(budgetsCard(data), settingsCard(data));
+  root.append(top, routingCard(data), historyCard());
   return {node: root, summary, level};
 }
 
@@ -194,6 +241,8 @@ export function cardExtra(data) {
 export function searchItems() {
   const open = (anchorId, label) => ({label, run: () => goTo(SECTION, anchorId)});
   return [
+    {title: MODE_COPY.searchTitle, subtitle: MODE_COPY.searchInfo, keywords: ['mode', 'burn', 'conserve', 'automatic', 'claude-burn', 'gpt-burn'],
+      anchor: MODE_ANCHOR, actions: [{label: 'Set mode', run: () => stageAction(SECTION, MODE_ANCHOR, APPLY_KEY, {arm: true})}]},
     {title: 'Usage budgets', subtitle: 'Allowance left in each window', keywords: ['claude', 'codex', 'fable', 'credits', 'gauge'],
       anchor: 'budgets', actions: [open('budgets', 'Open')]},
     {title: 'Usage routing', subtitle: 'Lean, workers and review', keywords: ['lean', 'availability', 'workers'],

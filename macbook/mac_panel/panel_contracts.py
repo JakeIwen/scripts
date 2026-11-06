@@ -299,6 +299,7 @@ class UsagePayload(_UsageRequired, total=False):
     mode_source: str
     expires_at: str
     availability_detail: dict[str, dict[str, Any]]
+    message: str  # only on the reply to a mode change: the tool's own report line
 
 
 class LogPolicy(TypedDict):

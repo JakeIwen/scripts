@@ -61,7 +61,7 @@ export function notice(section, text, kind = '') {
 // A control differs from what the last render put in it; selects have no defaultValue of their own.
 export function isChanged(element) {
   if (element.tagName === 'SELECT') return [...element.options].some(option => option.selected !== option.defaultSelected);
-  if (element.type === 'checkbox') return element.checked !== element.defaultChecked;
+  if (element.type === 'checkbox' || element.type === 'radio') return element.checked !== element.defaultChecked;
   return element.value !== element.defaultValue;
 }
 

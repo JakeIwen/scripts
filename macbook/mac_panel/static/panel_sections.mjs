@@ -83,7 +83,10 @@ function markUpdated(id) {
   setMeta(id, '', 'updated ', timeNode(Date.now() / 1000), entry?.auto ? ' · auto' : '');
 }
 
-// An entry with `endpoint: null` has nothing to fetch and renders from the state registry alone.
+// An entry with `endpoint: null` has nothing to fetch and renders from the state registry alone;
+// one with `load()` fetches its payload itself (a section drawing from more than one endpoint).
+const load = entry => (entry.load ? entry.load() : entry.endpoint === null ? null : api(entry.endpoint ?? `/api/${entry.id}`));
+
 export async function refresh(id, {whenIdle = false} = {}) {
   if (whenIdle && pauseForEditing(id)) return;
   if (busy.has(id)) return;
@@ -91,7 +94,7 @@ export async function refresh(id, {whenIdle = false} = {}) {
   const entry = registry.get(id);
   const content = sectionPart(id, '.content');
   try {
-    const value = entry.endpoint === null ? null : await api(entry.endpoint ?? `/api/${id}`);
+    const value = await load(entry);
     if (whenIdle && pauseForEditing(id)) return;
     // Disclosures keep the state the reader gave them; ones new to this render keep the renderer's default.
     const open = new Map([...content.querySelectorAll('details')].map(x => [x.dataset.key, x.open]));
@@ -116,7 +119,7 @@ export async function refresh(id, {whenIdle = false} = {}) {
   }
 }
 
-export async function action(id, path, body, {after, onError, reloadOnError = true} = {}) {
+export async function action(id, path, body, {after, onError, reloadOnError = true, whenIdle = false} = {}) {
   if (busy.has(id)) {
     notice(id, 'Section is busy; try again shortly', 'error');
     return undefined;
@@ -136,6 +139,7 @@ export async function action(id, path, body, {after, onError, reloadOnError = tr
     return undefined;
   } finally {
     busy.delete(id);
-    if (completed || reloadOnError) await refresh(id);
+    // whenIdle defers the reload while the section holds unsaved edits (the next idle poll picks it up).
+    if (completed || reloadOnError) await refresh(id, {whenIdle: completed && whenIdle});
   }
 }
