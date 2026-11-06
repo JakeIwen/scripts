@@ -398,6 +398,22 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
+- `macbook/scripts/log_rotate.py` (stable entry; stdlib, `/usr/bin/python3` 3.9,
+  needs `PYTHONPATH=shared/python`) is the Mac's log inventory and rotator, run
+  hourly by `com.jacobr.log-rotate` (`macbook/launchagents/`, installed by
+  `macbook/scripts/install_log_rotate.zsh`) and driven by the Mac Panel through
+  the CLI only (`inventory|status|rotate|policy|add|ignore|unignore`, `--json`;
+  exit 0/1/2, 3 stale revision, 75 busy). `log_rotate/sources.py` finds logs
+  (LaunchAgent plists, `crontab_sync.tracked_log_targets`, scan roots, extras),
+  `eligibility.py` owns the safety rules (regular, user-owned, inside `$HOME`,
+  no symlinks, never `~/.claude`/`~/.codex`/`Mobile Documents`), `copytruncate.py`
+  archives (fsync) before truncating the same inode, `rotate.py` runs a pass
+  (own `rotate.log` last), `growth.py` the MB/day ledger. Defaults are
+  `shared/settings/log-rotate.json` (tool_settings, `~/.config/jacobr/log-rotate.json`);
+  per-file policies/extras/ignores are a separate revision-checked
+  `~/.config/jacobr/log-rotate-files.json`, since the settings file rejects keys
+  the declaration lacks; state is `~/.local/state/log-rotate/`. Its Automations
+  declaration is `shared/automations/log-rotate.json`.
 - Custom Mac keyboard mappings: BTT shortcuts and `repair_key_sequences.py`,
   plus `macbook/launchagents/com.jacobr.dictation-key-f13.plist`, are
   documented in `~/dev/visual-guides/static/reference/keyboard-shortcuts.json`.

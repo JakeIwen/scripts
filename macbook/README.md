@@ -289,6 +289,55 @@ Read-only Mac Panel/CLI status rendering lives in `status.py`.
   does not raise the automation's overall status.
 - Stop it: `launchctl bootout gui/$(id -u)/com.jacobr.display-cab-dimmer`.
 
+## Log inventory and rotation
+
+`scripts/log_rotate.py` keeps the Mac's job logs from growing without bound,
+now that backups copy them. It lists every log the Mac's jobs write and rotates
+any over its limit in place by copy-truncate: the bytes go to `<log>.1.gz`
+(older copies shift to `.2.gz` and so on, past `keep` they are deleted), then
+the same inode is truncated, so launchd and cron, which hold the file open for
+appending, keep writing at offset 0. The archive is written and fsynced before
+the log is touched, so a failure leaves the original intact. Writes landing
+between the last copy and the truncate are lost, and a writer that does not open
+the file for appending resumes at its old offset and leaves a zero-filled gap, as
+with any copy-truncate; launchd's redirects and shell `>>` append.
+Archives stay in Time Machine; growth is bounded by `keep`, not by exclusions.
+It runs as the hourly LaunchAgent `com.jacobr.log-rotate` on `/usr/bin/python3`.
+
+Logs come from, in order (first source wins per path): LaunchAgent plists in
+`~/Library/LaunchAgents` (`StandardOutPath`/`StandardErrorPath`), the redirect
+targets in `macbook/crontab`, a scan of `~/.local/state`, `~/dev/scripts/tmp`
+and `~/Library/Logs` (`.log`, `.out`, `.err`, four directories deep), and extra
+paths added by hand. It only touches regular files owned by you inside `$HOME`,
+never through a symlink and never under `~/.claude`, `~/.codex` or
+`~/Library/Mobile Documents`; a listed path that breaks those rules shows as
+`refused` and is never opened. Log contents are never printed, only paths and
+sizes.
+
+- Defaults (rotate above 10 MB, keep 5, gzip, warn above 500 MB total) are
+  declared in `shared/settings/log-rotate.json` and edited in the Mac Panel's
+  Settings section. Per-file policies, extras and ignores are saved in
+  `~/.config/jacobr/log-rotate-files.json` (mode 600, revision-checked); state
+  (`last_sizes.json` for growth per day, `last_rotated.json`, `last_run.json`,
+  `rotate.log`) is in `~/.local/state/log-rotate/`. The rotator rotates its own
+  `rotate.log` last.
+- Install or update: `zsh /Users/jacobr/dev/scripts/macbook/scripts/install_log_rotate.zsh`.
+  It lints the plist, checks the script runs, creates the state directory
+  (launchd opens `launchd.log` there before the job starts) and loads the agent.
+  Verify with
+  `launchctl print gui/$(id -u)/com.jacobr.log-rotate | grep -E 'state =|runs =|last exit'`
+  (`last exit code = 0` once it has run) and
+  `tail ~/.local/state/log-rotate/rotate.log`.
+- From the repo root, `PYTHONPATH=shared/python /usr/bin/python3 -B
+  macbook/scripts/log_rotate.py` takes `inventory`, `status`, `rotate [--only
+  PATH] [--force]`, and the edits `policy`, `add`, `ignore` and `unignore`
+  (each needs `--revision` from `inventory --json`); every command takes
+  `--json`. Exit 0 is ok, 1 an error (also a rotate where some log failed, with
+  the full result still printed), 2 usage, 3 a stale revision and 75 when
+  another run or edit holds the lock.
+- Remove: `launchctl bootout gui/$(id -u)/com.jacobr.log-rotate` and delete
+  `~/Library/LaunchAgents/com.jacobr.log-rotate.plist`. Archives stay.
+
 ## Firefox ads and telemetry off
 
 `scripts/firefox_quiet_prefs.py` writes a managed block into `user.js` in every
