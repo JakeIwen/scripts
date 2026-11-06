@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.jacobr.log-rotate</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-B</string>
+        <string>/Users/jacobr/dev/scripts/macbook/scripts/log_rotate.py</string>
+        <string>rotate</string>
+        <string>--json</string>
+    </array>
+    <key>WorkingDirectory</key><string>/Users/jacobr</string>
+    <key>RunAtLoad</key><true/>
+    <key>StartInterval</key><integer>3600</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>Umask</key><integer>63</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>/usr/bin:/bin</string>
+        <key>PYTHONPATH</key><string>/Users/jacobr/dev/scripts/shared/python</string>
+    </dict>
+    <!-- Its own log is one of the logs it rotates; launchd keeps appending to the same inode. -->
+    <key>StandardOutPath</key>
+    <string>/Users/jacobr/.local/state/log-rotate/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jacobr/.local/state/log-rotate/launchd.log</string>
+</dict>
+</plist>
