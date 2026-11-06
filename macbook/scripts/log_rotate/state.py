@@ -14,6 +14,7 @@ import tool_settings
 
 from .records import EXIT_BUSY, LogRotateError
 
+ARCHIVES_FILE = "archives.json"
 SIZES_FILE = "last_sizes.json"
 ROTATED_FILE = "last_rotated.json"
 RUN_FILE = "last_run.json"

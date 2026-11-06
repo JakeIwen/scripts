@@ -313,6 +313,102 @@ class RotationTests(LogRotateCase):
         with gzip.open(path + ".1.gz") as newest, gzip.open(path + ".2.gz") as older:
             self.assertEqual((newest.read(), older.read()), (generations[2], generations[1]))
 
+    def test_foreign_archive_names_refuse_without_changing_anything(self):
+        for suffix, symlink in (('.99.gz', False), ('.1.gz', True)):
+            with self.subTest(suffix=suffix):
+                path = self.make_log('app/job' + suffix + '.log')
+                foreign = path + suffix
+                target = self.write('unrelated' + suffix, b'foreign')
+                if symlink:
+                    os.symlink(target, foreign)
+                else:
+                    Path(foreign).write_bytes(b'foreign')
+                before = os.lstat(foreign)
+                original = self.read(path)
+                code, result, _ = self.run_cli('rotate', '--only', path, '--json')
+                self.assertEqual(code, 1)
+                self.assertEqual(result['errors'][0]['error'], 'foreign file at ' + foreign)
+                self.assertEqual(os.lstat(foreign), before)
+                self.assertEqual(self.read(target), b'foreign')
+                self.assertEqual(self.read(path), original)
+
+    def test_replaced_recorded_archive_is_not_owned(self):
+        path = self.make_log()
+        self.rotate()
+        archive = path + '.1.gz'
+        os.rename(archive, archive + '.saved')
+        Path(archive).write_bytes(b'foreign replacement')
+        Path(path).write_bytes(payload('next'))
+        code, result, _ = self.run_cli('rotate', '--json')
+        self.assertEqual(code, 1)
+        self.assertIn('foreign file at ' + archive, result['errors'][0]['error'])
+        self.assertEqual(self.read(archive), b'foreign replacement')
+        self.assertEqual(os.path.getsize(path), OVER_ONE_MB)
+
+    def test_archive_provenance_tracks_normal_shifts(self):
+        path = self.make_log(flags=('--max-mb', '1', '--keep', '2'))
+        self.rotate()
+        first_inode = os.lstat(path + '.1.gz').st_ino
+        Path(path).write_bytes(payload('next'))
+        self.rotate()
+        ledger = state.read_json(self.home, state.ARCHIVES_FILE)
+        self.assertEqual(set(ledger), {path + '.1.gz', path + '.2.gz'})
+        self.assertEqual(ledger[path + '.2.gz']['st_ino'], first_inode)
+        for name, record in ledger.items():
+            info = os.lstat(name)
+            self.assertEqual(record, {'path': name, 'st_dev': info.st_dev, 'st_ino': info.st_ino, 'size': info.st_size})
+
+    def test_continuous_growth_never_truncates_uncopied_bytes(self):
+        path = self.make_log()
+        real_copy = copytruncate._copy_pass
+        def copy_and_append(*args):
+            copied = real_copy(*args)
+            with open(path, 'ab') as writer:
+                writer.write(b'new bytes\n')
+            return copied
+        with mock.patch.object(copytruncate, '_copy_pass', side_effect=copy_and_append):
+            code, result, _ = self.run_cli('rotate', '--json')
+        self.assertEqual(code, 1)
+        self.assertEqual(result['errors'][0]['error'], 'grows faster than it can be copied')
+        self.assertEqual(os.path.getsize(path), OVER_ONE_MB + copytruncate.MAX_PASSES * len(b'new bytes\n'))
+        self.assertEqual(os.listdir(os.path.dirname(path)), ['job.log'])
+
+    def test_short_copy_never_truncates(self):
+        path = self.make_log()
+        with mock.patch.object(copytruncate.os, 'pread', return_value=b''):
+            code, result, _ = self.run_cli('rotate', '--json')
+        self.assertEqual(code, 1)
+        self.assertIn('grows faster than it can be copied', result['errors'][0]['error'])
+        self.assertEqual(os.path.getsize(path), OVER_ONE_MB)
+        self.assertEqual(os.listdir(os.path.dirname(path)), ['job.log'])
+
+    def test_preexisting_temporary_name_is_never_deleted(self):
+        path = self.make_log()
+        collision = Path(path).with_name('.job.log.rotating.' + str(os.getpid()))
+        collision.write_bytes(b'not ours')
+        self.rotate()
+        self.assertEqual(collision.read_bytes(), b'not ours')
+        self.assertEqual(os.path.getsize(path), 0)
+
+    def test_replaced_temporary_is_not_published_or_cleaned_up(self):
+        path = self.make_log()
+        real_write = copytruncate._write_archive
+        replacements = []
+        def replace_temporary(*args):
+            copied = real_write(*args)
+            temporary, = Path(path).parent.glob('.job.log.rotating.*')
+            temporary.rename(str(temporary) + '.original')
+            temporary.write_bytes(b'foreign temporary')
+            replacements.append(temporary)
+            return copied
+        with mock.patch.object(copytruncate, '_write_archive', side_effect=replace_temporary):
+            code, result, _ = self.run_cli('rotate', '--json')
+        self.assertEqual(code, 1)
+        self.assertIn('foreign file at ', result['errors'][0]['error'])
+        self.assertEqual(replacements[0].read_bytes(), b'foreign temporary')
+        self.assertEqual(os.path.getsize(path), OVER_ONE_MB)
+        self.assertFalse(Path(path + '.1.gz').exists())
+
     def test_uncompressed_archives_and_keep_zero(self):
         path = self.make_log(flags=("--max-mb", "1", "--compress", "off"))
         original = self.read(path)

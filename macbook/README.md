@@ -329,7 +329,7 @@ total over the warning level, errors in the last run, a stale run), which
   Settings section. Per-file policies, extras and ignores are saved in
   `~/.config/jacobr/log-rotate-files.json` (mode 600, revision-checked); state
   (`last_sizes.json` for growth per day, `last_rotated.json`, `last_run.json`,
-  `rotate.log`) is in `~/.local/state/log-rotate/`. The rotator rotates its own
+  `archives.json` for archive provenance, `rotate.log`) is in `~/.local/state/log-rotate/`. The rotator rotates its own
   `rotate.log` last.
 - Install or update: `zsh /Users/jacobr/dev/scripts/macbook/scripts/install_log_rotate.zsh`.
   It lints the plist, checks the script runs, creates the state directory

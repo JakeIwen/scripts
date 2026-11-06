@@ -9,15 +9,15 @@ from __future__ import annotations
 import gzip
 import os
 import stat
+import tempfile
 from typing import Optional, Tuple
 
-from . import eligibility
-from .archives import archive_path, scan_directory
+from . import archives, eligibility, state
+from .archives import archive_path
 from .records import EXIT_ERROR, LogRotateError
 
 CHUNK_BYTES = 1 << 20
-# A log still growing after this many catch-up passes is truncated anyway: it would
-# otherwise never rotate, and copy-truncate cannot be lossless against a live writer.
+# Bound the work, but never truncate bytes this invocation has not copied.
 MAX_PASSES = 8
 SPACE_MARGIN_BYTES = 1 << 20
 
@@ -48,7 +48,7 @@ def _open_checked(path: str, home: str) -> Tuple[int, os.stat_result]:
     return descriptor, info
 
 
-def _copy_pass(source: int, output, start: int, end: int, compress: bool) -> None:
+def _copy_pass(source: int, output, start: int, end: int, compress: bool) -> int:
     sink = gzip.GzipFile(fileobj=output, mode="wb", mtime=0) if compress else output
     offset = start
     while offset < end:
@@ -61,28 +61,35 @@ def _copy_pass(source: int, output, start: int, end: int, compress: bool) -> Non
         sink.close()  # a gzip member per pass; the fileobj stays open
     output.flush()
     os.fsync(output.fileno())
+    return offset
 
 
-def _write_archive(source: int, temporary: str, compress: bool) -> None:
-    """Copy the log into `temporary`, catching up with writers until it stops growing."""
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "wb") as output:
+def _write_archive(source: int, descriptor: int, compress: bool) -> int:
+    """Copy all observed bytes or refuse; the caller owns the exclusive temporary."""
+    with os.fdopen(descriptor, "wb", closefd=False) as output:
         copied = 0
         for _ in range(MAX_PASSES):
             size = os.fstat(source).st_size
-            if size <= copied:
-                return
-            _copy_pass(source, output, copied, size, compress)
-            copied = size
+            copied = _copy_pass(source, output, copied, size, compress)
+            if copied < size:
+                raise _fail("grows faster than it can be copied")
+            if copied == os.fstat(source).st_size:
+                return copied
+        raise _fail("grows faster than it can be copied")
 
 
-def _shift_archives(directory: str, base: str, keep: int) -> None:
-    existing = scan_directory(directory).get(base, [])
-    for item in sorted(existing, key=lambda archive: -archive.index):
+def _shift_archives(existing: list, directory: str, base: str, keep: int,
+                    ledger: dict, home: str) -> None:
+    for item in existing:
+        archives.require_owned(item.path, ledger)
         if item.index + 1 > keep:
             os.unlink(item.path)
         else:
-            os.rename(item.path, archive_path(directory, base, item.index + 1, item.gzipped))
+            destination = archive_path(directory, base, item.index + 1, item.gzipped)
+            archives.publish(item.path, destination)
+            ledger[destination] = archives.identity(destination)
+        ledger.pop(item.path, None)
+        state.write_json(home, state.ARCHIVES_FILE, ledger)
 
 
 def _sync_directory(directory: str) -> None:
@@ -99,25 +106,48 @@ def _require_space(directory: str, size: int) -> None:
         raise _fail("not enough free space for the archive")
 
 
+def _check_temporary(path: str, descriptor: int) -> bool:
+    """Never publish or clean up a replacement for the temporary we created."""
+    try:
+        current, created = os.lstat(path), os.fstat(descriptor)
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISREG(current.st_mode)
+            and (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino))
+
+
 def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, Optional[str]]:
-    """Archive and truncate `path`; returns (bytes before, archive path or None when keep is 0)."""
+    """Archive and truncate `path`; returns (bytes before, archive or None for keep 0)."""
     descriptor, info = _open_checked(path, home)
     directory, base = os.path.split(path)
-    temporary = os.path.join(directory, ".{}.rotating.{}".format(base, os.getpid()))
+    temporary = None
+    temporary_fd = None
     archive = None
     try:
+        ledger = state.read_json(home, state.ARCHIVES_FILE)
+        existing = archives.rotation_plan(directory, base, keep, compress, ledger)
         if keep > 0:
             _require_space(directory, info.st_size)
+            temporary_fd, temporary = tempfile.mkstemp(dir=directory, prefix=".{}.rotating.".format(base))
             try:
-                _write_archive(descriptor, temporary, compress)
-                _shift_archives(directory, base, keep)
+                copied = _write_archive(descriptor, temporary_fd, compress)
+                if copied != os.fstat(descriptor).st_size:
+                    raise _fail("grows faster than it can be copied")
+                if not _check_temporary(temporary, temporary_fd):
+                    raise _fail("foreign file at {}".format(temporary))
+                _shift_archives(existing, directory, base, keep, ledger, home)
                 archive = archive_path(directory, base, 1, compress)
-                os.rename(temporary, archive)
+                archives.publish(temporary, archive)
+                temporary = None
+                ledger[archive] = archives.identity(archive)
+                state.write_json(home, state.ARCHIVES_FILE, ledger)
             except OSError as error:
                 raise _fail("archive failed: {}".format(error.strerror or error)) from None
             _sync_directory(directory)
+            if copied != os.fstat(descriptor).st_size:
+                raise _fail("grows faster than it can be copied")
         else:
-            _shift_archives(directory, base, 0)
+            _shift_archives(existing, directory, base, 0, ledger, home)
         os.ftruncate(descriptor, 0)
         os.fsync(descriptor)
         return info.st_size, archive
@@ -125,9 +155,11 @@ def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, O
         raise _fail("rotation failed: {}".format(error.strerror or error)) from None
     finally:
         os.close(descriptor)
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            pass
+        if temporary_fd is not None:
+            try:
+                if temporary is not None and _check_temporary(temporary, temporary_fd):
+                    os.unlink(temporary)
+            except OSError:
+                pass
+            finally:
+                os.close(temporary_fd)
