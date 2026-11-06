@@ -14,6 +14,7 @@ import time
 import unittest
 from unittest import mock
 
+import crontab_sync
 import tool_automation
 import tool_settings
 
@@ -109,6 +110,32 @@ class SourceTests(LogRotateCase):
         sources = {os.path.basename(log["path"]): log["source"] for log in snapshot["logs"]}
         self.assertEqual(set(sources), {"a.log", "b.out", "c.err", "d.log"})
         self.assertTrue(all(source.startswith("crontab:") for source in sources.values()))
+
+    def test_cron_rotation_ignores_quoted_operators_and_dynamic_commands(self):
+        cases = {
+            "grep '>' \"$HOME/important.db\"": [],
+            'cmd >> ~/x.log 2>&1': [self.path('x.log')],
+            'cmd > "$HOME/a b.log"': [self.path('a b.log')],
+            'cmd $(echo x) > ~/x.log': [],
+            'eval cmd > ~/x.log': [],
+            'cmd << EOF > ~/x.log': [],
+            'cmd > "$other/x.log"': [],
+            r'cmd \> ~/x.log': [],
+            'cmd > "$HOME/a.log".db': [],
+            'cmd > $HOME/a#b.log': [self.path('a#b.log')],
+            'cmd # > $HOME/important.db': [],
+            'cmd > "$HOME"/a.log': [],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(crontab_sync.redirect_targets(command, {'HOME': self.home}, self.home), expected)
+        self.assertEqual(crontab_sync.redirected_log("grep '>' \"$HOME/important.db\"",
+                                                   {'HOME': self.home}, self.home), self.path('important.db'))
+        target = self.write('important.db', payload('not a log'))
+        self.crontab.write_text("0 * * * * grep '>' \"$HOME/important.db\"\n")
+        self.assertNotIn(target, [row['path'] for row in self.inventory()['logs']])
+        self.assertEqual(self.run_cli('rotate', '--json')[1]['rotated'], [])
+        self.assertEqual(os.path.getsize(target), OVER_ONE_MB)
 
     def test_scan_roots_depth_extensions_and_symlinks(self):
         self.write(".local/state/app/a.log")
