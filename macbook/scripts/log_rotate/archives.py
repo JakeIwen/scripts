@@ -105,8 +105,9 @@ def prune(home: str) -> dict:
     for path, record in ledger.items():
         try:
             os.lstat(path)
-        except (FileNotFoundError, NotADirectoryError):
-            continue
+        except OSError as error:
+            if isinstance(error, (FileNotFoundError, NotADirectoryError)):
+                continue
         retained[path] = record
     if retained != ledger:
         state.write_json(home, state.ARCHIVES_FILE, retained)

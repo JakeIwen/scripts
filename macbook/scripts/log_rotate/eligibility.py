@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import stat
-from typing import Optional
+from typing import Optional, Union
 
 from .records import LogReason
 
@@ -60,11 +60,11 @@ class Inspection:
     reason: Optional[LogReason] = None
 
 
-def _lstat(path: str) -> Optional[os.stat_result]:
+def _lstat(path: str) -> Union[os.stat_result, OSError, None]:
     try:
         return os.lstat(path)
-    except (FileNotFoundError, NotADirectoryError):
-        return None
+    except OSError as error:
+        return None if isinstance(error, (FileNotFoundError, NotADirectoryError)) else error
 
 
 def inspect(path: str, home: str) -> Inspection:
@@ -77,13 +77,19 @@ def inspect(path: str, home: str) -> Inspection:
     for part in parts[:-1]:
         current = os.path.join(current, part)
         info = _lstat(current)
+        if isinstance(info, OSError):
+            return Inspection(current, None, LogReason.UNREADABLE_DIRECTORY)
         if info is None:
             return Inspection(None, None)
         if stat.S_ISLNK(info.st_mode):
             return Inspection("path goes through a symlink", None, LogReason.SYMLINK_DIRECTORY)
         if not stat.S_ISDIR(info.st_mode):
             return Inspection(None, None)
+        if not os.access(current, os.X_OK):
+            return Inspection(current, None, LogReason.UNREADABLE_DIRECTORY)
     info = _lstat(path)
+    if isinstance(info, OSError):
+        return Inspection(os.path.dirname(path), None, LogReason.UNREADABLE_DIRECTORY)
     if info is None:
         return Inspection(None, None)
     if stat.S_ISLNK(info.st_mode):
@@ -103,10 +109,14 @@ def directory_problem(path: str, home: str) -> Optional[str]:
     for part in path[len(home) + 1:].split(os.sep):
         current = os.path.join(current, part)
         info = _lstat(current)
+        if isinstance(info, OSError):
+            return current
         if info is None:
             return "missing"
         if stat.S_ISLNK(info.st_mode):
             return "symlink"
         if not stat.S_ISDIR(info.st_mode):
             return "not a directory"
+        if not os.access(current, os.X_OK):
+            return current
     return None

@@ -85,7 +85,7 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
         except (FileNotFoundError, NotADirectoryError):
             pass
         except OSError:
-            entry_state, note, reason = STATE_REFUSED, "unreadable directory", LogReason.UNREADABLE_DIRECTORY
+            entry_state, note, reason = STATE_REFUSED, directory, LogReason.UNREADABLE_DIRECTORY
         except LogRotateError:
             entry_state, note, reason = STATE_REFUSED, archive_records.UNRECORDED_NOTE, LogReason.UNRECORDED_ARCHIVES
     return LogEntry(path, candidate.source, size, sum(item.size for item in archives), len(archives),

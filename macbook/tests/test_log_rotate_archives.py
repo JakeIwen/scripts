@@ -354,7 +354,7 @@ class InventoryIsolationTests(LogRotateCase):
         try:
             entry = self.entry(locked)
             self.assertEqual((entry['state'], entry['note'], entry['reason']),
-                             ('refused', 'unreadable directory', 'unreadable_directory'))
+                             ('refused', os.path.dirname(locked), 'unreadable_directory'))
             code, value, _ = self.run_cli('rotate', '--json')
             self.assertEqual(code, 0, value)
             self.assertEqual([item['path'] for item in value['rotated']], [healthy])
@@ -392,3 +392,45 @@ class InventoryIsolationTests(LogRotateCase):
         self.assertEqual(self.entry(path, snapshot)['reason'], 'unrecorded_archives')
         self.assertEqual([problem['level'] for problem in snapshot['problems']], ['warn', 'error'])
         self.assertIn('rotation is failing', snapshot['problems'][1]['text'])
+
+
+    def test_unsearchable_scan_folder_does_not_block_inventory_status_or_rotation(self):
+        healthy = self.write('.local/state/app/job.log', payload('healthy'))
+        self.set_policy(healthy, '--max-mb', '1')
+        locked = self.write('Library/Logs/Vendor/job.log', b'locked')
+        self.run_cli('add', '--revision', self.inventory()['revision'], locked, '--json')
+        directory = os.path.dirname(locked)
+        os.chmod(directory, 0o644)
+        try:
+            entry = self.entry(locked)
+            self.assertEqual((entry['state'], entry['note'], entry['reason']),
+                             ('refused', directory, 'unreadable_directory'))
+            self.assertEqual(self.run_cli('status', '--json')[0], 0)
+            code, value, _ = self.run_cli('rotate', '--json')
+            self.assertEqual(code, 0, value)
+            self.assertEqual([item['path'] for item in value['rotated']], [healthy])
+            self.assertEqual(os.path.getsize(healthy), 0)
+        finally:
+            os.chmod(directory, 0o700)
+
+    def test_unsearchable_recorded_archive_keeps_provenance_and_other_logs_rotate(self):
+        locked = self.write('locked/job.log', payload('locked'))
+        self.run_cli('add', '--revision', self.inventory()['revision'], locked, '--json')
+        self.set_policy(locked, '--max-mb', '1')
+        self.assertEqual(self.run_cli('rotate', '--json')[0], 0)
+        recorded = state.read_json(self.home, state.ARCHIVES_FILE)[locked + '.1.gz']
+        healthy = self.write('.local/state/app/job.log', payload('healthy'))
+        self.set_policy(healthy, '--max-mb', '1')
+        for mode in (0o600, 0o000):
+            with self.subTest(mode=mode):
+                Path(healthy).write_bytes(payload('healthy'))
+                os.chmod(os.path.dirname(locked), mode)
+                try:
+                    self.assertEqual(self.entry(locked)['reason'], 'unreadable_directory')
+                    self.assertEqual(self.run_cli('status', '--json')[0], 0)
+                    code, value, _ = self.run_cli('rotate', '--json')
+                    self.assertEqual(code, 0, value)
+                    self.assertEqual([item['path'] for item in value['rotated']], [healthy])
+                    self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE)[locked + '.1.gz'], recorded)
+                finally:
+                    os.chmod(os.path.dirname(locked), 0o700)
