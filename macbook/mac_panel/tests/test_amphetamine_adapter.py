@@ -11,7 +11,7 @@ from panel_test_support import FakeRunner, auth, json_command, request, running_
 def saved_state():
     return {'enabled': True, 'delay_seconds': 1200, 'display_sleep_locked': True,
             'low_battery_enabled': True, 'low_battery_percent': 10, 'revision': 'a' * 64,
-            'session': {'running': True, 'active': True, 'remaining': 0, 'display_sleep': False,
+            'session': {'running': True, 'active': True, 'display_sleep': False,
                         'screen_saver': False, 'closed_display': False}, 'error': None,
             'minimum_minutes': 1, 'maximum_minutes': 240}
 
