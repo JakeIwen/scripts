@@ -333,27 +333,52 @@ compare it with this checkout. Deployed files may differ from the repository.
   `bettertouchtool/install_mac_panel_menu.py`): a stdlib server run by the login
   LaunchAgent `com.jacobr.mac-panel` (gui domain, venv
   `~/.local/share/mac-panel/venv`; `install.zsh`, controller `panel_service.py`
-  with prepare/install/status/start/stop/restart/verify/uninstall; runtime files
-  in ignored `tmp/mac-panel/`). One adapter module per section, wire records in
+  with prepare/install/status/start/stop/restart/verify/uninstall and
+  `sudoers --print|--script`; runtime files in ignored `tmp/mac-panel/`;
+  `MAC_PANEL_PORT` and `MAC_PANEL_STATE_DIR` run a second instance for
+  development). One adapter module per section, wire records in
   `panel_contracts.py`, request guards (Host allowlist, per-instance token,
-  Origin + JSON on POST) in `request_guard.py`, the only subprocess boundary in
+  Origin + JSON on POST) in `request_guard.py`, `wire_validation.py` (every
+  armed POST needs `confirmed: true`, else 400), the only subprocess boundary in
   `cli_runner.py`, display redaction in `log_redaction.py`. It changes tools only
-  through their own CLIs or `tool_settings` (crontab edits go through
-  `crontab_sync.py`); ntfy config is read-only there, BTT repair is never
-  exposed, and it never reads pi/secrets. Its Automations section
-  (`automations_adapter.py`) needs no per-tool panel code: it lists
+  through their own CLIs or `tool_settings` (crontab edits and run-now go
+  through `crontab_sync.py`, deferred add through `deferred.zsh add`); ntfy
+  config is read-only there, BTT repair is never exposed, and it never reads
+  pi/secrets. Controls: `services_adapter.py` starts, stops and restarts
+  LaunchAgents and restarts `com.jacobr.*` daemons through `sudo -n
+  /bin/launchctl kickstart -k system/<label>`, allowed by the one sudoers line
+  `sudoers_rule.py` renders (`/etc/sudoers.d/mac-panel-daemons`, installed by
+  Jacob from `panel_service.py sudoers --script`); long actions (automation
+  `async` actions such as codex-update `check-now`, cron run-now) run in
+  `background_tasks.py` and are polled at `GET /api/tasks/<id>`. Its Automations
+  section (`automations_adapter.py`) needs no per-tool panel code: it lists
   `shared/automations/<tool>.json` declarations, runs each one's status command
-  and the declared actions (synchronous, confirmed when declared) by fixed argv.
-  Its page is ES modules in `static/` with no build step: `app.mjs` (section
-  registry, tabs, polling, open-tab/theme state, panel health), `panel_sections.mjs`
-  (`refresh`/`action` and the dirty check polls obey), `panel_api.mjs` (the only
-  `fetch`), `panel_dom.mjs` (DOM helpers, armed buttons, notices, times, focus
-  keys), `relative_time.mjs`, `status_cell.mjs` (`Level` vocabulary) and one
-  `section_<name>.mjs` per section. `server.py` serves any lower-case `.mjs`/`.css`
-  in `static/`; `tests/test_static_page.py` checks each module parses and its
+  and the declared actions by fixed argv. `sampler.py` records each section's
+  level and a few values into the panel-owned SQLite history
+  `~/.local/state/mac-panel/history.sqlite` (`history_store.py`: per-series
+  thinning, 30-day prune; `GET /api/history`), and `usage_adapter.py` serves
+  `~/config/mac/usage-budget/usage_budget.py facts --json` (read-only cached
+  facts, no account identity) at `GET /api/usage`. Its page is ES modules in
+  `static/` with no build step: `app.mjs` (`MODULES` table, polling, panel
+  health), `shell.mjs` (Overview-first grouped sidebar nav, hashes, drawer below
+  900 px), `search.mjs`/`search_ui.mjs`/`search_actions.mjs` (Cmd-K search over
+  sections, settings fields, jobs, services, consumers and actions; a search
+  action only navigates and arms a button), `panel_sections.mjs` (state
+  registry, `refresh`/`action` and the dirty check polls obey), `panel_api.mjs`
+  (the only `fetch`), `dom_core.mjs`/`components.mjs`/`panel_dom.mjs` (armed
+  buttons, `card`, `kv`, `settingRow`, `toggle`, `info` icons with tap popovers,
+  notices, times), `charts.mjs` (inline-SVG `stateStrip`, `sparkline`, `gauge`,
+  `scheduleStrip`; geometry is Node-tested), `history_panel.mjs`,
+  `task_receipt.mjs`, `status_cell.mjs` (`Level` vocabulary), `tokens.css`
+  (dark theme from the van dashboard palette, light under `data-theme="light"`;
+  no `style` attributes under the CSP, dynamic geometry through CSS custom
+  properties), copy in `section_copy.mjs`, and one `section_<name>.mjs` per
+  section exporting `render` and optional `searchItems`, `attentionItems`,
+  `cardExtra`. `server.py` serves any lower-case `.mjs`/`.css` in `static/` at
+  the root; `tests/test_static_page.py` checks each module parses and its
   imports resolve. Service log tails load on demand from
-  `GET /api/services/logs/<label>`, and `/healthz` reports `source_changed` so the
-  page offers a restart after Python edits.
+  `GET /api/services/logs/<label>`, and `/healthz` reports `source_changed` so
+  the page offers a restart after edits to the panel's own Python.
   Usage: `macbook/mac_panel/README.md`.
   `amphetamine_adapter.py` and `static/section_amphetamine.mjs` expose native
   auto-lock settings through `macbook/scripts/amphetamine_control.py`.
