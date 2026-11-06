@@ -20,35 +20,34 @@ PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
 KEYBOARD = 0
 SHIFT, COMMAND = 1 << 17, 1 << 20
 GLOBAL = 'BT.G'
-# Finder file focus and editing-key writable text focus are disjoint. The pair
-# alone is exempt: unrelated Cmd-V triggers must still block both installers.
-DISJOINT_TRIGGER_PAIRS = (frozenset({'EDA649C3-026B-4402-9BF9-CE339233EFB2',
-                                     'A9D83EB2-3D4F-5A85-984E-511A2477E7CE'}),)
 
 
-def runtime_action(function, entry, options, title, runtime, *, line_clipboard_variable=None,
-                   ensure_line_clipboard_variable=False):
-    """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
+def disjoint_trigger_pairs():
+    """Trigger pairs that may share a key because their conditions never overlap.
+
+    Owned by the editing-keys installer (Finder file focus vs writable text focus);
+    resolved lazily because both installers import this module.
+    """
+    from install_text_editing_keys import DISJOINT_TRIGGER_PAIRS
+    return DISJOINT_TRIGGER_PAIRS
+
+
+def runtime_action(function, entry, options, title, runtime, *, hook=None):
+    """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome.
+
+    hook(entry, options) may return (before, after): JS statements run before the
+    runtime is read and after its outcome is parsed (`result` is in scope).
+    """
     call = '\n%s(%s);' % (entry, json.dumps(options))
-    off, on = map(json.dumps, (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON))
-    variable_name = json.dumps(line_clipboard_variable)
-    ensure_variable = (
-        f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {variable_name}}});\n'
-        f'    if (lineClipboard == null || lineClipboard === "") await callBTT("set_persistent_string_variable", '
-        f'{{variable_name: {variable_name}, to: {off}}});\n'
-        if ensure_line_clipboard_variable and line_clipboard_variable else '')
-    variable_update = (
-        '    if (typeof result.lineClipboard === "boolean") await callBTT("set_persistent_string_variable", '
-        + f'{{variable_name: {variable_name}, to: result.lineClipboard ? {on} : {off}}});\n'
-        if line_clipboard_variable else '')
+    before, after = hook(entry, options) if hook else ('', '')
     # display_notification uses the unnamed body parameter, not "text":
     # https://docs.folivora.ai/docs/scripting/cli/ (command #6).
     # A script that fails inside runJXA comes back as {NSLocalizedDescription} instead.
     script = (f'async function {function}() {{\n'
-              f'{ensure_variable}'
+              f'{before}'
               f'    const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));\n'
               f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
-              f'{variable_update}'
+              f'{after}'
               f'    const error = result.error || result.NSLocalizedDescription || result.warning;\n'
               f'    if (!result.ok || result.warning) await callBTT("display_notification", {{title: {json.dumps(title)}, "": error}});\n'
               f'    return result.ok ? result.result : error;\n}}')
@@ -132,12 +131,13 @@ def saved_errors(database, plan, enabled):
 def conflicts(database, plan):
     """Other enabled shortcuts in an active preset, in any app, on one of the plan's keys."""
     ours = {d['BTTUUID'] for d in plan}
+    disjoint = disjoint_trigger_pairs()
     keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']): d['BTTUUID']
             for d in plan if d['BTTTriggerType'] == KEYBOARD}
     return sorted(row['ZUNIQUEIDENTIFIER'] for row in active_triggers(database, KEYBOARD)
                   if row['ZUNIQUEIDENTIFIER'] not in ours
                   and (key := (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0)) in keys
-                  and frozenset({row['ZUNIQUEIDENTIFIER'], keys[key]}) not in DISJOINT_TRIGGER_PAIRS)
+                  and frozenset({row['ZUNIQUEIDENTIFIER'], keys[key]}) not in disjoint)
 
 
 def wait_saved(database, plan, enabled, label):

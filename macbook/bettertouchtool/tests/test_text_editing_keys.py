@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import patch
 
 import btt_socket
+import install_finder_paste as finder
 import install_text_editing_keys as keys
 import text_editing_conditions as conditions
 import trigger_install as triggers
@@ -163,6 +164,36 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(call_options(outcome['calls'][-2][1], 'runEditingKey'),
             {'kind': 'paste-line', 'directory': str(keys.DIRECTORY),
              'lineClipboardVariable': conditions.LINE_CLIPBOARD_VARIABLE})
+
+    def test_the_disjoint_pair_is_built_from_the_one_finder_and_paste_line_ids(self):
+        self.assertEqual(keys.DISJOINT_TRIGGER_PAIRS, (frozenset({finder.TRIGGER, keys.PASTE_LINE_ID}),))
+        self.assertEqual(keys.PASTE_LINE_ID, keys.stable_uuid('paste line'))
+        self.assertEqual(by_note('pastes above the line')['BTTUUID'], keys.PASTE_LINE_ID)
+        self.assertEqual(triggers.disjoint_trigger_pairs(), keys.DISJOINT_TRIGGER_PAIRS)
+
+    def test_variable_logic_is_an_optional_hook_and_finders_action_has_none(self):
+        script = finder.action()['BTTAppleScriptString']
+        self.assertNotIn('_variable', script)
+        self.assertNotIn('lineClipboard', script)
+        plain = triggers.runtime_action('f', 'run', {}, 'T', ('a.js',))['BTTAppleScriptString']
+        self.assertEqual(plain, script.replace('pasteInFinder', 'f').replace('runFinderPaste', 'run')
+                         .replace('Finder paste stopped', 'T').replace(json.dumps(list(finder.RUNTIME)),
+                                                                        json.dumps(['a.js'])))
+        hooked = triggers.runtime_action('f', 'run', {}, 'T', ('a.js',),
+                                         hook=lambda entry, options: ('    BEFORE\n', '    AFTER\n'))['BTTAppleScriptString']
+        order = [hooked.index(part) for part in ('BEFORE', 'readFile', 'runJXA', 'AFTER', 'display_notification')]
+        self.assertEqual(order, sorted(order))
+
+    def test_editing_key_scripts_keep_their_line_clipboard_variable_logic(self):
+        name = json.dumps(conditions.LINE_CLIPBOARD_VARIABLE)
+        update = ('    if (typeof result.lineClipboard === "boolean") await callBTT("set_persistent_string_variable", '
+                  f'{{variable_name: {name}, to: result.lineClipboard ? "1" : "0"}});\n')
+        ensure = f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {name}}});\n'
+        for note, has_ensure in (('pastes above the line', False), ('on app switch', True)):
+            script = by_note(note)['BTTAdditionalActionData']['BTTAppleScriptString']
+            self.assertIn(update, script)
+            self.assertEqual(ensure in script, has_ensure)
+        self.assertNotIn('set_persistent', by_note('in (')['BTTAdditionalActionData']['BTTAppleScriptString'])
 
     def test_a_raced_native_clipboard_clears_the_custom_condition_variable(self):
         [outcome] = run_entries([self.entry(by_note('pastes above the line'),

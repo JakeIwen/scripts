@@ -10,6 +10,7 @@ terminals keep their own behavior.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -20,6 +21,7 @@ import uuid
 from btt_common import current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
 import btt_socket
+from install_finder_paste import TRIGGER as FINDER_PASTE_ID
 import text_editing_conditions as conditions
 import trigger_install as triggers
 from trigger_install import COMMAND, SHIFT, conflicts, set_enabled
@@ -42,14 +44,37 @@ def stable_uuid(name):
     return str(uuid.uuid5(NAMESPACE, name)).upper()
 
 
+PASTE_LINE_ID = stable_uuid('paste line')
+# Finder file focus and editing-key writable text focus are disjoint. The pair
+# alone is exempt: unrelated Cmd-V triggers must still block both installers.
+DISJOINT_TRIGGER_PAIRS = (frozenset({FINDER_PASTE_ID, PASTE_LINE_ID}),)
+
+
+def _line_clipboard_hook(entry, options):
+    """JS around the runtime that keeps the persistent line-clipboard variable in step."""
+    name = options.get('lineClipboardVariable')
+    if not name:
+        return '', ''
+    variable = json.dumps(name)
+    off, on = map(json.dumps, (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON))
+    ensure = ''
+    if entry == 'runAppSwitch':
+        ensure = (
+            f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {variable}}});\n'
+            f'    if (lineClipboard == null || lineClipboard === "") await callBTT("set_persistent_string_variable", '
+            f'{{variable_name: {variable}, to: {off}}});\n')
+    update = (
+        '    if (typeof result.lineClipboard === "boolean") await callBTT("set_persistent_string_variable", '
+        + f'{{variable_name: {variable}, to: result.lineClipboard ? {on} : {off}}});\n')
+    return ensure, update
+
+
 def _action(function, entry, options, title):
-    return triggers.runtime_action(function, entry, options, title, RUNTIME,
-                                   line_clipboard_variable=options.get('lineClipboardVariable'),
-                                   ensure_line_clipboard_variable=entry == 'runAppSwitch')
+    return triggers.runtime_action(function, entry, options, title, RUNTIME, hook=_line_clipboard_hook)
 
 
 def _keyboard(name, keycode, modifiers, condition, notes, action):
-    return triggers.keyboard_trigger(stable_uuid(name), keycode, modifiers, condition, notes, action)
+    return triggers.keyboard_trigger(PASTE_LINE_ID if name == 'paste line' else stable_uuid(name), keycode, modifiers, condition, notes, action)
 
 
 def definitions():
