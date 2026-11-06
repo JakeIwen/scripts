@@ -357,7 +357,8 @@ class RotationTests(LogRotateCase):
         self.assertEqual(ledger[path + '.2.gz']['st_ino'], first_inode)
         for name, record in ledger.items():
             info = os.lstat(name)
-            self.assertEqual(record, {'path': name, 'st_dev': info.st_dev, 'st_ino': info.st_ino, 'size': info.st_size})
+            self.assertEqual(record, {'path': name, 'st_dev': info.st_dev, 'st_ino': info.st_ino, 'size': info.st_size,
+                                      'st_birthtime': getattr(info, 'st_birthtime', None)})
 
     def test_continuous_growth_never_truncates_uncopied_bytes(self):
         path = self.make_log()

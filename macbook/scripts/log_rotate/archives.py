@@ -51,11 +51,15 @@ def identity(path: str) -> dict:
     info = os.lstat(path)
     if not stat.S_ISREG(info.st_mode):
         raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
-    return {"path": path, "st_dev": info.st_dev, "st_ino": info.st_ino, "size": info.st_size}
+    return {"path": path, "st_dev": info.st_dev, "st_ino": info.st_ino, "size": info.st_size,
+            "st_birthtime": getattr(info, "st_birthtime", None)}
 
 
 def require_owned(path: str, ledger: dict) -> None:
-    if identity(path) != ledger.get(path):
+    current, recorded = identity(path), ledger.get(path)
+    # macOS can assign a different device number after reboot.
+    if not isinstance(recorded, dict) or any(current[key] != recorded.get(key)
+                                             for key in ("path", "st_ino", "size", "st_birthtime")):
         raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
 
 
