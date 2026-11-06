@@ -86,6 +86,13 @@ class ServicesAdapter:
         listed = parse_list(checked(self.runner.run(('/bin/launchctl', 'list'))).stdout)
         return listed, self.owned_plists(self.agents)
 
+    def agent_state(self, label):
+        """Installed/loaded/pid/last exit of one user LaunchAgent, for sections that show their own job."""
+        listed, plists = self.discover_agents()
+        job = listed.get(label)
+        return {'label': label, 'installed': label in plists, 'loaded': job is not None,
+                'pid': job['pid'] if job else None, 'last_exit': job['last_exit'] if job else None}
+
     def read(self) -> ServicesPayload:
         listed, plists = self.discover_agents()
         rows = []

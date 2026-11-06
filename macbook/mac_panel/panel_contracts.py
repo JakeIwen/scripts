@@ -16,6 +16,7 @@ class Section(str, Enum):
     GUARD = 'guard'
     NTFY = 'ntfy'
     USAGE = 'usage'
+    LOGS = 'logs'
 
 
 class TaskState(str, Enum):
@@ -40,9 +41,11 @@ class LogStream(str, Enum):
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, code: str | None = None):
         super().__init__(message)
         self.status = status
+        # A machine-readable reason the page may act on (a busy rotator, say); None for plain errors.
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -296,6 +299,39 @@ class UsagePayload(_UsageRequired, total=False):
     mode_source: str
     expires_at: str
     availability_detail: dict[str, dict[str, Any]]
+
+
+class LogPolicy(TypedDict):
+    max_mb: float
+    keep: int
+    compress: bool
+    enabled: bool
+    override: bool
+
+
+class LogEntry(TypedDict):
+    path: str
+    source: str
+    bytes: int
+    archived_bytes: int
+    archives: int
+    mtime: float | None
+    growth_mb_per_day: float | None
+    policy: LogPolicy
+    last_rotated: float | None
+    state: str
+    note: str | None
+
+
+class LogsPayload(TypedDict):
+    generated_at: float | None
+    revision: str
+    defaults: dict
+    totals: dict
+    logs: list[LogEntry]
+    ignored: list[str]
+    # The log-rotate LaunchAgent: installed, loaded (None = launchd unreadable), pid, last exit.
+    service: dict
 
 
 class Level(str, Enum):

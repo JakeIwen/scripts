@@ -107,7 +107,7 @@ class PanelHandler(BaseHTTPRequestHandler):
             else:
                 raise ApiError(405, 'Method not allowed')
         except ApiError as exc:
-            self.send_json(exc.status, {'error': str(exc)})
+            self.send_json(exc.status, {'error': str(exc), **({'code': exc.code} if exc.code else {})})
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             return
         except Exception:

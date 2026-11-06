@@ -29,3 +29,5 @@ LOG = DATA / 'panel.log'
 DEFERRED = ('/bin/zsh', str(ROOT / 'macbook/scripts/deferred.zsh'))
 RESTORE = ('/usr/bin/python3', '-I', '-B', str(ROOT / 'shared/sh/llm_restore.py'))
 GUARD = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/bettertouchtool/btt.py'), 'guard')
+LOG_ROTATE = ('/usr/bin/python3', '-I', '-B', str(ROOT / 'macbook/scripts/log_rotate.py'))
+LOG_ROTATE_LABEL = 'com.jacobr.log-rotate'

@@ -11,6 +11,7 @@ from background_tasks import BackgroundTasks
 from crontab_adapter import CrontabAdapter
 from deferred_adapter import DeferredAdapter
 from guard_adapter import GuardAdapter
+from logs_adapter import LogsAdapter
 from metered_adapter import MeteredAdapter
 from ntfy_adapter import NtfyAdapter
 from panel_contracts import ApiError, Reply, Section
@@ -28,6 +29,7 @@ class PanelRoutes:
         self.deferred = DeferredAdapter(runner, tasks=self.tasks)
         self.guard = GuardAdapter(runner)
         self.services = ServicesAdapter(runner)
+        self.logs = LogsAdapter(runner, self.services)
         self.adapters = {
             Section.METERED: MeteredAdapter(runner),
             Section.AMPHETAMINE: AmphetamineAdapter(runner),
@@ -40,6 +42,7 @@ class PanelRoutes:
             Section.GUARD: self.guard,
             Section.NTFY: NtfyAdapter(),
             Section.USAGE: UsageAdapter(runner),
+            Section.LOGS: self.logs,
         }
         self.reads = {f'/api/{name.value}': adapter.read for name, adapter in self.adapters.items()}
         self.writes = {
@@ -53,6 +56,7 @@ class PanelRoutes:
             '/api/services/restart': self.adapters[Section.SERVICES].restart,
             '/api/llm-restore': self.adapters[Section.RESTORE].toggle,
             '/api/guard': self.guard.action,
+            '/api/logs': self.logs.mutate,
             '/api/ntfy/test': self.notify_test,
         }
 
