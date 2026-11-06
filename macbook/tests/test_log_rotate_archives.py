@@ -726,6 +726,19 @@ class PendingRecoveryFixTests(LogRotateCase):
 
 
 class ScanAndTemporaryFixTests(LogRotateCase):
+    def test_scanned_unsearchable_directory_lists_refused_log_without_extra(self):
+        path = self.write('.local/state/locked/job.log', b'locked')
+        directory = Path(path).parent
+        directory.chmod(0o644)
+        try:
+            self.assertEqual(os.listdir(directory), ['job.log'])
+            with self.assertRaises(PermissionError):
+                os.lstat(path)
+            entry = self.entry(path)
+            self.assertEqual((entry['state'], entry['reason']), ('refused', 'unreadable_directory'))
+        finally:
+            directory.chmod(0o700)
+
     def test_idle_run_cleans_only_old_owned_unlinked_rotator_temporaries(self):
         path = self.write('.local/state/app/job.log', b'below threshold')
         directory = Path(path).parent

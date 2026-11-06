@@ -10,7 +10,7 @@ from typing import Iterator, List
 import crontab_sync
 
 from . import eligibility
-from .records import SOURCE_CRONTAB, SOURCE_EXTRA, SOURCE_LAUNCHAGENT, SOURCE_SCAN, THIRD_PARTY_LOG_DIR
+from .records import LogReason, SOURCE_CRONTAB, SOURCE_EXTRA, SOURCE_LAUNCHAGENT, SOURCE_SCAN, THIRD_PARTY_LOG_DIR
 
 # Relative to $HOME; the first is the Mac's job state, the second this repo's scratch logs.
 SCAN_ROOTS = (".local/state", "dev/scripts/tmp", THIRD_PARTY_LOG_DIR)
@@ -85,7 +85,9 @@ def _walk(directory: str, depth: int, home: str) -> Iterator[str]:
             elif entry.name.endswith(SCAN_EXTENSIONS) and entry.is_file(follow_symlinks=False):
                 yield entry.path
         except OSError:
-            continue
+            # Listing can succeed without search permission; inventory must show the refusal.
+            if entry.name.endswith(SCAN_EXTENSIONS):
+                yield entry.path
 
 
 def scan_candidates(home: str) -> List[Candidate]:
@@ -95,7 +97,9 @@ def scan_candidates(home: str) -> List[Candidate]:
         if eligibility.directory_problem(root, home) is not None:
             continue
         for path in _walk(root, 0, home):
-            if eligibility.inspect(path, home).refusal in (None, eligibility.HARD_LINK_NOTE):
+            inspection = eligibility.inspect(path, home)
+            if (inspection.refusal in (None, eligibility.HARD_LINK_NOTE)
+                    or inspection.reason == LogReason.UNREADABLE_DIRECTORY):
                 found.append(Candidate(path, SOURCE_SCAN))
     return found
 
