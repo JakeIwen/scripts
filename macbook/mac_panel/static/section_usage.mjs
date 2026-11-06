@@ -15,20 +15,23 @@ const HISTORY_MAX_GAP = 3600;
 const percent = value => `${Math.round(value)}%`;
 const AVAILABILITY_LEVEL = {ok: Level.OK, constrained: Level.WARN, out: Level.ERROR, unknown: Level.UNKNOWN};
 const FAMILY = {claude: 'Claude', gpt: 'Codex'};
+// Routing text keys the usage tool has sent; any other string key still shows under its own name.
+const ROUTE_LABELS = {workers: 'Workers', builders: 'Builders', review: 'Review', parents: 'Parents'};
+const lineLeft = (data, spec) => (spec.position ? data[spec.position]?.line_left : undefined);
 
 // One entry per allowance window; `key` is the facts field and, with `_left`, the history series.
 const WINDOWS = [
-  {key: 'claude_weekly', label: 'Claude, this week', marker: true},
+  {key: 'claude_weekly', label: 'Claude, this week', position: 'claude_position'},
   {key: 'claude_session', label: 'Claude, five-hour window'},
   {key: 'fable_weekly', label: 'Fable, this week'},
-  {key: 'codex_weekly', label: 'Codex, this week'},
+  {key: 'codex_weekly', label: 'Codex, this week', position: 'gpt_position'},
   {key: 'codex_session', label: 'Codex, session window'},
 ];
 
 function windowGauge(spec, data) {
   const window = data[spec.key];
   if (!window) return null;
-  const marker = spec.marker ? data.claude_position?.line_left : undefined;
+  const marker = lineLeft(data, spec);
   const result = node('div');
   result.append(gauge({value: window.left, max: PERCENT, marker, label: spec.label, format: percent}));
   if (window.resets_at) {
@@ -41,19 +44,20 @@ function windowGauge(spec, data) {
 
 // Credits have no fixed size, so the gauge compares them with what the daily allowance would use to expiry.
 function creditsGauge(credits) {
-  const wanted = (credits.allowance_per_day ?? 0) * credits.days_left;
-  if (credits.left === null || !(wanted > 0)) return null;
+  const wanted = (credits?.allowance_per_day ?? 0) * (credits?.days_left ?? 0);
+  if (credits?.left === undefined || !(wanted > 0)) return null;
   return gauge({value: Math.min(credits.left, wanted), max: wanted, label: 'Credits to expiry',
     format: value => String(Math.round(value))});
 }
 
 function creditsRows(credits) {
-  const number = value => (value === null ? undefined : String(Math.round(value * 10) / 10));
+  const number = value => (value == null ? undefined : String(Math.round(value * 10) / 10));
+  const days = credits.days_left == null ? '' : ` (${Math.round(credits.days_left)} days)`;
   return kv([
     ['Credits left', number(credits.left)],
     ['Allowance per day', number(credits.allowance_per_day)],
     ['Burn per day', number(credits.burn_per_day)],
-    ['Expires', `${credits.expires} (${Math.round(credits.days_left)} days)`],
+    ['Expires', credits.expires ? `${credits.expires}${days}` : undefined],
   ]);
 }
 
@@ -70,10 +74,11 @@ function budgetsCard(data) {
     if (drawn) body.append(drawn);
   });
   if (!body.childElementCount) body.append(emptyState(COPY.noData));
-  const credits = creditsGauge(data.credits);
-  if (credits) body.append(credits);
-  body.append(creditsRows(data.credits));
-  body.append(node('p', COPY.creditsInfo, 'muted small'));
+  if (data.credits) {
+    const credits = creditsGauge(data.credits);
+    if (credits) body.append(credits);
+    body.append(creditsRows(data.credits), node('p', COPY.creditsInfo, 'muted small'));
+  }
   return card({title: titled(COPY.budgetsTitle, COPY.budgetsInfo), body, anchor: 'budgets'});
 }
 
@@ -89,16 +94,19 @@ function routingCard(data) {
   Object.entries(data.availability).forEach(([family, state]) => {
     availability.append(tag(`${FAMILY[family] ?? family}: ${state}`, AVAILABILITY_LEVEL[state]));
   });
+  const route = Object.entries(data.route ?? {}).map(([key, text]) => [ROUTE_LABELS[key] ?? key, text]);
   body.append(kv([
-    ['Lean', tag(data.lean)],
-    ['Workers', data.route.workers],
-    ['Review', data.route.review],
+    ['Lean', data.lean ? tag(data.lean) : undefined],
+    ...route,
     ['Availability', withInfo(availability, 'out or constrained means that provider gets no new workers until its window resets.')],
+    ['Mode source', data.mode_source],
+    ['Expires', data.expires_at],
     ['Snapshot', snapshotAge(data)],
   ]));
-  if (data.reasons.length) {
+  const notes = [...(data.lines ?? []), ...(data.reasons ?? [])];
+  if (notes.length) {
     const list = node('ul', null, 'findings');
-    data.reasons.forEach(reason => list.append(node('li', reason)));
+    notes.forEach(text => list.append(node('li', text)));
     body.append(list);
   }
   return card({title: titled(COPY.routingTitle, COPY.routingInfo), body, anchor: 'routing'});
@@ -149,7 +157,7 @@ export function render(data) {
   const level = assess(data);
   const claude = data.claude_weekly ? `Claude ${percent(data.claude_weekly.left)}` : 'Claude n/a';
   const codex = data.codex_weekly ? `Codex ${percent(data.codex_weekly.left)}` : 'Codex n/a';
-  const summary = `${claude} · ${codex} · ${data.lean}`;
+  const summary = [claude, codex, data.lean].filter(Boolean).join(' · ');
   const line = node('p', null, 'summary-line');
   line.append(status(level, summary));
   root.append(line);
@@ -178,7 +186,7 @@ export function cardExtra(data) {
   const result = node('div');
   WINDOWS.filter(spec => ['claude_weekly', 'codex_weekly'].includes(spec.key) && data[spec.key]).forEach(spec => {
     result.append(gauge({value: data[spec.key].left, max: PERCENT, label: spec.label, format: percent,
-      marker: spec.marker ? data.claude_position?.line_left : undefined}));
+      marker: lineLeft(data, spec)}));
   });
   return result.childElementCount ? result : null;
 }
