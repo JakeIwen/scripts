@@ -1,10 +1,13 @@
 // Overview: built entirely from the state registry, so it costs no requests of its own.
-import {card, emptyState, kv, node, timeNode} from './panel_dom.mjs';
-import {sections, state} from './panel_sections.mjs';
+import {api} from './panel_api.mjs';
+import {card, emptyState, node, notice, settingRow, timeNode, toggle} from './panel_dom.mjs';
+import {refresh, sections, state} from './panel_sections.mjs';
 import {search, settingItems} from './search.mjs';
+import {JOBS_COPY} from './section_copy.mjs';
 import {sectionLink} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 
+const COPY = JOBS_COPY.overview;
 const FINDER_RESULTS = 6;
 const SEVERITY = {[Level.ERROR]: 0, [Level.WARN]: 1};
 
@@ -48,26 +51,53 @@ function attentionCard(rows, entries) {
 
 const titleOf = id => sections().find(entry => entry.id === id)?.title ?? id;
 
+// A switch changes one tool and then reloads the sections that show it, so every view agrees at once.
+async function flip(path, body, reload) {
+  try {
+    const result = await api(path, body);
+    notice('overview', result.message || 'Done', 'ok');
+  } catch (error) {
+    notice('overview', error.message, 'error');
+  } finally {
+    await Promise.all(reload.map(id => refresh(id)));
+  }
+}
+
+const loadingRow = label => settingRow({label, control: node('span', 'loading…', 'muted')});
+
+function lowDataRow() {
+  const metered = state.metered?.payload;
+  if (!metered) return loadingRow('Low Data Mode');
+  const {enabled, revision, error} = metered.low_data_mode;
+  const control = node('div', null, 'actions');
+  control.append(toggle({
+    label: enabled ? 'On' : 'Off', on: enabled, confirm: true, key: 'overview-low-data',
+    onChange: next => flip('/api/metered', {action: 'low-data-mode', enabled: next, revision, confirmed: true}, ['metered']),
+  }));
+  if (error) control.append(node('span', error, 'error small'));
+  return settingRow({label: 'Low Data Mode', info: COPY.lowDataInfo, control, anchor: 'low-data'});
+}
+
+function restoreRow() {
+  const restore = state['llm-restore']?.payload;
+  if (!restore) return loadingRow('llm-restore snapshots');
+  const control = node('div', null, 'actions');
+  control.append(toggle({
+    label: restore.enabled ? 'On' : 'Off', on: restore.enabled, key: 'overview-restore',
+    onChange: next => flip('/api/llm-restore', {enabled: next}, ['llm-restore', 'crontab']),
+  }), node('span', `${restore.sessions_open ?? '?'} sessions open`, 'muted small'));
+  return settingRow({label: 'llm-restore snapshots', info: COPY.restoreInfo, control});
+}
+
 function quickControls() {
   const body = node('div');
   const metered = state.metered?.payload;
-  const restore = state['llm-restore']?.payload;
   const verdict = metered?.fresh ? metered.state.verdict.reason : null;
-  const lowData = metered ? (metered.low_data_mode.enabled ? 'On' : 'Off') : null;
-  body.append(kv([
-    ['Low Data Mode', labelWith(lowData, sectionLink('Open in Metered', 'metered', 'low-data-mode', {focus: true}))],
-    ['Network', labelWith(state.metered?.summary ?? null, verdict && node('span', verdict, 'muted'))],
-    ['llm-restore snapshots', labelWith(restore ? `${restore.enabled ? 'On' : 'Off'} · ${restore.sessions_open ?? '?'} sessions` : null,
-      sectionLink('Open in llm-restore', 'llm-restore', 'snapshots', {focus: true}))],
-  ]));
-  return card({title: 'Quick controls', body, anchor: 'quick-controls'});
-}
-
-function labelWith(text, extra) {
-  const row = node('span', null, 'quick-row');
-  row.append(text === null ? node('span', 'loading…', 'muted') : document.createTextNode(text));
-  if (extra) row.append(' ', extra);
-  return row;
+  const network = node('span');
+  network.append(state.metered?.summary ?? 'loading…', verdict ? ' · ' : '', verdict ? node('span', verdict, 'muted') : '',
+    ' ', sectionLink('Open in Metered', 'metered'));
+  body.append(lowDataRow(), settingRow({label: 'Network', control: network}), restoreRow());
+  return card({title: COPY.quickTitle, body, anchor: 'quick-controls'});
 }
 
 function sectionCard(entry) {
@@ -106,7 +136,7 @@ function settingsFinder() {
     }));
     if (input.value.trim() && !found.length) results.replaceChildren(emptyState('No matching setting'));
   });
-  root.append(input, results);
+  root.append(input, results, sectionLink(COPY.allSettings, 'settings'));
   finder = root;
   return root;
 }

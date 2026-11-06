@@ -9,7 +9,7 @@ from background_tasks import BackgroundTasks
 from cli_runner import CommandResult, checked, json_result
 from cron_schedule import describe_schedule, next_runs
 from log_redaction import redact, safe_display_path
-from panel_contracts import ApiError, CronJob, CrontabPayload, OwnerKind, Reply
+from panel_contracts import ApiError, CronJob, CrontabPayload, Reply
 from panel_paths import ROOT
 from wire_validation import confirm, field, object_fields
 
@@ -124,16 +124,11 @@ def display_job(job, now=None):
     now = time.time() if now is None else now
     expression = ' '.join(job['schedule_fields'])
     block, switch = job['managed_block'], job['managed_switch']
-    if block:
-        owner_kind = OwnerKind.MANAGED
-        owner = f'{block} — {switch or "macbook/crontab"}'
-    else:
-        owner_kind, owner = OwnerKind.TRACKED, 'macbook/crontab'
     log_path, log_modified = display_log(job['log_path'])
     return CronJob(id=job['id'], expression=expression,
                    schedule=describe_schedule(expression), command=job['command'],
                    program=program_summary(job['command']),
-                   description=job['description'], owner_kind=owner_kind, owner=owner,
+                   description=job['description'],
                    log_path=log_path, log_modified=log_modified, paused=job['paused'],
                    managed_block=block, managed_switch=switch,
                    next_runs=[] if job['paused'] else next_runs(job['schedule_fields'], now, now + 7 * 86400))
@@ -164,7 +159,7 @@ class CrontabAdapter:
         return CrontabPayload(
             tasks=self.tasks.list(), revision=value['revision'], uncommitted=value['uncommitted'],
             jobs=[display_job(job) for job in value['jobs']],
-            in_sync=not live_only and not repo_only, order_changed=False,
+            in_sync=not live_only and not repo_only,
             live_only=live_only, repo_only=repo_only, installable=value['installable'])
 
     def mutate(self, body):

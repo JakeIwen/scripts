@@ -181,3 +181,11 @@ summary .muted { color: var(--muted); }
   td.full { grid-template-columns: 1fr; }
   td.full::before { display: none; }
 }
+
+/* ---- jobs & services: timelines, receipts and the add-job form ---- */
+.history-slot { margin-top: var(--space-2); }
+.chart-block { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-2); padding: var(--space-3) var(--space-4); margin: 0 0 var(--space-3); }
+.sudo-install { margin: var(--space-2) 0; }
+code.copyable { user-select: all; padding: 2px 6px; background: var(--soft); border: 1px solid var(--line); border-radius: var(--radius-1); }
+.add-job .setting { max-width: none; }
+.add-job textarea { width: 100%; font: var(--text-small)/1.45 var(--mono); }

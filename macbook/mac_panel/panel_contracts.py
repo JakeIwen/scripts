@@ -29,12 +29,6 @@ class JobState(str, Enum):
     FAILED = 'failed'
 
 
-class OwnerKind(str, Enum):
-    TRACKED = 'tracked'
-    MANAGED = 'managed'
-    LIVE = 'live-only'
-
-
 class ServiceKind(str, Enum):
     AGENT = 'agent'
     DAEMON = 'daemon'
@@ -168,8 +162,6 @@ class CronJob(TypedDict):
     command: str
     program: str
     description: str
-    owner_kind: str
-    owner: str
     log_path: str | None
     log_modified: float | None
     paused: bool
@@ -183,7 +175,6 @@ class CrontabPayload(TypedDict):
     uncommitted: bool
     jobs: list[CronJob]
     in_sync: bool
-    order_changed: bool
     live_only: list[str]
     repo_only: list[str]
     installable: bool

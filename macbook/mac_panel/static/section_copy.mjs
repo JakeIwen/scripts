@@ -18,19 +18,19 @@ export const SECTION_COPY = {
   },
   services: {
     title: 'Services',
-    info: 'The launchd jobs under com.jacobr.* and the system daemons installed for them. A dot shows running, idle, failed or disabled; open a row for its log tails. Restart asks for confirmation. System daemons are status-only because restarting them needs root.',
+    info: 'The launchd jobs under com.jacobr.* and the system daemons installed for them. Each card shows its state, a health timeline and log tails. Start, stop and restart ask for confirmation. A system daemon can only be restarted, and only once the sudoers rule is installed.',
   },
   deferred: {
     title: 'Deferred jobs',
-    info: 'One-off future jobs queued with deferred.zsh. A checker runs hourly and at login, runs each job when due, and alerts on failure. Run now, retry, reschedule and cancel go through that CLI.',
+    info: 'One-off future jobs queued with deferred.zsh. A checker runs hourly and at login, runs each job when due, and alerts on failure. Add a job here, or run, retry, reschedule and cancel one; all of it goes through that CLI.',
   },
   crontab: {
     title: 'Crontab',
-    info: 'The tracked macbook/crontab compared with the live one. Pause or resume a job, or install the tracked file when no live-only lines would be lost. Last log write is a hint from the job\'s redirected log, not proof it succeeded.',
+    info: 'The tracked macbook/crontab compared with the live one, with a timeline of the next runs. Run a job now, pause or resume it, or install the tracked file when no live-only lines would be lost.',
   },
   automations: {
     title: 'Automations',
-    info: 'Background tools that declare themselves under shared/automations/. Each card shows the tool\'s own status and the actions it exposes; the tool keeps its own state.',
+    info: 'Background tools that declare themselves under shared/automations/. Each card shows the tool\'s own status and the actions it exposes; a slow action runs in the background and reports here when it finishes. The tool keeps its own state.',
   },
   'llm-restore': {
     title: 'llm-restore',
@@ -141,4 +141,62 @@ export const USAGE_COPY = {
 export const SETTINGS_COPY = {
   empty: 'No tools declare settings',
   resetInfo: 'Restores every field of this tool to its declared default.',
+};
+
+// ---- Jobs & services: strings the section renderers use, kept out of the render functions ----
+export const JOBS_COPY = {
+  services: {
+    historyInfo: 'Each strip is one service\'s state over time, sampled once a minute while the panel runs. Taller bands are worse states; empty stretches mean the panel was not recording.',
+    verbs: {restart: 'Restart', start: 'Start', stop: 'Stop'},
+    verbHelp: {
+      restart: 'Kill the job and launch it again now.',
+      start: 'Enable the job and load it into launchd.',
+      stop: 'Disable the job and unload it, so KeepAlive cannot bring it back.',
+    },
+    blocked: {restart: 'Not loaded, so there is nothing to restart. Use Start.', start: 'Already running.', stop: 'Not loaded.'},
+    sudoMissing: 'Restarting a system daemon needs root. Install the sudoers rule once from Terminal with the command below, then reload this page.',
+    sudoInstall: 'Install the rule:',
+    statusOnly: 'status only',
+    empty: 'No com.jacobr.* launchd jobs found.',
+  },
+  crontab: {
+    scheduleInfo: 'Each tick is one scheduled run in the next window, read from the live crontab; hollow ticks have not happened yet and the amber line is now. Paused jobs have no runs. Jobs that run too often to draw are listed below the strip.',
+    frequent: 'Not drawn, too frequent: ',
+    nothingScheduled: 'No runs are scheduled in this window.',
+    lastLogInfo: 'The modification time of the log file the job redirects its output to. It shows the job wrote something recently, not that it succeeded.',
+    nextInfo: 'Computed from the schedule in this Mac\'s local time; a paused job has no next run.',
+    runInfo: 'Runs the command once now with the cron environment, as cron would. Its output appears under the job when it finishes.',
+    empty: 'No cron jobs.',
+  },
+  deferred: {
+    scheduleInfo: 'Each tick is a queued job at its due time; hollow ticks are still to come and the amber line is now. A job past due runs when the hourly checker next looks.',
+    scheduleEmpty: 'No jobs are queued.',
+    addTitle: 'Add a job',
+    addInfo: 'Queues a one-off job. The script runs once at the due time with the timeout you set; the checker alerts if it fails.',
+    fields: {
+      due: ['Due', 'Local date and time the job becomes due.'],
+      name: ['Name', 'Lower-case letters, digits and hyphens, up to 60 characters. It names the job in lists and alerts.'],
+      description: ['Description', 'Optional note shown with the job.'],
+      script: ['Script', 'The whole script, starting with a #! line. It is saved with owner-only permissions and run by the checker.'],
+      attempts: ['Attempts', 'How many times the checker tries before marking the job failed. Leave empty for the CLI default.'],
+      timeout: ['Timeout', 'Seconds a single attempt may run. Leave empty for the CLI default.'],
+    },
+    defaultScript: '#!/bin/zsh\nset -eu\n\n',
+    empty: 'No deferred jobs.',
+  },
+  automations: {
+    empty: 'No automations declared.',
+    asyncInfo: 'Runs in the background; the result appears here when it finishes, and the card refreshes.',
+  },
+  restore: {
+    toggleInfo: 'Pauses or resumes the every-minute snapshot. The CLI owns its crontab block, so this changes nothing else.',
+    sessionsInfo: 'Claude Code and Codex sessions detected as open at the last snapshot.',
+    lastInfo: 'When the snapshot last ran. It should be within a minute while snapshots are on.',
+  },
+  overview: {
+    quickTitle: 'Quick controls',
+    lowDataInfo: 'Constrains Wi-Fi while the network is metered and clears it when unmetered or approved. Turn it on only after the sudoers / LAN Time Machine test in Metered has passed.',
+    restoreInfo: 'The every-minute snapshot of open Claude Code and Codex sessions that llmrestore reopens after a reboot.',
+    allSettings: 'All settings',
+  },
 };
