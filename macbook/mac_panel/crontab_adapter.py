@@ -9,7 +9,7 @@ from background_tasks import BackgroundTasks
 from cli_runner import CommandResult, checked, json_result
 from cron_schedule import describe_schedule, next_runs
 from log_redaction import redact, safe_display_path
-from panel_contracts import ApiError, CronJob, CrontabPayload, Reply
+from panel_contracts import Section, ApiError, CronJob, CrontabPayload, Reply
 from panel_paths import ROOT
 from wire_validation import confirm, field, object_fields
 
@@ -157,7 +157,7 @@ class CrontabAdapter:
         value = validate_status(json_result(self.runner.run((*SYNC, 'status', '--json'))))
         live_only, repo_only = value['live_only'], value['repo_only']
         return CrontabPayload(
-            tasks=self.tasks.list(), revision=value['revision'], uncommitted=value['uncommitted'],
+            tasks=self.tasks.list(Section.CRONTAB), revision=value['revision'], uncommitted=value['uncommitted'],
             jobs=[display_job(job) for job in value['jobs']],
             in_sync=not live_only and not repo_only,
             live_only=live_only, repo_only=repo_only, installable=value['installable'])
@@ -179,7 +179,13 @@ class CrontabAdapter:
             argv += (job,)
         argv = (*argv, '--revision', revision_value, '--json')
         if action == 'run':
-            task = self.tasks.start(f'crontab:{job}', lambda: self.run_job(argv, job))
+            current = self.runner.run((*SYNC, 'status', '--json'))
+            if current.returncode in (3, 75):
+                raise ApiError(409, cli_error(current))
+            value = validate_status(json_result(current))
+            if value['revision'] != revision_value:
+                raise ApiError(409, 'Crontab revision changed; refresh before running')
+            task = self.tasks.start(Section.CRONTAB, f'crontab:{job}', lambda: self.run_job(argv, job))
             return Reply(task, 202)
         result = self.runner.run(argv)
         if result.returncode in (3, 75):

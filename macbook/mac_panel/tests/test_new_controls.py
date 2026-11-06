@@ -8,13 +8,16 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from automations_adapter import AutomationsAdapter
 from background_tasks import BackgroundTasks
 from cli_runner import CliRunner, CommandResult
 from crontab_adapter import CrontabAdapter, SYNC
+from test_crontab_adapter import status_payload, JOB_ID, REVISION
+from test_deferred_adapter import inventory
 from deferred_adapter import DeferredAdapter
-from panel_contracts import ApiError, SudoRule, TaskState
+from panel_contracts import ApiError, Section, SudoRule, TaskState
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, auth, json_command, request, running_server
 from services_adapter import ServicesAdapter
@@ -136,7 +139,6 @@ print added
 
 class AsyncControlsTests(unittest.TestCase):
     def test_cron_run_is_a_receipt_visible_through_routes_and_inventory(self):
-        from test_crontab_adapter import status_payload, JOB_ID, REVISION
         release, entered = threading.Event(), threading.Event()
         def work():
             entered.set()
@@ -145,7 +147,7 @@ class AsyncControlsTests(unittest.TestCase):
             return json_command({'id': JOB_ID, 'exit': 0, 'output': 'Completed',
                                  'started': '2026-01-01T00:00:00+00:00',
                                  'finished': '2026-01-01T00:00:01+00:00', 'timed_out': False})
-        runner = FakeRunner([work])
+        runner = FakeRunner([json_command(status_payload()), work, json_command(status_payload())])
         routes = PanelRoutes(runner=runner)
         self.addCleanup(routes.close)
         try:
@@ -164,7 +166,8 @@ class AsyncControlsTests(unittest.TestCase):
             payload = routes.dispatch('GET', '/api/crontab').body
             self.assertEqual(payload['tasks'][0]['id'], receipt.body['id'])
             self.assertEqual(payload['tasks'][0]['state'], 'done')
-            self.assertEqual(runner.calls[0], ((*SYNC, 'run', JOB_ID, '--revision', REVISION, '--json'), 930))
+            self.assertEqual(runner.calls[0], ((*SYNC, 'status', '--json'), 30))
+            self.assertEqual(runner.calls[1], ((*SYNC, 'run', JOB_ID, '--revision', REVISION, '--json'), 930))
         finally:
             release.set()
 
@@ -174,7 +177,7 @@ class AsyncControlsTests(unittest.TestCase):
         value = {'id': 'a' * 12, 'exit': 7, 'output': 'job failed',
                  'started': '2026-01-01T00:00:00+00:00',
                  'finished': '2026-01-01T00:00:01+00:00', 'timed_out': False}
-        runner = FakeRunner([json_command(value)])
+        runner = FakeRunner([json_command({**status_payload(), 'revision': 'b' * 64}), json_command(value)])
         adapter = CrontabAdapter(runner, tasks)
         receipt = adapter.mutate({'action': 'run', 'job': value['id'],
                                   'revision': 'b' * 64, 'confirmed': True})
@@ -187,7 +190,8 @@ class AsyncControlsTests(unittest.TestCase):
     def test_cron_revision_failure_keeps_the_cli_reason(self):
         tasks = BackgroundTasks()
         self.addCleanup(tasks.close)
-        adapter = CrontabAdapter(FakeRunner([json_command({'error': 'revision changed'}, 75)]), tasks)
+        adapter = CrontabAdapter(FakeRunner([json_command({**status_payload(), 'revision': 'b' * 64}),
+            json_command({'error': 'revision changed'}, 75)]), tasks)
         receipt = adapter.mutate({'action': 'run', 'job': 'a' * 12,
                                   'revision': 'b' * 64, 'confirmed': True})
         tasks.executor.shutdown(wait=True)
@@ -196,6 +200,47 @@ class AsyncControlsTests(unittest.TestCase):
         self.assertEqual(result['exit_status'], 75)
         self.assertIn('revision changed', result['message'])
         self.assertNotIn('checker', result['message'])
+
+    def test_task_inventories_belong_to_their_adapter_even_while_running(self):
+        tasks = BackgroundTasks()
+        self.addCleanup(tasks.close)
+        release = threading.Event()
+        def operation():
+            if not release.wait(3):
+                raise AssertionError('release timed out')
+            return CommandResult(0, 'Completed')
+        try:
+            receipts = {section: tasks.start(section, 'same-job', operation)
+                        for section in (Section.CRONTAB, Section.DEFERRED, Section.AUTOMATIONS)}
+            adapters = {
+                Section.CRONTAB: CrontabAdapter(FakeRunner([json_command(status_payload())]), tasks),
+                Section.DEFERRED: DeferredAdapter(FakeRunner([json_command(inventory())]), tasks),
+                Section.AUTOMATIONS: AutomationsAdapter(FakeRunner(), SimpleNamespace(
+                    declaration_tools=lambda: []), tasks),
+            }
+            for section, adapter in adapters.items():
+                with self.subTest(section=section):
+                    self.assertEqual(adapter.read()['tasks'], [receipts[section]])
+                    self.assertEqual(tasks.get(receipts[section]['id']), receipts[section])
+            release.set()
+            tasks.executor.shutdown(wait=True)
+            for section in adapters:
+                self.assertEqual(tasks.list(section)[0]['state'], 'done')
+        finally:
+            release.set()
+
+    def test_cron_stale_revision_returns_http_409_before_enqueuing(self):
+        runner = FakeRunner([json_command(status_payload())])
+        routes = PanelRoutes(runner=runner)
+        self.addCleanup(routes.close)
+        with running_server(routes) as server:
+            body = json.dumps({'action': 'run', 'job': JOB_ID,
+                               'revision': 'b' * 64, 'confirmed': True})
+            status, _, raw = request(server, '/api/crontab', 'POST', body, auth(server, True))
+        self.assertEqual(status, 409)
+        self.assertIn('revision changed', json.loads(raw)['error'])
+        self.assertEqual(routes.tasks.list(Section.CRONTAB), [])
+        self.assertEqual(runner.calls, [((*SYNC, 'status', '--json'), 30)])
 
     def test_confirmed_async_automation_uses_declared_timeout_and_receipt(self):
         import tool_automation
