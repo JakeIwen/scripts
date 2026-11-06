@@ -1,7 +1,10 @@
+from contextlib import closing
 import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import shutil
 import tempfile
 import threading
 import time
@@ -29,7 +32,7 @@ class HistoryTests(unittest.TestCase):
         self.store.record([sample(10), sample(20, 'b'), sample(30), sample(20, section='metered')])
         self.assertEqual(self.store.directory.stat().st_mode & 0o777, 0o700)
         self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
-        with sqlite3.connect(self.store.path) as connection:
+        with closing(sqlite3.connect(self.store.path)) as connection:
             self.assertEqual(connection.execute('PRAGMA journal_mode').fetchone()[0], 'wal')
             self.assertEqual([r[1] for r in connection.execute('PRAGMA table_info(samples)')],
                              ['section', 'key', 'ts', 'level', 'value', 'text'])
@@ -37,21 +40,67 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(set(value['series']), {'a', 'b'})
         self.assertEqual(value['series']['a'], [dict(ts=10.0, level='ok', value=10.0, text='running')])
         self.assertEqual(self.store.series('services', 0, 50, 'b')['series']['b'][0]['ts'], 20)
-        self.assertEqual(self.store.series('absent', 0, 50), {'series': {}})
+        self.assertEqual(self.store.series('absent', 0, 50), {'series': {}, 'spacing': {}})
 
-    def test_even_global_thinning_and_pruning(self):
+    def test_even_per_series_thinning_and_pruning(self):
         self.store.record([sample(i, str(i % 3)) for i in range(10001)])
-        value = self.store.series('services', 0, 10000)
-        points = sorted(p['ts'] for rows in value['series'].values() for p in rows)
-        self.assertEqual(len(points), 5000)
-        self.assertEqual((points[0], points[-1]), (0, 10000))
-        self.assertLessEqual(max(b - a for a, b in zip(points, points[1:])), 3)
-        self.assertEqual(self.store.series('services', 0, 10000, limit=1)['series'],
-                         {'1': [dict(ts=10000.0, level='ok', value=10000.0, text='running')]})
+        value = self.store.series('services', 0, 10000, limit=1000)
+        self.assertEqual(value['spacing'], {'0': 9, '1': 9, '2': 9})
+        for key, rows in value['series'].items():
+            self.assertEqual(len(rows), 1000)
+            self.assertEqual(rows[0]['ts'], int(key))
+            self.assertLessEqual(max(b['ts'] - a['ts'] for a, b in zip(rows, rows[1:])), 12)
+        last = self.store.series('services', 0, 10000, limit=1)
+        self.assertEqual({key: rows[0]['ts'] for key, rows in last['series'].items()},
+                         {'0': 9999, '1': 10000, '2': 9998})
+        self.assertEqual(last['spacing'], {'0': 0, '1': 0, '2': 0})
         with patch('history_store.time.time', return_value=30 * 86400 + 500):
             self.store.prune()
         left = self.store.series('services', 0, 1000)
         self.assertEqual(min(p['ts'] for rows in left['series'].values() for p in rows), 500)
+
+    def chart_coverage(self, payload, duration):
+        # Exercise the actual drawn geometry with SQLite's retained series and reported spacing.
+        module = (Path(__file__).parents[1] / 'static/charts.mjs').as_uri()
+        script = """
+import {readFileSync} from 'node:fs';
+const {stateBands, stateGap} = await import(process.argv[1]);
+const {payload, duration} = JSON.parse(readFileSync(0, 'utf8'));
+const coverage = Object.fromEntries(Object.entries(payload.series).map(([key, samples]) => {
+  const bands = stateBands(samples, {from: 0, to: duration, width: 320, maxGap: stateGap(payload.spacing[key])});
+  return [key, bands.filter(band => band.level !== 'nodata').reduce((sum, band) => sum + band.end - band.start, 0) / duration];
+}));
+console.log(JSON.stringify(coverage));
+"""
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script, module],
+            input=json.dumps(dict(payload=payload, duration=duration)), text=True,
+            capture_output=True, check=True, timeout=30)
+        return json.loads(result.stdout)
+
+    def test_twenty_continuous_services_keep_over_95_percent_seven_day_coverage(self):
+        duration = 7 * 86400
+        self.store.record(sample(ts, str(service)) for ts in range(0, duration + 1, 60)
+                          for service in range(20))
+        payload = self.store.series('services', 0, duration)
+        self.assertEqual(len(payload['series']), 20)
+        self.assertTrue(all(len(rows) == 5000 for rows in payload['series'].values()))
+        self.assertEqual(set(payload['spacing'].values()), {120})
+        self.assertTrue(all(value > .95 for value in self.chart_coverage(payload, duration).values()))
+
+    def test_thinning_still_draws_a_real_panel_outage_as_a_gap(self):
+        duration, gap_start, gap_end = 7 * 86400, 3 * 86400, 4 * 86400
+        self.store.record(sample(ts) for ts in range(0, duration + 1, 60)
+                          if not gap_start <= ts < gap_end)
+        payload = self.store.series('services', 0, duration)
+        coverage = self.chart_coverage(payload, duration)['a']
+        self.assertLess(coverage, .87)
+        self.assertGreater(coverage, .85)
+
+    def test_sparse_unthinned_samples_do_not_redefine_an_outage_as_cadence(self):
+        self.store.record([sample(0), sample(86400)])
+        payload = self.store.series('services', 0, 86460)
+        self.assertEqual(payload['spacing'], {})
+        self.assertLess(self.chart_coverage(payload, 86460)['a'], .01)
 
     def test_environment_override(self):
         with patch.dict(os.environ, {'MAC_PANEL_STATE_DIR': str(self.store.directory)}):
@@ -107,7 +156,7 @@ class SamplingTests(unittest.TestCase):
 
     def test_jobs_and_restore(self):
         result = samples(Section.CRONTAB, {'jobs': [dict(id='job', paused=True,
-                         log_modified=123, program='fixture')]}, 10)
+                         log_modified=123, command='fixture', expression='* * * * *')]}, 10)
         self.assertEqual(result[0]['value'], 123)
         self.assertEqual(result[0]['level'], 'idle')
         result = samples(Section.DEFERRED, {'jobs': [dict(id='job', valid=True,
@@ -116,6 +165,25 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(result[1]['text'], 'invalid')
         result = samples(Section.RESTORE, dict(sessions_open=3, last_snapshot=123), 10)
         self.assertEqual([(r['key'], r['value']) for r in result], [('sessions', 3), ('snapshot', 123)])
+
+    def test_cron_history_persists_no_argument_string(self):
+        from crontab_adapter import display_job
+        from test_crontab_adapter import status_payload
+        job = status_payload()['jobs'][0]
+        job['command'] = '/usr/bin/curl https://x/tok3n --header "secret: tok3n"'
+        rows = samples(Section.CRONTAB, {'jobs': [display_job(job)]}, 10)
+        with tempfile.TemporaryDirectory() as directory:
+            store = HistoryStore(directory)
+            store.record(rows)
+            with closing(sqlite3.connect(store.path)) as connection:
+                stored = connection.execute('SELECT key, text FROM samples').fetchall()
+        self.assertNotIn('tok3n', json.dumps(stored))
+        self.assertNotIn('https://x', json.dumps(stored))
+        self.assertEqual(stored, [(job['id'], '0 3 * * * · curl')])
+        for command in ('bash -c "echo tok3n"', 'env SECRET=tok3n curl https://x/tok3n',
+                        '"unterminated tok3n', '> https://x/tok3n'):
+            job['command'] = command
+            self.assertNotIn('tok3n', json.dumps(samples(Section.CRONTAB, {'jobs': [display_job(job)]}, 10)))
 
     def test_thread_stops_promptly_and_logs_failures(self):
         called = threading.Event()

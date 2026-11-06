@@ -9,6 +9,9 @@ const DEFAULT_WIDTH = 320;
 const MIN_BAND_PX = 1.5;
 const TIP_HIT_PX = 24;
 const MARKER_RADIUS = 4;
+const MIN_STATE_GAP = 5 * 60;
+
+export const stateGap = spacing => Math.max(MIN_STATE_GAP, 3 * (spacing ?? 0));
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const round = value => Math.round(value * 10) / 10;
@@ -193,7 +196,7 @@ const timeSpan = (start, end) => `${absoluteText(start * 1000)} to ${absoluteTex
 // ---- renderers ----
 
 /** Coloured bands over time. samples: [{ts, level, text?}]. */
-export function stateStrip({samples, from, to, height = 22, maxGap}) {
+export function stateStrip({samples, from, to, height = 22, spacing, maxGap = stateGap(spacing)}) {
   const wrap = html('div', 'chart chart-strip');
   const holder = html('div', 'chart-plot');
   wrap.append(holder);

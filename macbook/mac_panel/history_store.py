@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import sqlite3
+from statistics import median
 import time
 
 from panel_contracts import HistoryPayload
@@ -55,19 +56,24 @@ class HistoryStore:
         with self.connection() as connection:
             # COUNT and iteration share a snapshot even while the sampler commits.
             connection.execute('BEGIN')
-            count = connection.execute('SELECT count(*) FROM samples WHERE ' + clause, args).fetchone()[0]
-            # Select evenly spaced row positions, retaining both endpoints. Iterating the
-            # cursor bounds Python memory even for a long unfiltered history request.
-            selected = None
-            if count > limit:
-                selected = ({round(i * (count - 1) / (limit - 1)) for i in range(limit)}
-                            if limit > 1 else {count - 1})
+            counts = dict(connection.execute('SELECT key, count(*) FROM samples WHERE '
+                                             + clause + ' GROUP BY key', args))
+            selected = {name: ({round(i * (count - 1) / (limit - 1)) for i in range(limit)}
+                               if limit > 1 else {count - 1})
+                        for name, count in counts.items() if count > limit}
             rows = connection.execute('SELECT key, ts, level, value, text FROM samples WHERE '
-                                      + clause + ' ORDER BY ts, key, rowid', args)
-            for index, (name, ts, level, value, text) in enumerate(rows):
-                if selected is None or index in selected:
+                                      + clause + ' ORDER BY key, ts, rowid', args)
+            indexes = defaultdict(int)
+            for name, ts, level, value, text in rows:
+                index = indexes[name]
+                indexes[name] += 1
+                if name not in selected or index in selected[name]:
                     result[name].append(dict(ts=ts, level=level, value=value, text=text))
-        return {'series': dict(result)}
+        # Report spacing only for thinned series: sparse raw samples must not turn an outage into cadence.
+        spacing = {name: median(deltas) if deltas else 0 for name, points in result.items()
+                   for deltas in [[b['ts'] - a['ts'] for a, b in zip(points, points[1:])
+                                   if b['ts'] > a['ts']]] if name in selected}
+        return {'series': dict(result), 'spacing': spacing}
 
     def prune(self, days=RETENTION_DAYS):
         with self.connection() as connection:

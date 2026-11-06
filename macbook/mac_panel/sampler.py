@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 
+from crontab_adapter import program_name
 from panel_contracts import HistorySample, Level, Section
 from usage_adapter import WINDOWS
 
@@ -93,7 +94,7 @@ def samples(section, payload, ts):
         rows = usage_samples(payload)
     elif section == Section.CRONTAB:
         rows = [(job['id'], Level.IDLE if job['paused'] else Level.OK,
-                 job['log_modified'], job['program']) for job in payload['jobs']]
+                 job['log_modified'], f"{job['expression']} · {program_name(job['command'])}") for job in payload['jobs']]
     elif section == Section.RESTORE:
         rows = [('sessions', Level.OK if payload['sessions_open'] is not None else Level.UNKNOWN,
                  payload['sessions_open'], None),

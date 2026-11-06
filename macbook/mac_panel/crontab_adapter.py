@@ -70,6 +70,16 @@ def program_summary(command):
     return ' '.join([words[0].rsplit('/', 1)[-1], *words[1:]])
 
 
+def program_name(command):
+    """Only an executable basename, never the argument-bearing display summary."""
+    try:
+        words = without_redirections(command_words(command))
+    except ValueError:
+        return 'unknown'
+    executable = next((word for word in words if not ASSIGNMENT.match(word)), '')
+    return executable.rsplit('/', 1)[-1] or 'unknown'
+
+
 def validate_status(value):
     required = ('revision', 'uncommitted', 'jobs', 'live_only', 'repo_only', 'installable')
     object_fields(value, required, status=502)

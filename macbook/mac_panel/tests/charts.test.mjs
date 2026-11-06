@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {gaugeGeometry, linePoints, nearestByX, pathData, rangeWindow, scheduleLayout, spanText, stateBands, timeToX, xToTime} from '../static/charts.mjs';
+import {gaugeGeometry, linePoints, nearestByX, pathData, rangeWindow, scheduleLayout, spanText, stateBands, stateGap, timeToX, xToTime} from '../static/charts.mjs';
 
 const WINDOW = {from: 1000, to: 2000, width: 100};
 
@@ -88,4 +88,14 @@ test('scheduleLayout groups events into lanes, marks the future and places now',
 
 test('spanText picks a readable unit', () => {
   assert.deepEqual([30, 600, 7200, 259200].map(spanText), ['30 s', '10 min', '2 h', '3 d']);
+});
+
+
+test('state gap follows retained spacing but still marks a real outage', () => {
+  assert.equal(stateGap(), 300);
+  assert.equal(stateGap(60), 300);
+  assert.equal(stateGap(600), 1800);
+  const samples = [{ts: 0, level: 'ok'}, {ts: 600, level: 'ok'}, {ts: 3000, level: 'ok'}];
+  const bands = stateBands(samples, {from: 0, to: 3600, width: 320, maxGap: stateGap(600)});
+  assert.deepEqual(bands.filter(band => band.level === 'nodata').map(band => [band.start, band.end]), [[2400, 3000]]);
 });
