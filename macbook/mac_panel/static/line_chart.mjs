@@ -4,7 +4,7 @@
 import {appendTimeTicks} from './chart_axes.mjs';
 import {html, responsive, svgNode, tooltip} from './chart_dom.mjs';
 import {linePoints, pathData, nearestByX} from './charts.mjs';
-import {niceTicks, round, spreadLabels, tickLabelWidth, momentLabel, timeToX, xToTime} from './chart_scale.mjs';
+import {niceTicks, round, spreadLabels, momentLabel, timeToX, xToTime} from './chart_scale.mjs';
 import {absoluteText} from './relative_time.mjs';
 
 const SLACK = 0.01;
@@ -30,6 +30,29 @@ export function recordingStart(series, from, to, since) {
   return first > from + (to - from) * SLACK ? Math.min(first, to) : null;
 }
 
+const LABEL_EM = 0.65;
+const FONT_PX = 12;
+const Y_LABEL_GAP = 8;
+const LEFT_PAD_PX = 4;
+const END_LABEL_GAP = END_DOT + 6;
+const RIGHT_PAD_PX = 4;
+const MIN_RIGHT_PX = 32;
+
+/** Text width when it cannot be measured: a conservative 0.65 em per character. */
+export const estimateTextWidth = text => Math.ceil(String(text).length * LABEL_EM * FONT_PX);
+
+/**
+ * Left and right plot margins that keep the y labels and end-of-line labels inside the SVG. `measured`
+ * ({y, end}: widest rendered label in px) replaces the estimate where it is a real number above zero.
+ */
+export function labelMargins(yTexts, endTexts, measured = {}) {
+  const widest = (texts, real) => (real > 0 ? Math.ceil(real) : Math.max(0, ...texts.map(estimateTextWidth)));
+  return {
+    left: widest(yTexts, measured.y) + Y_LABEL_GAP + LEFT_PAD_PX,
+    right: Math.max(MIN_RIGHT_PX, widest(endTexts, measured.end) + END_LABEL_GAP + RIGHT_PAD_PX),
+  };
+}
+
 const median = numbers => {
   const sorted = [...numbers].sort((a, b) => a - b);
   const mid = sorted.length >> 1;
@@ -46,7 +69,7 @@ function spacingOf(points) {
 const toleranceOf = (spacing, maxGap) => Math.min(maxGap ?? Infinity, spacing === null ? Infinity : spacing / 2);
 
 /** Everything a draw needs, in pixels: plot box, gridlines, per-series segments and end labels. */
-export function lineChartLayout({series, from, to, width, height, yMin, yMax, yFormat = String, maxGap, recordingSince, now = to, hasUnit = false}) {
+export function lineChartLayout({series, from, to, width, height, yMin, yMax, yFormat = String, maxGap, recordingSince, now = to, hasUnit = false, margins}) {
   const top = TOP_PX + (hasUnit ? UNIT_ROW_PX : 0);
   const values = series.flatMap(entry => entry.points.map(point => point.value)).filter(Number.isFinite);
   const ticks = niceTicks(yMin ?? Math.min(0, ...values), yMax ?? Math.max(...values, 0), 5);
@@ -54,8 +77,7 @@ export function lineChartLayout({series, from, to, width, height, yMin, yMax, yF
     const last = [...entry.points].filter(point => Number.isFinite(point.value) && point.ts <= to && point.ts >= from).pop();
     return last ? yFormat(last.value) : '';
   });
-  const left = tickLabelWidth(Math.max(...ticks.ticks.map(value => yFormat(value).length))) + 12;
-  const right = Math.max(32, tickLabelWidth(Math.max(...ends.map(text => text.length))) + 14);
+  const {left, right} = margins ?? labelMargins(ticks.ticks.map(value => yFormat(value)), ends);
   const plot = {left, top, width: Math.max(width - left - right, 40), height: Math.max(height - top - BOTTOM_PX, 40)};
   const placed = series.map(entry => ({
     ...entry,
@@ -65,7 +87,7 @@ export function lineChartLayout({series, from, to, width, height, yMin, yMax, yF
   const labelYs = spreadLabels(placed.map(entry => plot.top + (entry.points.length ? entry.points[entry.points.length - 1].y : 0)),
     LABEL_GAP, plot.top, plot.top + plot.height);
   return {
-    plot, width, now, from, to, yTicks: ticks.ticks.map(value => ({value, label: yFormat(value),
+    plot, margins: {left, right}, width, now, from, to, yTicks: ticks.ticks.map(value => ({value, label: yFormat(value),
       y: round(plot.top + (1 - (value - ticks.min) / (ticks.max - ticks.min)) * plot.height)})),
     series: placed.map((entry, index) => ({...entry, endText: ends[index], labelY: labelYs[index],
       tolerance: toleranceOf(spacingOf(entry.points), maxGap),
@@ -125,7 +147,7 @@ function drawGrid(svg, layout) {
   const {plot} = layout;
   layout.yTicks.forEach(tick => {
     svg.append(svgNode('line', {x1: plot.left, x2: plot.left + plot.width, y1: tick.y, y2: tick.y}, 'grid-line'));
-    const text = svgNode('text', {x: plot.left - 8, y: tick.y + 4, 'text-anchor': 'end'}, 'axis-label');
+    const text = svgNode('text', {x: plot.left - Y_LABEL_GAP, y: tick.y + 4, 'text-anchor': 'end'}, 'axis-label y-label');
     text.textContent = tick.label;
     svg.append(text);
   });
@@ -154,13 +176,22 @@ function drawSeries(svg, layout) {
       svg.append(svgNode('path', {d: pathData(moved)}, cls));
     });
     if (!entry.last) return;
-    const text = svgNode('text', {x: plot.left + plot.width + END_DOT + 6, y: entry.labelY + 4}, `end-label c-${entry.color ?? 'accent'}`);
+    const text = svgNode('text', {x: plot.left + plot.width + END_LABEL_GAP, y: entry.labelY + 4}, `end-label c-${entry.color ?? 'accent'}`);
     text.textContent = entry.endText;
     svg.append(text);
     if (!entry.dashed) {
       svg.append(svgNode('circle', {r: END_DOT, cx: entry.last.x + plot.left, cy: entry.last.y + plot.top}, `end-dot c-${entry.color ?? 'accent'}`));
     }
   });
+}
+
+const widest = (svg, selector) => Math.max(0, ...[...svg.querySelectorAll(selector)]
+  .map(label => (typeof label.getComputedTextLength === 'function' ? label.getComputedTextLength() : 0)));
+
+/** Widest rendered y label and end label in px, or null where the environment cannot measure text. */
+function measureLabels(svg) {
+  const measured = {y: widest(svg, '.y-label'), end: widest(svg, '.end-label')};
+  return measured.y > 0 || measured.end > 0 ? measured : null;
 }
 
 function addHover(svg, layout, {tip, yFormat}) {
@@ -214,10 +245,10 @@ export function lineChart({series, from, to, now = to, yMin, yMax, yFormat = Str
   wrap.append(box);
   const tip = tooltip(box);
   const hasData = series.some(entry => entry.points.some(point => Number.isFinite(point.value)));
-  const paint = width => {
+  const paint = (width, margins) => {
     holder.replaceChildren();
     const height = chartHeight(width);
-    const layout = lineChartLayout({series, from, to, width, height, yMin, yMax, yFormat, maxGap, recordingSince, now, hasUnit: Boolean(yLabel)});
+    const layout = lineChartLayout({series, from, to, width, height, yMin, yMax, yFormat, maxGap, recordingSince, now, hasUnit: Boolean(yLabel), margins});
     const svg = svgNode('svg', {viewBox: `0 0 ${width} ${height}`, width, height, role: 'img',
       'aria-label': `${series.map((entry, index) => `${entry.label} ${lastValues[index]}`).join(', ')}${yLabel ? `, ${yLabel}` : ''}`});
     drawGrid(svg, layout);
@@ -232,6 +263,13 @@ export function lineChart({series, from, to, now = to, yMin, yMax, yFormat = Str
     holder.append(svg);
     return {layout, svg};
   };
-  responsive(holder, width => { paint(width); });
+  // Draw with estimated margins, measure the labels as rendered, and lay out once more if the margins differ.
+  responsive(holder, width => {
+    const first = paint(width);
+    const measured = measureLabels(first.svg);
+    if (!measured) return;
+    const margins = labelMargins(first.layout.yTicks.map(tick => tick.label), first.layout.series.map(entry => entry.endText), measured);
+    if (margins.left !== first.layout.margins.left || margins.right !== first.layout.margins.right) paint(width, margins);
+  });
   return wrap;
 }

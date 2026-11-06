@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {lineChartLayout, recordingStart, tooltipRows, valuesAt} from '../static/line_chart.mjs';
+import {estimateTextWidth, labelMargins, lineChartLayout, recordingStart, tooltipRows, valuesAt} from '../static/line_chart.mjs';
 import {labelAnchor, niceTicks, spreadLabels, timeTicks} from '../static/chart_scale.mjs';
 import {gaugeGeometry, linePoints, nearestByX, pathData, rangeWindow, scheduleLayout, spanText, stateBands, stateGap, timeToX, xToTime} from '../static/charts.mjs';
 
@@ -233,4 +233,17 @@ test('tooltipRows with aligned series shows every value at the rounded hover tim
   assert.equal(tip.ts, 300);
   assert.deepEqual(tip.rows.map(row => [row.point.value, row.sampleTs]), [[20, null], [2, null]]);
   assert.equal(tooltipRows(layout, layout.plot.width * 0.9), null, 'past the last sample plus half a spacing there is nothing to show');
+});
+
+test('labelMargins never drop below the conservative estimate and use real measurements when given', () => {
+  const estimated = labelMargins(['0%', '100%'], ['82%']);
+  assert.ok(estimated.left >= estimateTextWidth('100%') + 8, 'left holds the widest y label');
+  assert.ok(estimated.right >= estimateTextWidth('82%') + 10, 'right holds the end label and its gap');
+  assert.ok(estimateTextWidth('100%') >= Math.ceil(4 * 0.65 * 12));
+  const measured = labelMargins(['0%', '100%'], ['82%'], {y: 30, end: 20});
+  assert.equal(measured.left, 30 + 8 + 4);
+  assert.deepEqual(labelMargins(['100%'], ['1%'], {y: 0, end: NaN}), labelMargins(['100%'], ['1%']));
+  const layout = lineChartLayout({...LINE, yFormat: value => `${value}%`, series: [{key: 'a', label: 'A', points: points([0, 100], [1000, 82])}]});
+  assert.equal(layout.plot.left, estimated.left);
+  assert.ok(layout.plot.left + layout.plot.width + estimated.right <= LINE.width);
 });
