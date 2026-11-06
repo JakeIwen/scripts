@@ -63,7 +63,8 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
     third_party = policy.is_unopted_third_party(candidate.source, path, home, config)
     if third_party:
         entry_policy = replace(entry_policy, enabled=False)
-    inspection = eligibility.inspect(path, home)
+    inspection = (eligibility.Inspection(path, None, candidate.reason) if candidate.reason is not None
+                  else eligibility.inspect(path, home))
     last_rotated = rotated.get(path) if isinstance(rotated.get(path), (int, float)) else None
     if inspection.refusal is not None:
         return LogEntry(path, candidate.source, 0, 0, 0, None, None, entry_policy, last_rotated,

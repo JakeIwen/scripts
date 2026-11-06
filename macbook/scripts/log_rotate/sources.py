@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import os
 import plistlib
 from pathlib import Path
-from typing import Iterator, List
+from typing import Iterator, List, Optional
 
 import crontab_sync
 
@@ -27,6 +27,7 @@ PLIST_LOG_KEYS = ("StandardOutPath", "StandardErrorPath")
 class Candidate:
     path: str
     source: str
+    reason: Optional[LogReason] = None
 
 
 def launchagent_candidates(home: str) -> List[Candidate]:
@@ -69,10 +70,11 @@ def crontab_candidates(home: str) -> List[Candidate]:
     return found
 
 
-def _walk(directory: str, depth: int, home: str) -> Iterator[str]:
+def _walk(directory: str, depth: int, home: str) -> Iterator[Candidate]:
     try:
         entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
     except OSError:
+        yield Candidate(directory, SOURCE_SCAN, LogReason.UNREADABLE_DIRECTORY)
         return
     for entry in entries:
         try:
@@ -83,24 +85,28 @@ def _walk(directory: str, depth: int, home: str) -> Iterator[str]:
                         and eligibility.location_refusal(entry.path, home) is None):
                     yield from _walk(entry.path, depth + 1, home)
             elif entry.name.endswith(SCAN_EXTENSIONS) and entry.is_file(follow_symlinks=False):
-                yield entry.path
+                yield Candidate(entry.path, SOURCE_SCAN)
         except OSError:
             # Listing can succeed without search permission; inventory must show the refusal.
             if entry.name.endswith(SCAN_EXTENSIONS):
-                yield entry.path
+                yield Candidate(entry.path, SOURCE_SCAN)
 
 
 def scan_candidates(home: str) -> List[Candidate]:
     found = []  # type: List[Candidate]
     for relative in SCAN_ROOTS:
         root = os.path.join(home, relative)
-        if eligibility.directory_problem(root, home) is not None:
+        problem = eligibility.directory_problem(root, home)
+        if problem is not None:
+            if os.path.isabs(problem):
+                found.append(Candidate(root, SOURCE_SCAN, LogReason.UNREADABLE_DIRECTORY))
             continue
-        for path in _walk(root, 0, home):
-            inspection = eligibility.inspect(path, home)
-            if (inspection.refusal in (None, eligibility.HARD_LINK_NOTE)
+        for candidate in _walk(root, 0, home):
+            inspection = eligibility.inspect(candidate.path, home)
+            if (candidate.reason == LogReason.UNREADABLE_DIRECTORY
+                    or inspection.refusal in (None, eligibility.HARD_LINK_NOTE)
                     or inspection.reason == LogReason.UNREADABLE_DIRECTORY):
-                found.append(Candidate(path, SOURCE_SCAN))
+                found.append(candidate)
     return found
 
 
