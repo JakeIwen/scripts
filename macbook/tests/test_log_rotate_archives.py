@@ -4,6 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 import types
+import time
 from unittest import mock
 
 from log_rotate import archives, copytruncate, eligibility, rotate, state
@@ -722,3 +723,40 @@ class PendingRecoveryFixTests(LogRotateCase):
         self.assertEqual(value['errors'], [{'path': path, 'error': 'fixture unexpected failure'}])
         self.assertEqual([item['path'] for item in value['rotated']], [healthy])
         self.assertEqual(self.run_cli('status', '--json')[1]['level'], 'warn')
+
+
+class ScanAndTemporaryFixTests(LogRotateCase):
+    def test_idle_run_cleans_only_old_owned_unlinked_rotator_temporaries(self):
+        path = self.write('.local/state/app/job.log', b'below threshold')
+        directory = Path(path).parent
+        old = directory / '.job.log.rotating.abcdefgh'
+        fresh = directory / '.job.log.rotating.12345678'
+        wrong = directory / '.other.log.rotating.abcdefgh'
+        malformed = directory / '.job.log.rotating.not-ours'
+        linked = directory / '.job.log.rotating.abcdefg1'
+        symlink = directory / '.job.log.rotating.abcdefg2'
+        recorded = directory / 'job.log.1'
+        folder = directory / '.job.log.rotating.abcdefg4'
+        for item in (old, fresh, wrong, malformed, linked, recorded):
+            item.write_bytes(b'temporary fixture')
+            os.utime(item, (time.time() - 7200,) * 2)
+        os.utime(fresh, None)
+        os.link(linked, directory / 'saved-link')
+        symlink.symlink_to(old)
+        folder.mkdir()
+        os.utime(folder, (time.time() - 7200,) * 2)
+        state.write_json(self.home, state.ARCHIVES_FILE, {str(recorded): archives.identity(str(recorded))})
+        self.assertEqual(self.run_cli('rotate', '--json')[0], 0)
+        self.assertFalse(old.exists())
+        for item in (fresh, wrong, malformed, linked, recorded, folder):
+            self.assertTrue(item.exists(), item.name)
+        self.assertTrue(symlink.is_symlink())
+
+    def test_old_temporary_owned_by_another_user_is_preserved(self):
+        path = self.write('.local/state/app/job.log', b'below threshold')
+        temporary = Path(path).parent / '.job.log.rotating.abcdefgh'
+        temporary.write_bytes(b'temporary fixture')
+        os.utime(temporary, (time.time() - 7200,) * 2)
+        with mock.patch.object(eligibility, 'current_uid', return_value=os.getuid() + 1):
+            self.assertEqual(self.run_cli('rotate', '--json')[0], 0)
+        self.assertTrue(temporary.exists())

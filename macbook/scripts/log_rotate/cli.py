@@ -115,8 +115,9 @@ def _run_edit(args: argparse.Namespace, home: str) -> Dict[str, Any]:
 def _run_rotate(args: argparse.Namespace, home: str) -> Dict[str, Any]:
     only = _usable_path(args.only, home) if args.only else None
     with state.run_lock(home):
-        archives.prune(home)
+        ledger = archives.prune(home)
         snapshot = inventory.take_snapshot(home)
+        archives.cleanup_temporaries([entry.path for entry in snapshot.entries], home, ledger)
         return rotate.run_rotation(snapshot, home, only=only, force=args.force)
 
 

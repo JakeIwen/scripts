@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import os
 import re
 import stat
+import time
 from typing import Dict, List
 
 from . import eligibility, state
@@ -159,6 +160,40 @@ def prune(home: str) -> dict:
     if retained != ledger:
         state.write_json(home, state.ARCHIVES_FILE, retained)
     return retained
+
+
+def cleanup_temporaries(paths: list, home: str, ledger: dict) -> None:
+    """Reclaim abandoned unpublished copies, never an archive inode or an unsafe path."""
+    recorded = {(item.get("st_dev"), item.get("st_ino"))
+                for item in ledger.values() if isinstance(item, dict)}
+    for archive in ledger:
+        try:
+            info = os.lstat(archive)
+            recorded.add((info.st_dev, info.st_ino))
+        except OSError:
+            pass
+    cutoff = time.time() - 3600
+    for path in paths:
+        directory, base = os.path.split(path)
+        if (eligibility.location_refusal(path, home) is not None
+                or eligibility.directory_problem(directory, home) is not None):
+            continue
+        pattern = re.compile(re.escape(".{}.rotating.".format(base)) + r"[a-z0-9_]{8}\Z")
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            if pattern.fullmatch(entry.name) is None:
+                continue
+            try:
+                info = entry.stat(follow_symlinks=False)
+                if (stat.S_ISREG(info.st_mode) and info.st_uid == eligibility.current_uid()
+                        and info.st_nlink == 1 and info.st_mtime < cutoff
+                        and (info.st_dev, info.st_ino) not in recorded):
+                    os.unlink(entry.path)
+            except OSError:
+                continue
 
 
 def adopt(path: str, home: str) -> None:
