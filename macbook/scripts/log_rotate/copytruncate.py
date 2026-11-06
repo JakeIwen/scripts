@@ -37,6 +37,9 @@ def _open_checked(path: str, home: str) -> Tuple[int, os.stat_result]:
     except OSError as error:
         raise _fail("cannot open for rotation: {}".format(error.strerror or error)) from None
     info = os.fstat(descriptor)
+    if info.st_nlink > 1:
+        os.close(descriptor)
+        raise _fail("refused: " + eligibility.HARD_LINK_NOTE)
     # The path could have been swapped for another file between the check and the open.
     if (not stat.S_ISREG(info.st_mode) or info.st_uid != eligibility.current_uid()
             or (info.st_dev, info.st_ino) != (inspection.info.st_dev, inspection.info.st_ino)):

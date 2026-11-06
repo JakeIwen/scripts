@@ -95,7 +95,7 @@ def scan_candidates(home: str) -> List[Candidate]:
         if eligibility.directory_problem(root, home) is not None:
             continue
         for path in _walk(root, 0, home):
-            if eligibility.inspect(path, home).refusal is None:
+            if eligibility.inspect(path, home).refusal in (None, eligibility.HARD_LINK_NOTE):
                 found.append(Candidate(path, SOURCE_SCAN))
     return found
 

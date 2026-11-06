@@ -210,6 +210,26 @@ class RefusalTests(LogRotateCase):
         self.assertEqual(self.refused(self.path("link.log"))["note"], "symlink")
         self.assertIn("symlink", self.refused(self.path("linkdir/target.log"))["note"])
 
+    def test_hard_links_to_protected_logs_are_refused(self):
+        protected = self.write('.claude/session.log', payload('protected'))
+        os.makedirs(self.path('.local/state/app'))
+        linked = self.path('.local/state/app/session.log')
+        os.link(protected, linked)
+        self.assertEqual(self.refused(linked)['note'], 'hard-linked file')
+        result = self.run_cli('rotate', '--json')[1]
+        self.assertEqual(result['rotated'], [])
+        self.assertEqual(os.path.getsize(protected), OVER_ONE_MB)
+
+    def test_hard_link_added_during_open_is_refused(self):
+        path = self.write('.local/state/app/race.log', payload('race'))
+        checked = eligibility.inspect(path, self.home)
+        os.link(path, self.path('alias.log'))
+        with mock.patch.object(eligibility, 'inspect', return_value=checked):
+            with self.assertRaises(copytruncate.LogRotateError) as caught:
+                copytruncate.rotate_file(path, self.home, 5, True)
+        self.assertIn('hard-linked file', str(caught.exception))
+        self.assertEqual(os.path.getsize(path), OVER_ONE_MB)
+
     def test_files_owned_by_someone_else_are_refused(self):
         other = self.write("job.log", "x")
         self.list_via_crontab(other)

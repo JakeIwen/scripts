@@ -8,6 +8,7 @@ import stat
 from typing import Optional
 
 # Credentials and synced state live here; never listed, never opened.
+HARD_LINK_NOTE = "hard-linked file"
 EXCLUDED_HOME_DIRS = (".claude", ".codex", "Library/Mobile Documents")
 
 
@@ -85,6 +86,8 @@ def inspect(path: str, home: str) -> Inspection:
         return Inspection("symlink", None)
     if not stat.S_ISREG(info.st_mode):
         return Inspection("not a regular file", None)
+    if info.st_nlink > 1:
+        return Inspection(HARD_LINK_NOTE, None)
     if info.st_uid != current_uid():
         return Inspection("not owned by you", None)
     return Inspection(None, info)

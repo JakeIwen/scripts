@@ -309,7 +309,7 @@ Logs come from, in order (first source wins per path): LaunchAgent plists in
 targets in `macbook/crontab`, a scan of `~/.local/state`, `~/dev/scripts/tmp`
 and `~/Library/Logs` (`.log`, `.out`, `.err`, four directories deep), and extra
 paths added by hand. It only touches regular files owned by you inside `$HOME`,
-never through a symlink and never under `~/.claude`, `~/.codex` or
+never through a symlink or hard link and never under `~/.claude`, `~/.codex` or
 `~/Library/Mobile Documents`; a listed path that breaks those rules shows as
 `refused` and is never opened. Log contents are never printed, only paths and
 sizes.
