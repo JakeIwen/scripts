@@ -332,6 +332,7 @@ class RotationTests(LogRotateCase):
                 self.assertEqual(self.read(target), b'foreign')
                 self.assertEqual(self.read(path), original)
 
+
     def test_replaced_recorded_archive_is_not_owned(self):
         path = self.make_log()
         self.rotate()
@@ -692,16 +693,17 @@ class ProblemTests(LogRotateCase):
         self.assertIn(found[0]["text"], self.status_summary())
         self.assertEqual(self.inventory()["problems"], found)
 
-    def test_a_refused_entry_is_a_problem_that_names_the_way_out(self):
+    def test_a_refused_entry_stays_visible_but_is_not_a_problem(self):
         link = self.path("jobs/link.log")
         self.write("jobs/real.log")
         os.symlink(self.path("jobs/real.log"), link)
         os.makedirs(self.path("Library/LaunchAgents"))
         with open(self.path("Library/LaunchAgents/com.example.link.plist"), "wb") as output:
             plistlib.dump({"Label": "com.example.link", "StandardOutPath": link}, output)
-        found, = self.inventory()["problems"]
-        self.assertEqual((found["level"], found["path"]), ("warn", link))
-        self.assertIn("ignore", found["text"])
+        self.assertEqual(self.entry(link)["state"], "refused")
+        self.assertEqual(self.entry(link)["note"], "symlink")
+        self.assertEqual(self.inventory()["problems"], [])
+        self.assertNotIn("refused", self.status_summary())
 
     def status_summary(self):
         return self.run_cli("status", "--json")[1]["summary"]

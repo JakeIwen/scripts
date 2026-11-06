@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import tool_automation
 
 from .inventory import Snapshot
-from .records import MB, STATE_DUE, STATE_REFUSED
+from .records import MB, STATE_DUE
 
 # The agent runs hourly; three hours without a run means it is not running.
 STALE_RUN_SECONDS = 3 * 3600
@@ -32,9 +32,6 @@ def find_problems(snapshot: Snapshot, last_run: Dict[str, Any], now: float) -> L
         if entry.state == STATE_DUE and entry.bytes > OVERSIZE_FACTOR * entry.policy.max_mb * MB:
             found.append(_problem(ERROR, "{} is {} (limit {} MB): rotation is failing".format(
                 name, megabytes(entry.bytes), entry.policy.max_mb), entry.path))
-        elif entry.state == STATE_REFUSED:
-            found.append(_problem(WARN, "{} was refused: {}; ignore it to dismiss this".format(name, entry.note),
-                                  entry.path))
     totals = snapshot.totals()
     limit = snapshot.defaults["warn_total_mb"]
     if totals["bytes"] + totals["archived_bytes"] > limit * MB:

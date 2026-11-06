@@ -320,9 +320,10 @@ log; enable per file": it is listed and its bytes count in the totals, but the
 rotator leaves it alone until you opt in with a per-file `--enabled on` policy
 or add the path as an extra. A LaunchAgent or crontab log in that folder is
 yours and rotates normally. `inventory --json` also carries `problems`, the
-list of what needs attention (a log past twice its limit, a refused path, a
+list of what needs attention (a log past twice its limit, a
 total over the warning level, errors in the last run, a stale run), which
-`status` and the Mac Panel's Logs section both show as sent.
+`status` and the Mac Panel's Logs section both show as sent. Refused paths
+stay visible in the table with their reason, but do not need attention.
 
 - Defaults (rotate above 10 MB, keep 5, gzip, warn above 500 MB total) are
   declared in `shared/settings/log-rotate.json` and edited in the Mac Panel's
