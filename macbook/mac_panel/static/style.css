@@ -97,7 +97,7 @@ button.refresh-one { font-size: var(--text-small); padding: 1px 8px; }
 /* ---- controls ---- */
 button, input, select, textarea { font: inherit; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--raised); color: var(--text); padding: 4px 10px; }
 input, select, textarea { background: var(--soft); }
-button { cursor: pointer; white-space: normal; }
+button { min-width: var(--confirm-width, 0); cursor: pointer; white-space: normal; }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .55; cursor: default; }
 button.armed { border-color: var(--bad); background: var(--bad-bg); color: var(--bad); white-space: nowrap; }
@@ -125,7 +125,7 @@ input[type=datetime-local] { max-width: 100%; }
 .info-button::after { content: attr(data-tip); display: none; position: absolute; left: 0; top: calc(100% + 6px); width: max-content; max-width: 260px; padding: 6px 8px; font: normal 400 var(--text-small)/1.4 var(--font); text-align: left; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-1); box-shadow: var(--shadow); z-index: 25; white-space: normal; }
 .info-button:hover::after, .info-button:focus-visible::after { display: block; }
 .info-button[aria-expanded="true"]::after { display: none; }
-.info-pop { position: absolute; left: 0; top: calc(100% + 6px); width: 280px; max-width: 80vw; padding: var(--space-2) var(--space-3); font-size: var(--text-small); line-height: 1.45; font-weight: 400; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-1); box-shadow: var(--shadow); z-index: 25; text-transform: none; letter-spacing: 0; }
+.info-pop { position: absolute; left: var(--popover-left, 0); top: calc(100% + 6px); width: 280px; max-width: 80vw; padding: var(--space-2) var(--space-3); font-size: var(--text-small); line-height: 1.45; font-weight: 400; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-1); box-shadow: var(--shadow); z-index: 25; text-transform: none; letter-spacing: 0; }
 
 /* ---- tables, key/values, disclosures ---- */
 .table-wrap { max-width: 100%; overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-2); margin: 0 0 var(--space-3); padding: 0 var(--space-2); }

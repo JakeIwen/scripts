@@ -7,7 +7,7 @@ import tempfile
 
 from background_tasks import BackgroundTasks
 from cli_runner import checked, json_result
-from panel_contracts import ApiError, DeferredPayload, JobState, Reply
+from panel_contracts import Section, ApiError, DeferredPayload, JobState, Reply
 from panel_paths import DEFERRED, DATA
 from wire_validation import confirm, field, object_fields
 
@@ -64,7 +64,7 @@ class DeferredAdapter:
 
     def read(self) -> DeferredPayload:
         value = decode_jobs(json_result(self.runner.run((*DEFERRED, 'list', '--json'))))
-        return {**value, 'tasks': self.tasks.list()}
+        return {**value, 'tasks': self.tasks.list(Section.DEFERRED)}
 
     def mutate(self, body):
         object_fields(body, ('action',), ('id', 'due', 'confirmed', 'name', 'description',
@@ -87,7 +87,7 @@ class DeferredAdapter:
             if job is None:
                 raise ApiError(404, 'Valid job not found')
             timeout = job['timeout'] + 30
-            task = self.tasks.start(job_id, lambda: self.runner.run(argv, timeout=timeout))
+            task = self.tasks.start(Section.DEFERRED, job_id, lambda: self.runner.run(argv, timeout=timeout))
             return Reply(task, 202)
         result = self.runner.run(argv)
         if result.returncode == 75:

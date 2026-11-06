@@ -240,6 +240,7 @@ class HistorySample(HistoryPoint):
 
 class HistoryPayload(TypedDict):
     series: dict[str, list[HistoryPoint]]
+    spacing: dict[str, float]
 
 
 class UsageWindow(TypedDict):

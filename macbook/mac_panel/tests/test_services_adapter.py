@@ -100,6 +100,20 @@ class ServicesTests(unittest.TestCase):
             finally:
                 routes.close()
 
+    def test_metered_free_text_tail_is_withheld_not_guessed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agents, daemons = fixture(root)
+            log = root / 'metered.log'
+            log.write_text('Connected to Private Place without a structured field\n')
+            (agents / 'com.jacobr.metered.plist').write_bytes(plistlib.dumps({
+                'Label': 'com.jacobr.metered', 'StandardOutPath': str(log)}))
+            payload = ServicesAdapter(FakeRunner(), agents, daemons).logs('com.jacobr.metered')
+            self.assertEqual(len(payload['logs']), 1)
+            self.assertNotIn('Private Place', payload['logs'][0]['text'])
+            self.assertIn('withheld to protect network identifiers', payload['logs'][0]['text'])
+            self.assertIsInstance(payload['logs'][0]['modified'], float)
+
     def test_restart_rechecks_inventory_and_rejects_system_or_unknown(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

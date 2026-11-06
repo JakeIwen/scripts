@@ -2,7 +2,7 @@
 // polls GET /api/tasks/<id> until it finishes, then reports the outcome and refreshes the section.
 import {api} from './panel_api.mjs';
 import {details, node, notice, timeNode} from './panel_dom.mjs';
-import {refresh} from './panel_sections.mjs';
+import {refreshIfIdle} from './panel_sections.mjs';
 import {Level, status} from './status_cell.mjs';
 
 export const TaskState = Object.freeze({RUNNING: 'running', DONE: 'done', FAILED: 'failed'});
@@ -32,7 +32,7 @@ export function watchTask(section, receipt, label) {
       }
       watching.delete(receipt.id);
       notice(section, outcomeText(label, task), task.state === TaskState.FAILED ? 'error' : 'ok');
-      await refresh(section);
+      await refreshIfIdle(section);
     } catch (error) {
       watching.delete(receipt.id);
       notice(section, error.message, 'error');

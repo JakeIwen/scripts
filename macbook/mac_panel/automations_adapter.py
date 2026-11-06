@@ -1,7 +1,7 @@
 """Declaration-driven automation status and commands with no panel-owned state."""
 from background_tasks import BackgroundTasks
 from cli_runner import checked, json_result
-from panel_contracts import ApiError, AutomationRecord, AutomationsPayload, Reply
+from panel_contracts import Section, ApiError, AutomationRecord, AutomationsPayload, Reply
 from wire_validation import confirm, field, object_fields
 
 
@@ -47,7 +47,7 @@ class AutomationsAdapter:
 
     def read(self) -> AutomationsPayload:
         tools = sorted(self.automations.declaration_tools())
-        return AutomationsPayload(tasks=self.tasks.list(), automations=[self._read_one(tool) for tool in tools])
+        return AutomationsPayload(tasks=self.tasks.list(Section.AUTOMATIONS), automations=[self._read_one(tool) for tool in tools])
 
     def action(self, body):
         object_fields(body, ('tool', 'action'), ('confirmed',))
@@ -67,7 +67,7 @@ class AutomationsAdapter:
         elif 'confirmed' in body:
             field(body, 'confirmed', bool, status=400)
         if action.asynchronous:
-            task = self.tasks.start(f'automation:{tool}:{action_name}', lambda: self.runner.run(
+            task = self.tasks.start(Section.AUTOMATIONS, f'automation:{tool}:{action_name}', lambda: self.runner.run(
                 action.command.argv, timeout=action.command.timeout))
             return Reply(task, 202)
         result = checked(self.runner.run(action.command.argv, timeout=action.command.timeout))

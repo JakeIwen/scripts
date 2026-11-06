@@ -1,6 +1,13 @@
+// No style attributes or inline <style>; dynamic geometry uses CSS custom properties set from JS.
 // The lowest DOM layer: element factory, the two-click confirm and the plain button. Imports nothing.
 export const PLACEHOLDER = '—';
 const ARM_SECONDS = 8;
+const armers = new WeakMap();
+
+/** Idempotently prepare a registered confirmation without dispatching an action click. */
+export function arm(target) {
+  armers.get(target)?.();
+}
 
 export function node(tag, text, className) {
   const result = document.createElement(tag);
@@ -28,19 +35,23 @@ export function armed(target, text, label = target) {
     label.replaceChildren(...original);
     target.classList.remove('armed');
   };
+  const prepare = () => {
+    if (isArmed || target.disabled) return;
+    isArmed = true;
+    original = [...label.childNodes];
+    target.style.setProperty('--confirm-width', `${target.offsetWidth}px`);
+    label.replaceChildren(text);
+    target.classList.add('armed');
+    timer = setTimeout(disarm, ARM_SECONDS * 1000);
+  };
+  armers.set(target, prepare);
   target.addEventListener('click', event => {
     if (isArmed) {
       disarm();
       return;
     }
     event.stopImmediatePropagation();
-    isArmed = true;
-    original = [...label.childNodes];
-    // CSSOM sizing is not an inline style attribute, so the CSP's style-src stays intact.
-    target.style.minWidth = `${target.offsetWidth}px`;
-    label.replaceChildren(text);
-    target.classList.add('armed');
-    timer = setTimeout(disarm, ARM_SECONDS * 1000);
+    prepare();
   });
   target.addEventListener('keydown', event => { if (event.key === 'Escape') disarm(); });
   target.addEventListener('blur', disarm);
