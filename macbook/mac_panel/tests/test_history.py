@@ -83,9 +83,22 @@ console.log(JSON.stringify(coverage));
                           for service in range(20))
         payload = self.store.series('services', 0, duration)
         self.assertEqual(len(payload['series']), 20)
-        self.assertTrue(all(len(rows) == 5000 for rows in payload['series'].values()))
-        self.assertEqual(set(payload['spacing'].values()), {120})
+        self.assertLessEqual(sum(map(len, payload['series'].values())), 5000)
         self.assertTrue(all(value > .95 for value in self.chart_coverage(payload, duration).values()))
+
+    def test_short_service_outage_survives_shared_budget(self):
+        duration, start = 7 * 86400, 3 * 86400
+        rows = (dict(sample(ts, str(service)), level='warn' if service == 0
+                     and start <= ts < start + 1200 else 'ok')
+                for ts in range(0, duration + 1, 60) for service in range(20))
+        self.store.record(rows)
+        payload = self.store.series('services', 0, duration)
+        outage = [row for row in payload['series']['0'] if row['level'] == 'warn']
+        self.assertTrue(outage)
+        self.assertEqual(outage[0]['ts'], start)
+        self.assertTrue(any(row['ts'] == start + 1200 and row['level'] == 'ok'
+                            for row in payload['series']['0']))
+        self.assertLessEqual(sum(map(len, payload['series'].values())), 5000)
 
     def test_thinning_still_draws_a_real_panel_outage_as_a_gap(self):
         duration, gap_start, gap_end = 7 * 86400, 3 * 86400, 4 * 86400

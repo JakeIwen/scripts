@@ -56,19 +56,53 @@ class HistoryStore:
         with self.connection() as connection:
             # COUNT and iteration share a snapshot even while the sampler commits.
             connection.execute('BEGIN')
-            counts = dict(connection.execute('SELECT key, count(*) FROM samples WHERE '
-                                             + clause + ' GROUP BY key', args))
-            selected = {name: ({round(i * (count - 1) / (limit - 1)) for i in range(limit)}
-                               if limit > 1 else {count - 1})
-                        for name, count in counts.items() if count > limit}
+            counts = {name: (count, first, last) for name, count, first, last in
+                      connection.execute('SELECT key, count(*), min(ts), max(ts) FROM samples WHERE '
+                                         + clause + ' GROUP BY key', args)}
+            # Every series keeps both endpoints, even if that exceeds the total budget.
+            budget = min(limit, max(2, MAX_SAMPLES // max(1, len(counts))))
+            selected = {name for name, (count, _, _) in counts.items() if count > budget}
+            slots, changes, previous, indexes = defaultdict(dict), defaultdict(list), {}, defaultdict(int)
             rows = connection.execute('SELECT key, ts, level, value, text FROM samples WHERE '
                                       + clause + ' ORDER BY key, ts, rowid', args)
-            indexes = defaultdict(int)
             for name, ts, level, value, text in rows:
                 index = indexes[name]
                 indexes[name] += 1
-                if name not in selected or index in selected[name]:
-                    result[name].append(dict(ts=ts, level=level, value=value, text=text))
+                point = dict(ts=ts, level=level, value=value, text=text)
+                if name not in selected:
+                    result[name].append(point)
+                    continue
+                count, first, last = counts[name]
+                if name in previous and previous[name] != level:
+                    changes[name].append((index, point))
+                previous[name] = level
+                if budget == 1:
+                    slot = 0
+                    distance = count - 1 - index
+                else:
+                    fraction = (ts - first) / (last - first) if last > first else index / (count - 1)
+                    slot = round(fraction * (budget - 1))
+                    distance = abs(fraction * (budget - 1) - slot)
+                    if index == 0 or index == count - 1:
+                        distance = -1
+                if slot not in slots[name] or distance < slots[name][slot][0]:
+                    slots[name][slot] = (distance, index, point)
+        for name in selected:
+            chosen = {index: point for _, index, point in slots[name].values()}
+            protected = {0, counts[name][0] - 1}
+            if budget > 2:
+                for index, point in changes[name]:
+                    if index in chosen:
+                        protected.add(index)
+                        continue
+                    candidates = chosen.keys() - protected
+                    if not candidates:
+                        break
+                    replace = min(candidates, key=lambda item: abs(chosen[item]['ts'] - point['ts']))
+                    del chosen[replace]
+                    chosen[index] = point
+                    protected.add(index)
+            result[name] = [chosen[index] for index in sorted(chosen)]
         # Report spacing only for thinned series: sparse raw samples must not turn an outage into cadence.
         spacing = {name: median(deltas) if deltas else 0 for name, points in result.items()
                    for deltas in [[b['ts'] - a['ts'] for a, b in zip(points, points[1:])
