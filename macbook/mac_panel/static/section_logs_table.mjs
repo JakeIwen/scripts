@@ -1,5 +1,5 @@
 // Logs table rows: the per-file policy editor, rotate and ignore controls, and the ignored list.
-import {anchor, button, confirmText, details, fieldError, info, node, settingRow, tag} from './panel_dom.mjs';
+import {anchor, button, confirmText, details, fieldError, info, node, notice, settingRow, tag} from './panel_dom.mjs';
 import {action, refresh} from './panel_sections.mjs';
 import {stageAction} from './search_actions.mjs';
 import {LOGS_COPY as COPY} from './section_copy.mjs';
@@ -11,11 +11,15 @@ const ENDPOINT = '/api/logs';
 const STATE_LEVEL = {ok: Level.OK, due: Level.WARN, disabled: Level.IDLE, missing: Level.IDLE, refused: Level.WARN};
 const NOT_ROTATABLE = new Set(['missing', 'refused']);
 
+// A rotation that had per-log errors still succeeded for the rest: keep the failures on screen.
+const rotate = body => action(SECTION, ENDPOINT, {action: 'rotate', confirmed: true, ...body},
+  {after: result => { if (result.errors.length) notice(SECTION, result.message, 'error'); }});
+
 export const logAnchor = path => `log-${path}`;
 
 export function pathCell(entry) {
   const cell = anchor(node('span'), logAnchor(entry.path));
-  const name = node('code', basename(entry.path), 'copyable');
+  const name = node('code', basename(entry.path), 'copyable log-name');
   name.title = entry.path;
   cell.append(name);
   if (entry.note) cell.append(' ', info(entry.note));
@@ -31,16 +35,16 @@ export function stateCell(entry) {
 }
 
 export function sizeCell(entry) {
-  const cell = node('span', formatBytes(entry.bytes));
+  const cell = node('span', formatBytes(entry.bytes), 'nowrap');
   cell.title = `${entry.bytes} bytes`;
   return cell;
 }
 
 export function archivesCell(entry) {
-  return node('span', entry.archives ? `${entry.archives} · ${formatBytes(entry.archived_bytes)}` : 'none', entry.archives ? '' : 'muted');
+  return node('span', entry.archives ? `${entry.archives} · ${formatBytes(entry.archived_bytes)}` : 'none', entry.archives ? 'nowrap' : 'muted nowrap');
 }
 
-export const growthCell = entry => node('span', formatGrowth(entry.growth_mb_per_day));
+export const growthCell = entry => node('span', formatGrowth(entry.growth_mb_per_day), 'nowrap');
 
 // ---- policy editor ----
 
@@ -50,7 +54,7 @@ function editorControls(entry) {
   const max = node('input');
   max.type = 'number';
   max.min = '1';
-  max.step = 'any';
+  max.step = '1';
   max.value = String(policy.max_mb);
   max.defaultValue = max.value;
   const keep = node('input');
@@ -73,7 +77,7 @@ function editorControls(entry) {
 }
 
 function policyForm(entry, data) {
-  const form = node('form', null, 'add-job');
+  const form = node('form', null, 'add-job log-policy');
   const inputs = editorControls(entry);
   const rows = {
     max_mb: settingRow({label: 'Rotate above', control: inputs.max, unit: 'MB'}),
@@ -120,7 +124,7 @@ function policyForm(entry, data) {
 
 function policyCell(entry, data) {
   const cell = node('div');
-  const summary = node('span');
+  const summary = node('span', null, 'nowrap');
   summary.append(policyText(entry.policy), entry.policy.override ? ' ' : '', entry.policy.override ? tag('custom') : '');
   const form = policyForm(entry, data);
   const editor = details('Edit policy', form, `policy-${entry.path}`);
@@ -134,7 +138,7 @@ function policyCell(entry, data) {
 
 export function rotateAllDue(data) {
   const due = data.logs.filter(entry => entry.state === 'due').length;
-  return button(`Rotate all due (${due})`, () => action(SECTION, ENDPOINT, {action: 'rotate', confirmed: true}),
+  return button(`Rotate all due (${due})`, () => rotate({}),
     {confirm: confirmText(`rotate ${due} due log${due === 1 ? '' : 's'}`), key: 'rotate-all', disabled: due === 0,
       title: due === 0 ? 'No log is past its limit' : COPY.rotateAllInfo});
 }
@@ -142,7 +146,7 @@ export function rotateAllDue(data) {
 function rowActions(entry, data) {
   const cell = node('div', null, 'actions');
   const blocked = NOT_ROTATABLE.has(entry.state) ? COPY.stateHelp[entry.state] : null;
-  cell.append(button('Rotate now', () => action(SECTION, ENDPOINT, {action: 'rotate', path: entry.path, force: true, confirmed: true}),
+  cell.append(button('Rotate now', () => rotate({path: entry.path, force: true}),
     {confirm: confirmText(`rotate ${basename(entry.path)}`), key: `rotate-${entry.path}`, disabled: Boolean(blocked), title: blocked ?? COPY.rotateRowInfo}),
   button('Ignore', () => action(SECTION, ENDPOINT, {action: 'ignore', path: entry.path, revision: data.revision}),
     {key: `ignore-${entry.path}`, title: COPY.ignoreInfo}));
@@ -150,7 +154,7 @@ function rowActions(entry, data) {
 }
 
 export function logRow(entry, data) {
-  return [pathCell(entry), entry.source, sizeCell(entry), archivesCell(entry), growthCell(entry),
+  return [pathCell(entry), node('span', entry.source, 'log-source'), sizeCell(entry), archivesCell(entry), growthCell(entry),
     policyCell(entry, data), stateCell(entry), rowActions(entry, data)];
 }
 

@@ -1,12 +1,12 @@
 """Log inventory and rotation relayed to macbook/scripts/log_rotate.py; sizes and paths only, never contents."""
-import math
+import json
 from pathlib import Path
 
 from cli_runner import checked, json_result
 from crontab_adapter import cli_error
 from log_redaction import redact
 from panel_contracts import ApiError, Level, LogsPayload, Reply
-from panel_paths import LOG_ROTATE, LOG_ROTATE_LABEL
+from panel_paths import LOG_ROTATE, LOG_ROTATE_ENV, LOG_ROTATE_LABEL
 from wire_validation import confirm, field, object_fields
 
 ACTIONS = frozenset(('rotate', 'policy', 'add', 'ignore', 'unignore'))
@@ -14,22 +14,16 @@ PATH_ACTIONS = ('policy', 'add', 'ignore', 'unignore')
 # Exit codes of the rotator CLI beyond 0 (ok) and 1 (error).
 EXIT_CONFLICT, EXIT_BUSY = 3, 75
 READ_TIMEOUT, ROTATE_TIMEOUT = 60, 600
-BYTES_PER_MB = 1024 * 1024
-# A file this many times past its limit means rotation is failing, not merely due.
-OVERSHOOT = 2
 MAX_PATH = 4096
 MAX_REVISION = 128
 STATES = frozenset(('ok', 'due', 'disabled', 'missing', 'refused'))
+PROBLEM_LEVELS = frozenset((Level.WARN.value, Level.ERROR.value))
 POLICY_FLAGS = (('compress', '--compress'), ('enabled', '--enabled'))
 
 
 def valid_path(value):
     return (isinstance(value, str) and 0 < len(value) <= MAX_PATH and Path(value).is_absolute()
             and not any(ord(char) < 32 for char in value))
-
-
-def number(value):
-    return type(value) in (int, float) and math.isfinite(value)
 
 
 def validate_policy(policy):
@@ -57,8 +51,17 @@ def validate_entry(entry):
     validate_policy(field(entry, 'policy', dict))
 
 
+def validate_problem(problem):
+    object_fields(problem, ('level', 'text'), status=502)
+    if field(problem, 'level', str) not in PROBLEM_LEVELS:
+        raise ApiError(502, 'Invalid problem level')
+    field(problem, 'text', str)
+    if field(problem, 'path', str, nullable=True) is not None and not valid_path(problem['path']):
+        raise ApiError(502, 'Invalid problem path')
+
+
 def validate_inventory(value):
-    object_fields(value, ('revision', 'defaults', 'totals', 'logs', 'ignored'), status=502)
+    object_fields(value, ('revision', 'defaults', 'totals', 'logs', 'ignored', 'problems'), status=502)
     if not 0 < len(field(value, 'revision', str)) <= MAX_REVISION:
         raise ApiError(502, 'Invalid log revision')
     object_fields(field(value, 'defaults', dict), ('max_mb', 'keep', 'compress', 'warn_total_mb'), status=502)
@@ -67,6 +70,8 @@ def validate_inventory(value):
         field(totals, key, int)
     for entry in field(value, 'logs', list):
         validate_entry(entry)
+    for problem in field(value, 'problems', list):
+        validate_problem(problem)
     return value
 
 
@@ -78,28 +83,40 @@ def ignored_paths(items):
     return paths
 
 
-def overshoots(entry):
-    policy = entry['policy']
-    return policy['enabled'] and entry['bytes'] > OVERSHOOT * policy['max_mb'] * BYTES_PER_MB
-
-
-def warnings(payload):
-    """Why the section needs attention; the same rules the page's attention list applies."""
-    found = []
-    service = payload['service']
-    if service.get('loaded') is False or service.get('installed') is False:
-        found.append('rotator agent is not running')
-    found += [f"{Path(entry['path']).name} is past {OVERSHOOT}x its limit" for entry in payload['logs'] if overshoots(entry)]
-    found += [f"{Path(entry['path']).name} refused" for entry in payload['logs'] if entry['state'] == 'refused']
-    if payload['totals']['bytes'] + payload['totals']['archived_bytes'] > payload['defaults']['warn_total_mb'] * BYTES_PER_MB:
-        found.append('total log size is over its warning level')
-    return found
+def agent_problems(service):
+    """The one fact the rotator cannot report about itself: whether launchd is running it."""
+    if service.get('installed') is False:
+        return [{'level': Level.WARN.value, 'text': 'rotator agent is not installed'}]
+    if service.get('loaded') is False:
+        return [{'level': Level.WARN.value, 'text': 'rotator agent is not running'}]
+    return []
 
 
 def log_samples(payload):
-    totals = payload['totals']
-    text = f"{totals['bytes'] / BYTES_PER_MB:.1f} MB live, {totals['archived_bytes'] / BYTES_PER_MB:.1f} MB archived"
-    return [('total', Level.WARN if warnings(payload) else Level.OK, totals['bytes'], text)]
+    """Total live bytes as the value; the text is the worst problem, else the file count."""
+    problems = payload['problems']
+    worst = next((item for item in problems if item['level'] == Level.ERROR.value), problems[0] if problems else None)
+    level = Level.ERROR if worst and worst['level'] == Level.ERROR.value else Level.WARN if worst else Level.OK
+    return [('total', level, payload['totals']['bytes'], worst['text'] if worst else f"{payload['totals']['files']} logs")]
+
+
+def rotate_result(result):
+    """The rotator exits 1 when any log failed yet still prints the full result: that is a result, not a failure."""
+    if result.returncode != 1:
+        return None
+    try:
+        value = json.loads(result.stdout)
+    except ValueError:
+        return None
+    keys = ('rotated', 'skipped', 'errors')
+    return value if isinstance(value, dict) and all(isinstance(value.get(key), list) for key in keys) else None
+
+
+def error_text(item):
+    """One rotation error as `name: reason`; the rotator sends {path, error}."""
+    if isinstance(item, dict):
+        return redact(f"{Path(str(item.get('path', ''))).name}: {item.get('error', '')}".strip(': '))
+    return redact(str(item))
 
 
 def failure(result):
@@ -117,6 +134,9 @@ class LogsAdapter:
         self.runner = runner
         self.services = services
 
+    def run(self, argv, timeout):
+        return self.runner.run(tuple(argv), timeout=timeout, env=LOG_ROTATE_ENV)
+
     def service_state(self):
         try:
             return self.services.agent_state(LOG_ROTATE_LABEL)
@@ -124,10 +144,12 @@ class LogsAdapter:
             return {'label': LOG_ROTATE_LABEL, 'installed': None, 'loaded': None, 'pid': None, 'last_exit': None}
 
     def read(self) -> LogsPayload:
-        value = validate_inventory(json_result(self.runner.run((*LOG_ROTATE, 'inventory', '--json'), timeout=READ_TIMEOUT)))
+        value = validate_inventory(json_result(self.run((*LOG_ROTATE, 'inventory', '--json'), READ_TIMEOUT)))
+        service = self.service_state()
         return LogsPayload(generated_at=value.get('generated_at'), revision=value['revision'],
                            defaults=value['defaults'], totals=value['totals'], logs=value['logs'],
-                           ignored=ignored_paths(field(value, 'ignored', list)), service=self.service_state())
+                           ignored=ignored_paths(field(value, 'ignored', list)), service=service,
+                           problems=[*agent_problems(service), *value['problems']])
 
     def mutate(self, body):
         action = field(body, 'action', str, status=400) if isinstance(body, dict) else None
@@ -148,14 +170,16 @@ class LogsAdapter:
         if 'force' in body:
             if field(body, 'force', bool, status=400):
                 argv.append('--force')
-        result = self.runner.run(tuple(argv), timeout=ROTATE_TIMEOUT)
-        failure(result)
-        value = json_result(checked(result))
+        result = self.run(argv, ROTATE_TIMEOUT)
+        value = rotate_result(result)
+        if value is None:
+            failure(result)
+            value = json_result(checked(result))
         object_fields(value, ('rotated', 'skipped', 'errors'), status=502)
         rotated, skipped, errors = (field(value, key, list) for key in ('rotated', 'skipped', 'errors'))
         message = f'Rotated {len(rotated)}, skipped {len(skipped)}'
         if errors:
-            message += f'; {len(errors)} failed: {redact(str(errors[0]))}'
+            message += f'; {len(errors)} failed: {error_text(errors[0])}'
         return Reply({'message': message, 'rotated': rotated, 'skipped': skipped, 'errors': errors})
 
     def policy_flags(self, body):
@@ -163,8 +187,8 @@ class LogsAdapter:
         if body.get('clear') is not None and field(body, 'clear', bool, status=400):
             flags.append('--clear')
         if 'max_mb' in body:
-            if not number(body['max_mb']) or body['max_mb'] <= 0:
-                raise ApiError(400, 'max_mb must be a positive number')
+            if type(body['max_mb']) is not int or body['max_mb'] < 1:
+                raise ApiError(400, 'max_mb must be a whole number of at least 1')
             flags += ['--max-mb', str(body['max_mb'])]
         if 'keep' in body:
             if type(body['keep']) is not int or body['keep'] < 0:
@@ -188,11 +212,12 @@ class LogsAdapter:
         if not valid_path(body['path']):
             raise ApiError(400, 'Invalid log path')
         flags = self.policy_flags(body) if action == 'policy' else []
-        result = self.runner.run((*LOG_ROTATE, action, '--json', '--revision', revision, *flags, body['path']),
-                                 timeout=READ_TIMEOUT)
+        result = self.run((*LOG_ROTATE, action, '--json', '--revision', revision, *flags, body['path']), READ_TIMEOUT)
         failure(result)
         value = json_result(checked(result))
-        new_revision = field(value, 'revision', str) if isinstance(value, dict) else None
-        if not new_revision:
-            raise ApiError(502, 'Invalid log revision')
-        return Reply({'message': f'{action.capitalize()} saved', 'revision': new_revision})
+        # The edit answers with the whole inventory plus the touched entry; decode it all so a bad reply fails here.
+        object_fields(validate_inventory(value), ('log',), status=502)
+        entry = field(value, 'log', dict, nullable=True)
+        if entry is not None:
+            validate_entry(entry)
+        return Reply({'message': f'{action.capitalize()} saved', 'revision': value['revision'], 'log': entry})

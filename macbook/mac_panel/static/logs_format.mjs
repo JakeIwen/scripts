@@ -1,9 +1,8 @@
 // Pure helpers for the Logs section (sizes, growth, limits, policy form checks); no DOM, so Node can test them.
+// One megabyte is 1048576 bytes, as in the rotator (log_rotate/records.py MB).
 export const BYTES_PER_MB = 1024 * 1024;
 const BYTES_PER_KB = 1024;
 const BYTES_PER_GB = 1024 * BYTES_PER_MB;
-// A file this many times past its limit means rotation is failing, not merely due (mirrors logs_adapter.OVERSHOOT).
-export const OVERSHOOT = 2;
 const MAX_MB_LIMIT = 500;
 const KEEP_LIMIT = 30;
 const ABSOLUTE_PATH = /^\/[^\u0000-\u001f]*$/;
@@ -33,38 +32,17 @@ export function policyText(policy) {
   return `${policy.max_mb} MB · keep ${policy.keep} · ${policy.compress ? 'gz' : 'plain'}`;
 }
 
-export const overshoots = entry => entry.policy.enabled && entry.bytes > OVERSHOOT * entry.policy.max_mb * BYTES_PER_MB;
 export const isDue = entry => entry.state === 'due';
 export const basename = path => path.slice(path.lastIndexOf('/') + 1) || path;
 
 /** Largest live file first; ties by path so the order is stable across polls. */
 export const bySize = logs => [...logs].sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path));
 
-/** Problems the section lists on Overview, each {level, text, key?} where key is a log path to jump to. */
-export function problems(data) {
-  const found = [];
-  const service = data.service ?? {};
-  if (service.installed === false) found.push({level: 'warn', text: 'rotator agent is not installed'});
-  else if (service.loaded === false) found.push({level: 'warn', text: 'rotator agent is not running'});
-  data.logs.forEach(entry => {
-    if (overshoots(entry)) {
-      found.push({level: 'error', key: entry.path,
-        text: `${basename(entry.path)} is ${formatBytes(entry.bytes)}, past ${OVERSHOOT}x its ${entry.policy.max_mb} MB limit; rotation is failing`});
-    }
-    if (entry.state === 'refused') found.push({level: 'warn', key: entry.path, text: `${basename(entry.path)} was refused${entry.note ? `: ${entry.note}` : ''}`});
-  });
-  const total = data.totals.bytes + data.totals.archived_bytes;
-  if (total > data.defaults.warn_total_mb * BYTES_PER_MB) {
-    found.push({level: 'warn', text: `logs total ${formatBytes(total)}, over the ${data.defaults.warn_total_mb} MB warning level`});
-  }
-  return found;
-}
-
 /** values: the editor's strings ('' for empty). Returns {field: message}; empty when the form can be sent. */
 export function validatePolicy(values) {
   const result = {};
   const mb = Number(values.max_mb);
-  if (values.max_mb === '' || !Number.isFinite(mb) || mb < 1 || mb > MAX_MB_LIMIT) result.max_mb = `Enter a size from 1 to ${MAX_MB_LIMIT} MB.`;
+  if (!/^\d+$/.test(values.max_mb) || mb < 1 || mb > MAX_MB_LIMIT) result.max_mb = `Enter a whole number of MB from 1 to ${MAX_MB_LIMIT}.`;
   if (!/^\d+$/.test(values.keep) || Number(values.keep) > KEEP_LIMIT) result.keep = `Keep a whole number of archives from 0 to ${KEEP_LIMIT}.`;
   return result;
 }

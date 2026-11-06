@@ -14,9 +14,11 @@ class FakeRunner:
     def __init__(self, results=()):
         self.results = list(results)
         self.calls = []
+        self.envs = []
 
-    def run(self, argv, timeout=30):
+    def run(self, argv, timeout=30, env=None):
         self.calls.append((tuple(argv), timeout))
+        self.envs.append(env)
         if not self.results:
             raise AssertionError(f'Unexpected command: {argv}')
         result = self.results.pop(0)

@@ -7,7 +7,7 @@ import {LOGS_COPY as COPY} from './section_copy.mjs';
 import {ignoredBlock, logAnchor, logRow, rotateAllDue, SECTION, stageRotate} from './section_logs_table.mjs';
 import {goTo} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
-import {basename, bySize, formatBytes, problems, validateAddPath} from './logs_format.mjs';
+import {basename, bySize, formatBytes, validateAddPath} from './logs_format.mjs';
 
 const HEADERS = ['Log', 'Source', 'Size', 'Archives', 'Growth', 'Policy', 'State', ''];
 const HISTORY_MAX_GAP = 7200;
@@ -86,8 +86,9 @@ function tableCard(data) {
   return card({title: COPY.logsTitle, body, anchor: 'logs-table'});
 }
 
+// The problem list is the rotator's (plus the agent's launchd state), sent as {level, text, path?}.
 export function render(data) {
-  const found = problems(data);
+  const found = data.problems;
   const level = found.length ? worst(found.map(item => item.level)) : Level.OK;
   const root = node('div');
   root.append(summaryLine(data, level));
@@ -98,7 +99,7 @@ export function render(data) {
 }
 
 export function attentionItems(data) {
-  return problems(data).map(item => ({level: item.level, text: item.text, anchor: item.key ? logAnchor(item.key) : 'logs-table'}));
+  return data.problems.map(item => ({level: item.level, text: item.text, anchor: item.path ? logAnchor(item.path) : 'logs-table'}));
 }
 
 export function cardExtra(data) {

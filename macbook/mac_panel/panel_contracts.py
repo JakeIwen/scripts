@@ -330,6 +330,8 @@ class LogsPayload(TypedDict):
     totals: dict
     logs: list[LogEntry]
     ignored: list[str]
+    # What needs attention, each {level, text, path?}: the rotator's list plus the agent's launchd state.
+    problems: list[dict]
     # The log-rotate LaunchAgent: installed, loaded (None = launchd unreadable), pid, last exit.
     service: dict
 
