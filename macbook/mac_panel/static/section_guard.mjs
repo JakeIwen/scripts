@@ -1,6 +1,8 @@
 // BTT guard: read-only inspection, audits and the explicit known-good checkpoint; repair stays in Terminal.
-import {button, details, keyValues, node, notice, timeNode} from './panel_dom.mjs';
+import {button, card, details, info, kv, node, notice, settingRow, timeNode} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
+import {GUARD_COPY as COPY} from './section_copy.mjs';
+import {goTo} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 
 const SECTION = 'guard';
@@ -96,34 +98,76 @@ function lastResultBlock() {
   return block;
 }
 
-function actionsBlock(active) {
-  const root = node('div');
-  const controls = node('div', null, 'actions');
-  controls.append(button('Inspect (read-only)', () => runGuard('inspect'), {key: 'inspect'}),
-    button('Audit (read-only)', () => runGuard('audit'), {key: 'audit'}));
-  controls.append(button('Take checkpoint', () => runGuard('checkpoint', {confirmed: true, replaces: active}),
-    {confirm: active ? `Confirm: replace ${active}` : 'Confirm: create the first checkpoint', key: 'checkpoint',
-      title: 'Accept the current BTT configuration as known-good'}));
-  root.append(controls);
-  root.append(node('p', 'Accept only after checking the BTT menu yourself. Repair is available only from the owner’s Terminal.', 'muted small'));
-  return root;
+function actionRow(label, help, control, anchorId) {
+  return settingRow({label, info: help, control, anchor: anchorId});
 }
 
-export function render(data) {
-  const root = node('div');
+function actionsCard(active) {
+  const body = node('div');
+  body.append(
+    actionRow('Inspect', COPY.inspectInfo, button('Inspect (read-only)', () => runGuard('inspect'), {key: 'inspect'}), 'inspect'),
+    actionRow('Audit', COPY.auditActionInfo, button('Audit (read-only)', () => runGuard('audit'), {key: 'audit'}), 'audit'),
+    actionRow('Known-good checkpoint', COPY.checkpointActionInfo,
+      button('Take checkpoint', () => runGuard('checkpoint', {confirmed: true, replaces: active}),
+        {confirm: active ? `Confirm: replace ${active}` : 'Confirm: create the first checkpoint', key: 'checkpoint'}),
+      'checkpoint'));
+  return card({title: COPY.actionsTitle, body});
+}
+
+// The facts every view of this section agrees on: levels, status nodes and whether an edit is pending.
+function assess(data) {
   const active = data.checkpoints.find(checkpoint => checkpoint.active)?.checkpoint_id ?? null;
   const monitor = monitorStatus(data.service);
   const acceptance = acceptanceStatus(data.acceptance, data.service);
   const audit = auditStatus(data.audit, acceptance.pending);
+  return {active, monitor, acceptance, audit};
+}
+
+function withInfo(content, help) {
+  const result = node('span');
+  result.append(content, info(help));
+  return result;
+}
+
+export function render(data) {
+  const root = node('div');
+  const {active, monitor, acceptance, audit} = assess(data);
   const checkpoint = active ? `${active} (${data.checkpoints.length} stored)` : `none (${data.checkpoints.length} stored)`;
-  root.append(keyValues([['Monitor', monitor.node], ['Audit', audit.node], ['Auto-accept', acceptance.node],
-    ['Known-good checkpoint', status(active ? Level.OK : Level.WARN, checkpoint)]]));
-  if (Array.isArray(data.audit.findings) && data.audit.findings.length) root.append(findingsList(data.audit.findings));
-  root.append(details('Raw status', JSON.stringify({audit: data.audit, monitor: data.service,
+  const body = node('div');
+  body.append(kv([
+    ['Monitor', withInfo(monitor.node, COPY.monitorInfo)],
+    ['Audit', withInfo(audit.node, COPY.auditInfo)],
+    ['Auto-accept', withInfo(acceptance.node, COPY.acceptanceInfo)],
+    ['Known-good checkpoint', withInfo(status(active ? Level.OK : Level.WARN, checkpoint), COPY.checkpointInfo)],
+  ]));
+  if (Array.isArray(data.audit.findings) && data.audit.findings.length) body.append(findingsList(data.audit.findings));
+  body.append(details('Raw status', JSON.stringify({audit: data.audit, monitor: data.service,
     acceptance: data.acceptance, checkpoints: data.checkpoints}, null, 2), 'guard-raw'));
-  root.append(actionsBlock(active));
+  const level = worst([monitor.level, audit.level, acceptance.level, active ? Level.OK : Level.WARN]);
+  root.append(card({title: COPY.statusTitle, level, body, anchor: 'status'}), actionsCard(active));
   if (lastResult) root.append(lastResultBlock());
   const summary = `${monitor.node.querySelector('.text').textContent} · audit ${data.audit.status}` +
     (acceptance.pending && data.audit.status === 'drift' ? ' (edit pending auto-accept)' : '');
-  return {node: root, summary, level: worst([monitor.level, audit.level, acceptance.level, active ? Level.OK : Level.WARN])};
+  return {node: root, summary, level};
+}
+
+export function attentionItems(data) {
+  const {active, monitor, acceptance, audit} = assess(data);
+  const items = [];
+  if (audit.level !== Level.OK) items.push({level: audit.level, text: `Audit ${data.audit.status}`, anchor: 'status'});
+  if (monitor.level === Level.ERROR) items.push({level: Level.ERROR, text: 'Monitor is not supervised', anchor: 'status'});
+  if (acceptance.level === Level.WARN) items.push({level: Level.WARN, text: 'A BTT edit is waiting or was refused', anchor: 'status'});
+  if (!active) items.push({level: Level.WARN, text: 'No known-good checkpoint', anchor: 'checkpoint'});
+  return items;
+}
+
+const jump = (anchorId, label) => ({label, run: () => goTo(SECTION, anchorId, {focus: true})});
+
+export function searchItems() {
+  return [
+    {title: 'BTT guard inspect', subtitle: 'Read-only', keywords: ['bettertouchtool'], anchor: 'inspect', actions: [jump('inspect', 'Inspect')]},
+    {title: 'BTT guard audit', subtitle: 'Read-only integrity check', keywords: ['bettertouchtool', 'drift'], anchor: 'audit', actions: [jump('audit', 'Audit')]},
+    {title: 'BTT guard checkpoint', subtitle: 'Accept the current BTT configuration as known-good', keywords: ['bettertouchtool', 'known-good'],
+      anchor: 'checkpoint', actions: [jump('checkpoint', 'Take checkpoint')]},
+  ];
 }

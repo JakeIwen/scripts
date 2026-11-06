@@ -32,7 +32,7 @@ const MODULES = [
   ['amphetamine', amphetamine, {auto: false}],
   ['guard', guard, {auto: false}],
   ['ntfy', ntfy, {auto: false}],
-  ['usage', usage, {endpoint: null, auto: false}],
+  ['usage', usage, {auto: false}],
   ['settings', settings, {auto: false}],
 ];
 const SECTIONS = MODULES.map(([id, module, options]) => ({

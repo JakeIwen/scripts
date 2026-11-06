@@ -25,7 +25,6 @@ def payload(value):
     if session is not None:
         for name in ('running', 'active', 'display_sleep', 'screen_saver', 'closed_display'):
             field(session, name, bool)
-        field(session, 'remaining', int)
     return value
 
 

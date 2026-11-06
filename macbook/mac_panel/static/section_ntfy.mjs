@@ -1,6 +1,8 @@
 // ntfy alerts: routing metadata only; destinations stay hidden and the one action is a confirmed test.
-import {button, node, notice, table} from './panel_dom.mjs';
+import {PLACEHOLDER, button, card, emptyState, fieldError, info, node, notice, settingRow, table} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
+import {NTFY_COPY as COPY} from './section_copy.mjs';
+import {goTo} from './shell.mjs';
 import {Level} from './status_cell.mjs';
 
 const SECTION = 'ntfy';
@@ -30,7 +32,7 @@ function eventsCell(events) {
 }
 
 function senderCell(script) {
-  if (!script) return node('span', '—', 'muted');
+  if (!script) return node('span', PLACEHOLDER, 'muted');
   const cell = node('code', script.split('/').pop());
   cell.title = script;
   return cell;
@@ -38,13 +40,27 @@ function senderCell(script) {
 
 export function render(data) {
   const root = node('div');
-  data.errors.forEach(error => root.append(node('p', error, 'error')));
+  data.errors.forEach(error => root.append(fieldError(error)));
   const rows = mergeAlerts(data.alerts).map(group => [group.sources.join(', '), eventsCell(group.events),
     senderCell(group.script), group.destination, node('code', group.configuration)]);
-  root.append(table(['Source', 'Events', 'Sender', 'Destination', 'Configuration'], rows));
-  root.append(button('Send a test alert (shared warning route)', () => action(SECTION, '/api/ntfy/test', {confirmed: true}, {
+  const routes = node('div');
+  routes.append(rows.length ? table(['Source', 'Events', 'Sender', 'Destination', 'Configuration'], rows) : emptyState(COPY.empty));
+  const title = node('span', COPY.routesTitle);
+  title.append(info(COPY.routesInfo));
+  root.append(card({title, body: routes}));
+  const test = button('Send a test alert (shared warning route)', () => action(SECTION, '/api/ntfy/test', {confirmed: true}, {
     after: result => notice(SECTION, result.sent ? 'Test alert sent to the phone' : 'Test alert was not sent', result.sent ? 'ok' : 'error'),
-  }), {confirm: 'Confirm: send a phone alert', key: 'test'}));
+  }), {confirm: 'Confirm: send a phone alert', key: 'test'});
+  root.append(card({title: COPY.testLabel, body: settingRow({label: COPY.testLabel, info: COPY.testInfo, control: test, anchor: 'test'})}));
   const summary = [`${data.alerts.length} routes`, data.errors.length && `${data.errors.length} unreadable`].filter(Boolean).join(' · ');
   return {node: root, summary, level: data.errors.length ? Level.WARN : Level.IDLE};
+}
+
+export function attentionItems(data) {
+  return data.errors.map(error => ({level: Level.WARN, text: `Unreadable alert configuration: ${error}`}));
+}
+
+export function searchItems() {
+  return [{title: 'Send a test ntfy alert', subtitle: 'ntfy alerts', keywords: ['phone', 'notification', 'warning'], anchor: 'test',
+    actions: [{label: 'Open', run: () => goTo(SECTION, 'test', {focus: true})}]}];
 }
