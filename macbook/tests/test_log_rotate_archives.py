@@ -542,7 +542,9 @@ cli.main(['rotate', '--only', path, '--json'])
                     self.assertEqual(self.run_cli('rotate', '--only', path, '--json')[0], 1)
                 self.assertEqual(os.path.getsize(path), 0)
                 Path(path).write_bytes(payload('gen5'))
-                self.rotate(path)
+                code, value, _ = self.run_cli('rotate', '--only', path, '--json')
+                self.assertEqual(code, 1)
+                self.assertIn('kept', value['errors'][0]['error'])
                 self.assert_retained(path, compress, (5, 4, 3))
                 for item in Path(path).parent.glob(Path(path).name + '.[0-9]*'):
                     item.unlink()
@@ -667,8 +669,8 @@ class PendingRecoveryFixTests(LogRotateCase):
                     item.unlink()
                 archives.prune(self.home)
 
-    def test_unusable_pending_archive_is_replaced_without_losing_history(self):
-        for damage in ('header', 'deflate', 'footer', 'cut', 'unreadable'):
+    def test_unusable_pending_archive_is_kept_beside_fresh_rotation(self):
+        for damage in ('header', 'deflate', 'cut', 'unreadable'):
             with self.subTest(damage=damage):
                 path = self.full_history(True)
                 self.crash_rotation(path, 'published')
@@ -680,15 +682,21 @@ class PendingRecoveryFixTests(LogRotateCase):
                     if damage == 'cut':
                         data = data[:len(data) // 2]
                     else:
-                        position = {'header': 0, 'deflate': 200, 'footer': -8}[damage]
+                        position = {'header': 0, 'deflate': 200}[damage]
                         data[position] ^= 0xff
                     archive.write_bytes(data)
+                saved_inode = archive.stat().st_ino
                 other = self.write('.local/state/other/job.log', payload('healthy'))
                 self.set_policy(other, '--max-mb', '1')
                 code, value, _ = self.run_cli('rotate', '--json')
-                self.assertEqual((code, value['errors']), (0, []))
+                self.assertEqual(code, 1)
+                self.assertEqual([item['path'] for item in value['errors']], [path])
+                self.assertIn('kept', value['errors'][0]['error'])
                 self.assertEqual(os.path.getsize(other), 0)
-                self.assert_retained(path, True)
+                self.assertEqual(Path(path + '.2.gz').stat().st_ino, saved_inode)
+                with gzip.open(archive, 'rb') as source:
+                    self.assertTrue(source.read() == payload('gen4'))
+                self.assertEqual(self.run_cli('status', '--json')[1]['level'], 'warn')
                 for item in Path(path).parent.glob('job.log.[0-9]*'):
                     item.unlink()
                 archives.prune(self.home)

@@ -11,7 +11,7 @@ import os
 import stat
 import tempfile
 import zlib
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from . import archives, eligibility, state
 from .archives import archive_path
@@ -175,22 +175,28 @@ def _finish_pending(source: int, output: int, archive: str, copied: int,
 def _matches_prefix(source: int, archive: str, copied: int, compress: bool) -> bool:
     reader = gzip.open if compress else open
     with reader(archive, "rb") as recorded:
-        offset, matches = 0, True
-        while True:
-            chunk = recorded.read(CHUNK_BYTES)
+        offset = 0
+        while offset < copied:
+            # read1 bounds decompression too: a damaged late member is not prefix damage.
+            chunk = recorded.read1(min(CHUNK_BYTES, copied - offset))
             if not chunk:
-                break
-            checked = min(len(chunk), max(copied - offset, 0))
-            if checked and chunk[:checked] != os.pread(source, checked, offset):
-                matches = False
+                raise EOFError("pending archive is shorter than its recorded source")
+            if chunk != os.pread(source, len(chunk), offset):
+                return False
             offset += len(chunk)
-        if offset < copied:
-            raise EOFError("pending archive is shorter than its recorded source")
-    return matches
+    return True
+
+
+def _keep_pending(archive: str, ledger: dict, home: str, warnings: List[str], reason: str) -> None:
+    # Uncertainty cannot prove the source still holds these bytes; retain this generation.
+    archives.require_owned(archive, ledger)
+    ledger[archive] = archives.identity(archive)
+    state.write_json(home, state.ARCHIVES_FILE, ledger)
+    warnings.append(reason)
 
 
 def _resume_pending(source: int, info: os.stat_result, existing: list,
-                    ledger: dict, home: str) -> Optional[str]:
+                    ledger: dict, home: str, warnings: List[str]) -> Optional[str]:
     for item in list(existing):
         pending = ledger[item.path].get("pending_truncate")
         if not isinstance(pending, dict):
@@ -205,17 +211,11 @@ def _resume_pending(source: int, info: os.stat_result, existing: list,
         try:
             matches = info.st_size >= copied and _matches_prefix(source, item.path, copied, item.gzipped)
         except (OSError, EOFError, gzip.BadGzipFile, zlib.error):
-            # The source has not been truncated; rebuild only after proving this is our archive.
-            archives.require_owned(item.path, ledger)
-            os.unlink(item.path)
-            ledger.pop(item.path)
-            state.write_json(home, state.ARCHIVES_FILE, ledger)
-            existing.remove(item)
+            _keep_pending(item.path, ledger, home, warnings, "pending archive unreadable; kept")
             continue
         if not matches:
-            # The source was truncated or rewritten since publication. Archive its new bytes normally.
-            ledger[item.path] = archives.identity(item.path)
-            state.write_json(home, state.ARCHIVES_FILE, ledger)
+            _keep_pending(item.path, ledger, home, warnings,
+                          "pending archive prefix differs from source; kept")
             continue
         output = os.open(item.path, os.O_RDWR | os.O_NOFOLLOW)
         try:
@@ -232,7 +232,8 @@ def _resume_pending(source: int, info: os.stat_result, existing: list,
     return None
 
 
-def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, Optional[str]]:
+def rotate_file(path: str, home: str, keep: int, compress: bool,
+                warnings: Optional[List[str]] = None) -> Tuple[int, Optional[str]]:
     """Archive and truncate `path`; returns (bytes before, archive or None for keep 0)."""
     descriptor, info = _open_checked(path, home)
     directory, base = os.path.split(path)
@@ -242,7 +243,8 @@ def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, O
         ledger = archives.prune(home)
         existing = archives.rotation_plan(directory, base, keep, compress, ledger)
         existing = archives.unique_archives(existing, ledger, home)
-        resumed = _resume_pending(descriptor, info, existing, ledger, home)
+        resumed = _resume_pending(descriptor, info, existing, ledger, home,
+                                  warnings if warnings is not None else [])
         if resumed is not None:
             return info.st_size, resumed
         if keep == 0:

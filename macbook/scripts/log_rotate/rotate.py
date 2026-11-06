@@ -63,13 +63,18 @@ def run_rotation(snapshot: Snapshot, home: str, only: Optional[str] = None, forc
             if entry.state not in (STATE_REFUSED, STATE_MISSING):
                 observed[entry.path] = (size, size)
             continue
+        warnings = []  # type: List[str]
         try:
-            before, archive = rotate_file(entry.path, home, entry.policy.keep, entry.policy.compress)
+            before, archive = rotate_file(entry.path, home, entry.policy.keep, entry.policy.compress, warnings)
         except Exception as error:
             errors.append({"path": entry.path, "error": str(error)})
             state.append_log(home, "error {}: {}".format(entry.path, error))
             observed[entry.path] = (size, size)
             continue
+        finally:
+            for warning in warnings:
+                errors.append({"path": entry.path, "error": warning})
+                state.append_log(home, "error {}: {}".format(entry.path, warning))
         rotated.append({"path": entry.path, "bytes_before": before, "archive": archive})
         stamps[entry.path] = round(now, 3)
         observed[entry.path] = (before, 0)
@@ -88,6 +93,6 @@ def _record(home: str, observed: Dict[str, Tuple[int, int]], stamps: Dict[str, A
         ledger = {**{k: v for k, v in previous.items() if k not in ledger}, **ledger}
     state.write_json(home, state.SIZES_FILE, {"paths": ledger})
     state.write_json(home, state.ROTATED_FILE, stamps)
-    if only is None:
+    if only is None or errors:
         state.write_json(home, state.RUN_FILE, {"ts": round(now, 3), "rotated": rotated, "errors": errors})
         state.append_log(home, "run complete: {} rotated, {} errors".format(rotated, errors))
