@@ -109,11 +109,17 @@ function policyForm(entry, data) {
       show({form: 'Nothing changed.'});
       return;
     }
+    if (body.keep === 0) body.confirmed = true;
     await send(body, onError);
   };
   form.addEventListener('submit', event => event.preventDefault());
   const controls = node('div', null, 'actions');
-  controls.append(button('Apply', apply, {key: `policy-apply-${entry.path}`}));
+  const applySlot = node('span');
+  const drawApply = () => applySlot.replaceChildren(button('Apply', apply,
+    {key: `policy-apply-${entry.path}`, confirm: Number(inputs.keep.value) === 0 && initial.keep !== 0 ? 'Confirm: discard on rotate' : null}));
+  drawApply();
+  form.addEventListener('input', drawApply);
+  controls.append(applySlot);
   if (entry.policy.override) {
     controls.append(button('Reset to defaults', () => send({action: 'policy', path: entry.path, revision: data.revision, clear: true}, onError),
       {key: `policy-reset-${entry.path}`, title: `Defaults: ${data.defaults.max_mb} MB, keep ${data.defaults.keep}`}));

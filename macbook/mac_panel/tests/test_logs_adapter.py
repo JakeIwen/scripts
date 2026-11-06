@@ -1,5 +1,10 @@
 """Logs adapter against a fake rotator CLI: wire decoding, argv identity, confirmation and 409 mapping."""
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 import threading
 
@@ -163,6 +168,17 @@ class LogsActionTests(unittest.TestCase):
                                               '--keep', '3', '--compress', 'off', '--enabled', 'on', PATH))
         self.assertEqual(runner.calls[1][0], (*LOG_ROTATE, 'policy', '--json', '--revision', REVISION, '--clear', PATH))
 
+    def test_keep_zero_requires_explicit_confirmation(self):
+        body = {'action': 'policy', 'revision': REVISION, 'path': PATH, 'keep': 0}
+        logs, runner = adapter([json_command(inventory(entry()) | {'log': entry()})])
+        for extra in ({}, {'confirmed': False}, {'confirmed': 'true'}):
+            with self.subTest(extra=extra), self.assertRaises(ApiError) as caught:
+                logs.mutate(body | extra)
+            self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(runner.calls, [])
+        logs.mutate(body | {'confirmed': True})
+        self.assertIn('--keep', runner.calls[0][0])
+        self.assertIn('0', runner.calls[0][0])
 
     def test_edit_replies_decode_the_whole_inventory_and_the_touched_entry(self):
         body = {'action': 'ignore', 'revision': REVISION, 'path': PATH}
@@ -228,6 +244,57 @@ class LogsActionTests(unittest.TestCase):
             routes.close()
 
 
+class LogsPolicyPageTests(unittest.TestCase):
+    def test_keep_zero_apply_arms_before_sending_confirmation(self):
+        script = r"""
+import assert from 'node:assert/strict';
+const base = process.argv[1];
+const {Element, section} = await import(base + '/tests/dom_fixture.mjs');
+globalThis.Node = Element;
+const timer = globalThis.setTimeout;
+globalThis.setTimeout = (...args) => { const value = timer(...args); value.unref(); return value; };
+const {register} = await import(base + '/static/panel_sections.mjs');
+const {logRow} = await import(base + '/static/section_logs_table.mjs');
+section('logs');
+register([{id: 'logs', render: () => ({node: new Element(), summary: '', level: 'ok'})}]);
+const sent = [];
+globalThis.fetch = async (path, options) => {
+  if (options.body) sent.push(JSON.parse(options.body));
+  return {ok: true, status: 200, json: async () => ({message: 'Saved'})};
+};
+const entry = {path: '/fixture/job.log', source: 'scan', bytes: 1, archived_bytes: 0,
+  archives: 0, state: 'ok', growth_mb_per_day: null,
+  policy: {max_mb: 10, keep: 5, compress: true, enabled: true, override: false}};
+const walk = root => [root, ...root.childNodes.filter(x => x instanceof Element).flatMap(walk)];
+const cell = logRow(entry, {revision: 'rev'})[5];
+const form = walk(cell).find(x => x.tagName === 'FORM');
+const keep = walk(form).find(x => x.dataset.key === 'policy-keep-/fixture/job.log');
+const apply = () => walk(form).find(x => x.dataset.key === 'policy-apply-/fixture/job.log');
+keep.value = '0';
+form.dispatchEvent(new Event('input'));
+apply().click();
+assert.equal(sent.length, 0);
+assert.equal(apply().textContent, 'Confirm: discard on rotate');
+apply().click();
+await new Promise(setImmediate);
+assert.equal(sent.length, 1);
+assert.equal(sent[0].keep, 0);
+assert.equal(sent[0].confirmed, true);
+keep.value = '1';
+form.dispatchEvent(new Event('input'));
+apply().click();
+await new Promise(setImmediate);
+assert.equal(sent.length, 2);
+assert.equal(sent[1].keep, 1);
+assert.equal('confirmed' in sent[1], false);
+console.log('PASS: keep-zero Apply requires two clicks; ordinary policy requires one');
+"""
+        with tempfile.TemporaryDirectory() as home:
+            result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script,
+                                     Path(__file__).resolve().parents[1].as_uri()],
+                                    env={**os.environ, 'HOME': home}, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('PASS: keep-zero Apply requires two clicks', result.stdout)
 
 
 class LogsSamplingTests(unittest.TestCase):

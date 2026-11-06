@@ -250,6 +250,8 @@ class LogsAdapter:
         if not valid_path(body['path']):
             raise ApiError(400, 'Invalid log path')
         flags = self.policy_flags(body) if action == 'policy' else []
+        if action == 'policy' and body.get('keep') == 0:
+            confirm(body)
         result = self.run((*LOG_ROTATE, action, '--json', '--revision', revision, *flags, body['path']), READ_TIMEOUT)
         failure(result)
         value = json_result(checked(result))
