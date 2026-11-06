@@ -540,3 +540,80 @@ cli.main(['rotate', '--only', path, '--json'])
                 for item in Path(path).parent.glob(Path(path).name + '.[0-9]*'):
                     item.unlink()
                 archives.prune(self.home)
+
+
+class TemporaryLinkCleanupTests(LogRotateCase):
+    make_log = ArchiveRecoveryTests.make_log
+    rotate = ArchiveRecoveryTests.rotate
+    full_history = RetryRetentionTests.full_history
+    assert_retained = RetryRetentionTests.assert_retained
+
+    def test_idle_run_removes_only_temporary_names_linked_to_recorded_archive(self):
+        path = self.make_log()
+        self.rotate(path)
+        archive = path + '.1.gz'
+        directory = Path(path).parent
+        linked = directory / '.job.log.rotating.interrupted'
+        foreign = directory / '.job.log.rotating.foreign'
+        symlink = directory / '.job.log.rotating.symlink'
+        unrelated = directory / 'saved-link'
+        os.link(archive, linked)
+        foreign.write_bytes(b'foreign fixture')
+        symlink.symlink_to(archive)
+        os.link(archive, unrelated)
+        self.assertEqual(self.run_cli('rotate', '--json')[0], 0)
+        self.assertFalse(linked.exists())
+        self.assertTrue(symlink.is_symlink())
+        self.assertTrue(unrelated.exists())
+        self.assertEqual(foreign.read_bytes(), b'foreign fixture')
+        unrelated.unlink()
+        self.assertEqual(os.stat(archive).st_nlink, 1)
+        self.assertEqual(self.run_cli('adopt', '--revision', self.inventory()['revision'], path, '--json')[0], 0)
+
+    def test_unrecorded_or_replaced_archive_does_not_authorize_temporary_cleanup(self):
+        path = self.make_log()
+        self.rotate(path)
+        archive = path + '.1.gz'
+        os.rename(archive, archive + '.saved')
+        Path(archive).write_bytes(b'replacement fixture')
+        replaced_link = Path(path).parent / '.job.log.rotating.replacement'
+        os.link(archive, replaced_link)
+        foreign_archive = self.write('elsewhere/manual.log.1', b'unrecorded fixture')
+        foreign_link = Path(foreign_archive).parent / '.manual.log.rotating.unrecorded'
+        os.link(foreign_archive, foreign_link)
+        self.assertEqual(self.run_cli('rotate', '--json')[0], 0)
+        self.assertTrue(replaced_link.exists())
+        self.assertTrue(foreign_link.exists())
+        self.assertEqual(os.stat(archive).st_nlink, 2)
+        self.assertEqual(os.stat(foreign_archive).st_nlink, 2)
+
+    def test_sigkill_between_temporary_link_and_unlink_is_cleaned_before_retry_and_adopt(self):
+        for compress in (True, False):
+            with self.subTest(compress=compress):
+                path = self.full_history(compress)
+                script = """
+import os, sys
+from log_rotate import archives, cli
+real_publish = archives.publish
+def kill(source, destination):
+    if os.path.basename(source).startswith('.') and '.rotating.' in os.path.basename(source):
+        os.link(source, destination, follow_symlinks=False)
+        os.kill(os.getpid(), 9)
+    real_publish(source, destination)
+archives.publish = kill
+cli.main(['rotate', '--only', sys.argv[1], '--json'])
+"""
+                environment = dict(os.environ, PYTHONPATH=os.pathsep.join(
+                    str(REPOSITORY / part) for part in ('macbook/scripts', 'shared/python')))
+                result = subprocess.run([PYTHON, '-c', script, path], env=environment,
+                                        capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, -9, result.stderr)
+                directory = Path(path).parent
+                self.assertEqual(len(list(directory.glob('.job.log.rotating.*'))), 1)
+                self.rotate(path)
+                self.assert_retained(path, compress)
+                self.assertEqual(list(directory.glob('.job.log.rotating.*')), [])
+                self.assertEqual(self.run_cli('adopt', '--revision', self.inventory()['revision'], path, '--json')[0], 0)
+                for item in directory.glob(Path(path).name + '.[0-9]*'):
+                    item.unlink()
+                archives.prune(self.home)

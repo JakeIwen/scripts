@@ -120,8 +120,34 @@ def publish(source: str, destination: str) -> None:
     os.unlink(source)
 
 
+
+def _remove_linked_temporaries(path: str, ledger: dict, home: str) -> None:
+    """Only a proven archive inode authorizes removal of an interrupted publish link."""
+    directory = os.path.dirname(path)
+    if directory != home and eligibility.location_refusal(directory, home) is not None:
+        return
+    try:
+        if eligibility.directory_problem(directory, home) is not None:
+            return
+        require_owned(path, ledger)
+        archive = os.lstat(path)
+        entries = list(os.scandir(directory))
+    except (OSError, LogRotateError):
+        return
+    for entry in entries:
+        if not entry.name.startswith(".") or ".rotating." not in entry.name:
+            continue
+        try:
+            info = entry.stat(follow_symlinks=False)
+            if (stat.S_ISREG(info.st_mode)
+                    and (info.st_dev, info.st_ino) == (archive.st_dev, archive.st_ino)):
+                os.unlink(entry.path)
+        except OSError:
+            continue
+
+
 def prune(home: str) -> dict:
-    """Remove only absent paths; publication records may deliberately precede their files."""
+    """Prune absent records and temporary aliases, retaining inaccessible archive records."""
     ledger = state.read_json(home, state.ARCHIVES_FILE)
     retained = {}
     for path, record in ledger.items():
@@ -131,6 +157,7 @@ def prune(home: str) -> dict:
             if isinstance(error, (FileNotFoundError, NotADirectoryError)):
                 continue
         retained[path] = record
+        _remove_linked_temporaries(path, ledger, home)
     if retained != ledger:
         state.write_json(home, state.ARCHIVES_FILE, retained)
     return retained
