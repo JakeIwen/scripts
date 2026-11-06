@@ -88,21 +88,31 @@ def expand_value(value, variables, home):
     return value
 
 
-def redirected_log(command, variables, home):
+REDIRECT_OPERATORS = ('>', '>>', '&>', '&>>')
+
+
+def redirect_targets(command, variables, home):
+    """Every absolute file the command redirects output to, in order (stderr redirects included)."""
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars='><&|;')
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        return None
+        return []
+    targets = []
     for index, token in enumerate(tokens[:-1]):
-        if token not in ('>', '>>'):
+        if token not in REDIRECT_OPERATORS:
             continue
         value = expand_value(tokens[index + 1], variables, home)
         if '$' in value or value == '/dev/null' or not Path(value).is_absolute():
             continue
-        return value
-    return None
+        targets.append(value)
+    return targets
+
+
+def redirected_log(command, variables, home):
+    targets = redirect_targets(command, variables, home)
+    return targets[0] if targets else None
 
 
 def split_cron_line(line):
@@ -166,10 +176,16 @@ def parse_jobs(text, home=None):
                 'managed_switch': MANAGED_SWITCHES.get(block),
                 'description': comment,
                 'log_path': redirected_log(command, variables, home),
+                '_log_paths': redirect_targets(command, variables, home),
                 '_line_index': index,
             })
         comment = ''
     return jobs
+
+
+def tracked_log_targets(text, home=None):
+    """(job id, redirect target paths) for each job that redirects output, paused jobs included."""
+    return [(job['id'], job['_log_paths']) for job in parse_jobs(text, home) if job['_log_paths']]
 
 
 def public_job(job):
