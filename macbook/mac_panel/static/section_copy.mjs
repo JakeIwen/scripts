@@ -67,3 +67,78 @@ export const sectionTitle = id => SECTION_COPY[id]?.title ?? id;
 export function groupOf(id) {
   return GROUPS.find(group => group.sections.includes(id));
 }
+
+// ---- per-section copy for Metered, Amphetamine, BTT guard, ntfy, Usage and Settings ----
+
+export const METERED_COPY = {
+  ssidsTitle: 'Metered SSIDs',
+  ssidsInfo: 'Exact, case-sensitive Wi-Fi names that count as metered. Additions work offline and sync to the Pi later; removal needs the Pi and its current revision.',
+  ssidsEmpty: 'No SSIDs are metered',
+  lowDataTitle: 'Low Data Mode',
+  lowDataInfo: 'Enable only after the sudoers / LAN Time Machine test passes. Wi-Fi is marked constrained while metered and cleared when unmetered or approved. A flag this control did not set (native per-network Low Data Mode) is left alone.',
+  macConsumersTitle: 'Mac consumers',
+  piConsumersTitle: 'Pi consumers',
+  piConsumersInfo: 'Pi consumers are approved on the Pi with its own revision; this page only shows what the Pi reported.',
+  approveInfo: 'Lets a gated consumer use a metered network for a limited time. An episode lasts until the current network connection ends.',
+  modeTitle: 'Mac mode',
+  modeInfo: 'Auto follows the SSID rules. Metered or Unmetered overrides them for the chosen time.',
+  exemptInfo: 'An exempt consumer is never held back, whatever the verdict.',
+  advancedTitle: 'Advanced',
+  historyTitle: 'Network history',
+  historyInfo: 'Whether the network was metered, sampled every minute while the panel runs. Unknown means the state was missing or stale. Gaps mean the panel was not running.',
+  consumerHistoryTitle: 'Per-consumer history',
+  noHistory: 'No history recorded for this range yet',
+  stale: 'State is missing or stale',
+};
+
+export const AMPHETAMINE_COPY = {
+  lockTitle: 'Automatic screen lock',
+  lockInfo: 'Locks the screen after the idle time, but only during an active Amphetamine keep-awake session. Turning it on starts a session if none is running.',
+  minutesLabel: 'Idle time',
+  minutesInfo: 'Minutes without input before the screen locks. Applying restarts Amphetamine and keeps an indefinite open-display session.',
+  sessionLabel: 'Keep-awake session',
+  sessionInfo: 'Active: Amphetamine is keeping the Mac awake. Inactive: no session, so automatic lock cannot fire. Unavailable: the session could not be read. Indefinite and special sessions are preserved or refused, never replaced.',
+  displayLabel: 'Display after locking',
+  displayInfo: 'Whether the display may sleep once the screen is locked.',
+  batteryLabel: 'Battery cutoff',
+  batteryInfo: 'Read-only here: Amphetamine owns this preference and the panel cannot change it.',
+  needsSession: 'Automatic locking needs an active Amphetamine session.',
+};
+
+export const GUARD_COPY = {
+  statusTitle: 'Status',
+  monitorInfo: 'The optional scheduled monitor audits BetterTouchTool and alerts on drift. Without it the audit button here is the only check.',
+  auditInfo: 'Compares BetterTouchTool\'s triggers with the known-good checkpoint. Drift means something was added, removed or changed.',
+  acceptanceInfo: 'The monitor accepts a change made while the same BTT process kept running, once it has stayed unchanged for 10 minutes. Changes after a BTT relaunch or update are alerted, never accepted.',
+  checkpointInfo: 'The saved known-good copy the audit compares against.',
+  actionsTitle: 'Actions',
+  inspectInfo: 'Reads BTT and lists findings. Changes nothing.',
+  auditActionInfo: 'Runs the integrity audit against the active checkpoint. Changes nothing.',
+  checkpointActionInfo: 'Accepts the current BTT configuration as the new known-good checkpoint. Check the BTT menu yourself first. Repair is available only from the owner\'s Terminal.',
+};
+
+export const NTFY_COPY = {
+  routesTitle: 'Alert routes',
+  routesInfo: 'Each row is a hook that can send a phone alert: its source, the events that trigger it, the sender script and the destination. Topic URLs are secrets and never shown.',
+  empty: 'No alert routes found',
+  testLabel: 'Test alert',
+  testInfo: 'Sends one real alert to the phone through the shared warning route.',
+};
+
+export const USAGE_COPY = {
+  budgetsTitle: 'Allowance left',
+  budgetsInfo: 'Percent left in each window. The line marks an even spend through the window: a fill short of it means spending is ahead of schedule.',
+  routingTitle: 'Routing',
+  routingInfo: 'The usage-budget script weighs the windows and picks which family does the work and which reviews it.',
+  historyTitle: 'History',
+  historyInfo: 'Allowance left over time, sampled every 15 minutes while the panel runs.',
+  creditsInfo: 'Credits left against what the daily allowance would use before they expire. Short of full means they would run out early.',
+  noData: 'The usage tool gave no snapshot',
+  noHistory: 'No usage history recorded for this range yet',
+  staleMinutes: 120,
+};
+
+export const SETTINGS_COPY = {
+  empty: 'No tools declare settings',
+  resetInfo: 'Restores every field of this tool to its declared default.',
+};

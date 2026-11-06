@@ -1,8 +1,9 @@
 // Settings forms generated from each tool's declaration; saves go through tool_settings on the server.
-import {anchor, button, isChanged, node} from './panel_dom.mjs';
+import {button, card, emptyState, fieldError, isChanged, node, settingRow as row} from './panel_dom.mjs';
 import {action, refresh} from './panel_sections.mjs';
+import {SETTINGS_COPY as COPY} from './section_copy.mjs';
 import {settingAnchor, settingLabel} from './settings_fields.mjs';
-import {Level, status, worst} from './status_cell.mjs';
+import {Level, worst} from './status_cell.mjs';
 
 const SECTION = 'settings';
 const CONFLICT = 409;
@@ -46,18 +47,10 @@ function readValue(setting, input) {
 function settingRow(declaration, setting, value) {
   const id = settingAnchor(declaration.tool, setting.name);
   const input = makeInput(setting, value, id);
-  const row = anchor(node('div', null, 'setting'), id);
-  const text = node('div', null, 'setting-text');
-  const label = node('label');
-  label.htmlFor = id;
-  label.append(node('strong', settingLabel(setting)));
-  const unit = setting.unit ? ` ${setting.unit}` : '';
-  text.append(label, node('small', `${setting.description} Default: ${setting.default}${unit}.`));
-  const control = node('div', null, 'control');
   const marker = node('span', '', 'marker');
-  control.append(input, node('span', setting.unit || '', 'muted'), marker);
-  row.append(text, control);
-  return {row, input, marker};
+  const unit = setting.unit ? String(setting.unit) : undefined;
+  const help = `${setting.description} Default: ${setting.default}${unit ? ` ${unit}` : ''}.`;
+  return {row: row({label: settingLabel(setting), info: help, control: input, unit, marker, anchor: id}), input, marker};
 }
 
 // Markers say what will happen on Save: nothing, a return to the default, or a new value.
@@ -69,22 +62,22 @@ function updateMarkers(declaration, controls, save) {
     dirty = dirty || changed;
     marker.classList.toggle('changed', changed);
     const value = readValue(setting, input);
-    marker.textContent = changed ? 'unsaved' : value === setting.default ? 'default' : '';
+    marker.textContent = changed ? 'unsaved' : value === setting.default ? 'default' : 'changed from default';
   });
   save.disabled = !dirty;
 }
 
 function toolForm(tool) {
   const {declaration, state} = tool;
-  const form = node('form', null, 'tool');
-  form.append(node('h3', declaration.title), node('p', declaration.description, 'muted'));
+  const form = node('form');
+  form.append(node('p', declaration.description, 'muted'));
   const controls = new Map();
   declaration.settings.forEach(setting => {
     const parts = settingRow(declaration, setting, state.values[setting.name]);
     controls.set(setting.name, parts);
     form.append(parts.row);
   });
-  if (state.error) form.append(node('p', state.error, 'error'));
+  if (state.error) form.append(fieldError(state.error));
   const buttons = node('div', null, 'actions');
   const save = node('button', 'Save');
   save.type = 'submit';
@@ -94,7 +87,7 @@ function toolForm(tool) {
   const defaults = Object.fromEntries(declaration.settings.map(s => [s.name, s.default]));
   const reset = button('Reset to defaults', () => action(SECTION, '/api/settings',
     {tool: declaration.tool, action: 'reset', values: defaults, revision: state.revision, confirmed: true}),
-  {confirm: 'Confirm reset to defaults', key: `${declaration.tool}-reset`});
+  {confirm: 'Confirm: reset to defaults', title: COPY.resetInfo, key: `${declaration.tool}-reset`});
   buttons.append(save, reset, reload, node('span', state.path, 'muted small'));
   form.append(buttons);
   form.addEventListener('input', () => updateMarkers(declaration, controls, save));
@@ -109,16 +102,12 @@ function toolForm(tool) {
     });
   });
   updateMarkers(declaration, controls, save);
-  return form;
+  return card({title: declaration.title, body: form});
 }
 
 // A declaration the server could not load gets a card like a broken automation's: no form, just why.
 function errorCard(tool) {
-  const root = node('div', null, 'tool');
-  const line = node('p', null, 'summary-line');
-  line.append(status(Level.ERROR, 'unavailable'));
-  root.append(node('h3', tool.tool), line, node('p', tool.error, 'error'));
-  return root;
+  return card({title: tool.tool, level: Level.ERROR, summary: 'unavailable', body: fieldError(tool.error)});
 }
 
 function rendered(tool) {
@@ -131,7 +120,7 @@ export function render(data) {
   const root = node('div');
   const tools = data.tools.map(rendered);
   tools.forEach(tool => root.append(tool.root));
-  if (!tools.length) root.append(node('p', 'No tools declare settings'));
+  if (!tools.length) root.append(emptyState(COPY.empty));
   const summary = tools.map(tool => tool.summary).join(' · ') || 'none';
   return {node: root, summary, level: tools.length ? worst(tools.map(tool => tool.level)) : Level.IDLE};
 }
