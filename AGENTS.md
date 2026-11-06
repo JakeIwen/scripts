@@ -662,6 +662,35 @@ compare it with this checkout. Deployed files may differ from the repository.
   `CLAUDE_CODE_SESSION_ATTENDED`; Codex through its rollout's `session_meta`
   source (`cli`, not `exec` or a subagent). Stdlib; the Pi copy sits flat in
   `/home/pi/scripts/`.
+- `shared/sh/leftover_shells_guard.py` is a Claude `Stop` hook (Mac and Pi;
+  not `SubagentStop`, whose task list is the parent's) that keeps finished
+  background agents from lingering in the agent panel: a `run_in_background`
+  or auto-backgrounded shell is a keepalive on its agent. From the payload's
+  `background_tasks` it takes `shell` entries that are running or pending
+  (agents, monitors and workflows are ignored) and, the first time a shell id
+  appears in a session, blocks once with a reason listing it and telling the
+  model to `TaskStop` what it or its workers no longer need, and to say why it
+  keeps the rest. Ids challenged are recorded per session (session id hashed)
+  in `~/.agent/leftover-shells/<hash>.json`, written before the block. One
+  permanent directory lock, `~/.agent/leftover-shells/.lock` (`fcntl`, bounded
+  non-blocking retry, never unlinked or pruned; no per-session lock files),
+  serializes every run past the input checks: under it the session's ledger
+  mtime is refreshed, other sessions' ledgers idle over 30 days (and stray
+  `.ledger-*.tmp` files over a day old) are pruned, and new ids are claimed,
+  so a prune can never delete a ledger a live session just refreshed. A busy
+  lock allows the stop (and, with no live shells, skips refresh and prune).
+  Each shell is challenged once, acknowledged or not. Anything but a literal `stop_hook_active: false`,
+  malformed input (including a `background_tasks` list with any non-object
+  entry) and any ledger failure allow the stop. Descriptions and commands
+  are control-stripped, capped and shown as JSON-quoted data under a header
+  saying so. The Mac-only `+x` re-arm sentence is added
+  when `~/config/mac/claude-exit-after/claude_exit_after.py` exists. Known
+  limits: `notify_on_finish.py` can alert before the cleanup continuation, and
+  a shell that becomes unneeded after its one challenge is not re-challenged.
+  Its temp-file-plus-rename writer repeats the pattern in
+  `shared/sh/codex_update.py` on purpose: the hook ships flat to the Pi with
+  no imports. Stdlib; the Pi copy sits flat in `/home/pi/scripts/`. Tests:
+  `shared/tests/test_leftover_shells_guard.py`.
 - `shared/sh/reply_links.py` implements `+links`: with `--hook` it is the
   UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a bare
   `+links` without a model turn, listing each `file://` page and hosted
