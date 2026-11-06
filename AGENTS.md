@@ -353,7 +353,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `background_tasks.py` and are polled at `GET /api/tasks/<id>`. Its Automations
   section (`automations_adapter.py`) needs no per-tool panel code: it lists
   `shared/automations/<tool>.json` declarations, runs each one's status command
-  and the declared actions by fixed argv. `sampler.py` records each section's
+  and the declared actions by fixed argv. Its Logs section (`logs_adapter.py`,
+  `static/section_logs.mjs`) relays `macbook/scripts/log_rotate.py` and reads sizes and paths only. `sampler.py` records each section's
   level and a few values into the panel-owned SQLite history
   `~/.local/state/mac-panel/history.sqlite` (`history_store.py`: per-series
   thinning, 30-day prune; `GET /api/history`), and `usage_adapter.py` serves
@@ -397,6 +398,24 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
+- `macbook/scripts/log_rotate.py` (stable entry; stdlib, `/usr/bin/python3` 3.9,
+  needs `PYTHONPATH=shared/python`) is the Mac's log inventory and rotator, run
+  hourly by `com.jacobr.log-rotate` (`macbook/launchagents/`, installed by
+  `macbook/scripts/install_log_rotate.zsh`) and driven by the Mac Panel through
+  the CLI only (`inventory|status|rotate|policy|add|ignore|unignore`, `--json`;
+  exit 0/1/2, 3 stale revision, 75 busy). `log_rotate/sources.py` finds logs
+  (LaunchAgent plists, `crontab_sync.tracked_log_targets`, scan roots, extras),
+  `eligibility.py` owns the safety rules (regular, user-owned, inside `$HOME`,
+  no symlinks, never `~/.claude`/`~/.codex`/`Mobile Documents`), `copytruncate.py`
+  archives (fsync) before truncating the same inode, `rotate.py` runs a pass
+  (own `rotate.log` last), `growth.py` the MB/day ledger, `problems.py` the one
+  needs-attention list (`inventory --json` `problems`, `status`, the panel's Logs
+  section; scanned `~/Library/Logs` logs start disabled as third-party). Defaults are
+  `shared/settings/log-rotate.json` (tool_settings, `~/.config/jacobr/log-rotate.json`);
+  per-file policies/extras/ignores are a separate revision-checked
+  `~/.config/jacobr/log-rotate-files.json`, since the settings file rejects keys
+  the declaration lacks; state is `~/.local/state/log-rotate/`. Its Automations
+  declaration is `shared/automations/log-rotate.json`.
 - Custom Mac keyboard mappings: BTT shortcuts and `repair_key_sequences.py`,
   plus `macbook/launchagents/com.jacobr.dictation-key-f13.plist`, are
   documented in `~/dev/visual-guides/static/reference/keyboard-shortcuts.json`.

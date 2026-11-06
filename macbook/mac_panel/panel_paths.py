@@ -29,3 +29,8 @@ LOG = DATA / 'panel.log'
 DEFERRED = ('/bin/zsh', str(ROOT / 'macbook/scripts/deferred.zsh'))
 RESTORE = ('/usr/bin/python3', '-I', '-B', str(ROOT / 'shared/sh/llm_restore.py'))
 GUARD = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/bettertouchtool/btt.py'), 'guard')
+# Not -I: the script finds its log_rotate package beside itself on sys.path, and -I drops that.
+LOG_ROTATE = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/scripts/log_rotate.py'))
+# What the LaunchAgent plist sets; passed explicitly so a panel started without it still works.
+LOG_ROTATE_ENV = {'PYTHONPATH': str(ROOT / 'shared/python')}
+LOG_ROTATE_LABEL = 'com.jacobr.log-rotate'

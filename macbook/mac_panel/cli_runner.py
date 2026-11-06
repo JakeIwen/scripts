@@ -24,13 +24,14 @@ def child_environment() -> dict[str, str]:
 
 
 class CliRunner:
-    def run(self, argv, timeout=30) -> CommandResult:
+    def run(self, argv, timeout=30, env=None) -> CommandResult:
+        """`env` adds to (never replaces) the minimal child environment."""
         if not argv or not os.path.isabs(argv[0]) or not all(isinstance(x, str) for x in argv):
             raise ValueError('Commands require an absolute executable and string arguments')
         try:
             result = subprocess.run(list(argv), stdin=subprocess.DEVNULL, capture_output=True,
                                     text=True, errors='replace', timeout=timeout,
-                                    env=child_environment(), shell=False)
+                                    env={**child_environment(), **(env or {})}, shell=False)
         except subprocess.TimeoutExpired:
             raise ApiError(504, 'Tool timed out; inspect its state before retrying') from None
         except OSError as exc:

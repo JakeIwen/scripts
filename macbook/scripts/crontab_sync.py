@@ -88,21 +88,86 @@ def expand_value(value, variables, home):
     return value
 
 
-def redirected_log(command, variables, home):
+REDIRECT_OPERATORS = ('>', '>>', '&>', '&>>')
+
+
+def _display_redirect_targets(command, variables, home):
+    """Every absolute file the command redirects output to, in order (stderr redirects included)."""
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars='><&|;')
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        return None
+        return []
+    targets = []
     for index, token in enumerate(tokens[:-1]):
-        if token not in ('>', '>>'):
+        if token not in REDIRECT_OPERATORS:
             continue
         value = expand_value(tokens[index + 1], variables, home)
         if '$' in value or value == '/dev/null' or not Path(value).is_absolute():
             continue
-        return value
-    return None
+        targets.append(value)
+    return targets
+
+
+def redirect_targets(command, variables, home):
+    """Only literal output redirections are safe inputs to unattended rotation."""
+    # Refuse dynamic shell syntax rather than guessing which words become filenames.
+    if any(mark in command for mark in ('`', '$(', '${', '%', '<', '\\')):
+        return []
+    quote = None
+    for index, char in enumerate(command):
+        if quote is not None:
+            if char == quote:
+                quote = None
+                if index + 1 < len(command) and command[index + 1] not in ' \t>&|;':
+                    return []
+        elif char == '#' and (index == 0 or command[index - 1] in ' \t>&|;'):
+            return []
+        elif char in ('"', "'"):
+            if index and command[index - 1] not in ' \t>&|;':
+                return []
+            quote = char
+    try:
+        lexer = shlex.shlex(command, posix=False, punctuation_chars='>&|;')
+        lexer.commenters = ''
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    if any(token in tokens for token in ('eval', '[[', '((')):
+        return []
+    targets = []
+    for index, token in enumerate(tokens[:-1]):
+        if token not in REDIRECT_OPERATORS:
+            continue
+        if index and tokens[index - 1].isdigit() and len(tokens[index - 1]) != 1:
+            return []
+        value = tokens[index + 1]
+        if value.startswith(('"', "'")):
+            quote = value[0]
+            if len(value) < 2 or value[-1] != quote:
+                return []
+            value = value[1:-1]
+            if quote == '"':
+                value = expand_value(value, {'HOME': str(home)}, home)
+            if '$' in value:
+                return []
+        else:
+            if any(mark in value for mark in ('"', "'", '*', '?', '[', '{', '}')):
+                return []
+            value = expand_value(value, variables, home)
+            if any(char.isspace() for char in value) or any(char in value for char in '*?['):
+                return []
+        if '$' in value or value == '/dev/null' or not Path(value).is_absolute():
+            continue
+        targets.append(value)
+    return targets
+
+
+def redirected_log(command, variables, home):
+    targets = _display_redirect_targets(command, variables, home)
+    return targets[0] if targets else None
 
 
 def split_cron_line(line):
@@ -166,10 +231,16 @@ def parse_jobs(text, home=None):
                 'managed_switch': MANAGED_SWITCHES.get(block),
                 'description': comment,
                 'log_path': redirected_log(command, variables, home),
+                '_log_paths': redirect_targets(command, variables, home),
                 '_line_index': index,
             })
         comment = ''
     return jobs
+
+
+def tracked_log_targets(text, home=None):
+    """(job id, redirect target paths) for each job that redirects output, paused jobs included."""
+    return [(job['id'], job['_log_paths']) for job in parse_jobs(text, home) if job['_log_paths']]
 
 
 def public_job(job):

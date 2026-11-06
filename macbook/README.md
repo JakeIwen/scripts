@@ -289,6 +289,93 @@ Read-only Mac Panel/CLI status rendering lives in `status.py`.
   does not raise the automation's overall status.
 - Stop it: `launchctl bootout gui/$(id -u)/com.jacobr.display-cab-dimmer`.
 
+## Log inventory and rotation
+
+`scripts/log_rotate.py` keeps the Mac's job logs from growing without bound,
+now that backups copy them. It lists every log the Mac's jobs write and rotates
+any over its limit in place by copy-truncate: the bytes go to `<log>.1.gz`
+(older copies shift to `.2.gz` and so on, past `keep` they are deleted), then
+the same inode is truncated, so launchd and cron, which hold the file open for
+appending, keep writing at offset 0. The archive is written and fsynced before
+the log is touched, so a failure leaves the original intact. Growth is checked
+before shifting archives; bytes appended during publication are copied through
+the still-open archive descriptor (another gzip member) and fsynced before
+truncation. Writes landing between that final catch-up and the truncate are lost,
+and a writer that does not open the file for appending resumes at its old offset and leaves a zero-filled gap, as
+with any copy-truncate; launchd's redirects and shell `>>` append.
+Pending recovery can also lose byte-identical regrowth if the writer truncates
+and rewrites the same inode with exactly the archived bytes before recovery.
+Archives stay in Time Machine; growth is bounded by `keep`, not by exclusions.
+It runs as the hourly LaunchAgent `com.jacobr.log-rotate` on `/usr/bin/python3`.
+
+Logs come from, in order (first source wins per path): LaunchAgent plists in
+`~/Library/LaunchAgents` (`StandardOutPath`/`StandardErrorPath`), the redirect
+targets in `macbook/crontab`, a scan of `~/.local/state`, `~/dev/scripts/tmp`
+and `~/Library/Logs` (`.log`, `.out`, `.err`, four directories deep), and extra
+paths added by hand. It only touches regular files owned by you inside `$HOME`,
+never through a symlink or hard link and never under `~/.claude`, `~/.codex` or
+`~/Library/Mobile Documents`; a listed path that breaks those rules shows as
+`refused` and is never opened. Log contents are never printed, only paths and
+sizes.
+
+Other apps write under `~/Library/Logs` too (for example `Claude/main.log`). A
+log the scan finds there starts out `disabled` with the note "third-party app
+log; enable per file": it is listed and its bytes count in the totals, but the
+rotator leaves it alone until you opt in with a per-file `--enabled on` policy
+or add the path as an extra. A LaunchAgent or crontab log in that folder is
+yours and rotates normally. `inventory --json` also carries `problems`, the
+list of what needs attention (a log past twice its limit, a
+total over the warning level, errors in the last run, a stale run), which
+`status` and the Mac Panel's Logs section both show as sent. Refused paths
+stay visible in the table with their reason, but do not need attention except
+for `unrecorded archives; adopt to continue` or `archive record unreadable`:
+these require explicit recovery. Any enabled log over twice its limit also
+raises a rotation-failing error, even while refused.
+
+- Defaults (rotate above 10 MB, keep 5, gzip, warn above 500 MB total) are
+  declared in `shared/settings/log-rotate.json` and edited in the Mac Panel's
+  Settings section (default `keep` is at least 1; only a per-file policy can
+  choose 0 to discard contents). Per-file policies, extras and ignores are saved in
+  `~/.config/jacobr/log-rotate-files.json` (mode 600, revision-checked); state
+  (`last_sizes.json` for growth per day, `last_rotated.json`, `last_run.json`,
+  `archives.json` for archive provenance, `rotate.log`) is in `~/.local/state/log-rotate/`. The rotator rotates its own
+  `rotate.log` last. Archive records match path, inode, size and birth time;
+  device numbers are informational because macOS can change them across boots.
+  Publication records the destination before linking, and removes the source's
+  record after unlinking, so interrupted publication can leave extra records
+  rather than unrecorded archives. Missing paths are pruned at each run's start.
+  Missing or mismatched records never authorize automatic deletion: an enabled
+  log is `refused` with `unrecorded archives; adopt to continue`. A corrupt or
+  unreadable `archives.json` refuses every log with archives as `archive record
+  unreadable`, and blocks all rotation and adoption without rewriting the record.
+  Repair the file by hand, or preserve it with
+  `mv ~/.local/state/log-rotate/archives.json ~/.local/state/log-rotate/archives.json.saved`
+  (choose an unused backup name), then explicitly adopt each log's archives as
+  described below. Removing the corrupt record does not authorize archive deletion.
+- Recovery: `adopt --revision REV PATH` explicitly records all existing
+  `<PATH>.N[.gz]` archives after checking each is regular, owned by you,
+  non-symlinked, not hard-linked and inside the same allowed locations. It
+  returns the inventory without changing archive bytes. Use the displayed
+  revision from `inventory --json`; a stale revision refuses the operation.
+  The Logs row offers the same two-click **Adopt archives** action. Inspect
+  the archive paths before adopting; adoption trusts the files currently there.
+- Install or update: `zsh /Users/jacobr/dev/scripts/macbook/scripts/install_log_rotate.zsh`.
+  It lints the plist, checks the script runs, creates the state directory
+  (launchd opens `launchd.log` there before the job starts) and loads the agent.
+  Verify with
+  `launchctl print gui/$(id -u)/com.jacobr.log-rotate | grep -E 'state =|runs =|last exit'`
+  (`last exit code = 0` once it has run) and
+  `tail ~/.local/state/log-rotate/rotate.log`.
+- From the repo root, `PYTHONPATH=shared/python /usr/bin/python3 -B
+  macbook/scripts/log_rotate.py` takes `inventory`, `status`, `rotate [--only
+  PATH] [--force]`, and the edits `policy`, `add`, `ignore`, `unignore` and `adopt`
+  (each needs `--revision` from `inventory --json`); every command takes
+  `--json`. Exit 0 is ok, 1 an error (also a rotate where some log failed, with
+  the full result still printed), 2 usage, 3 a stale revision and 75 when
+  another run or edit holds the lock.
+- Remove: `launchctl bootout gui/$(id -u)/com.jacobr.log-rotate` and delete
+  `~/Library/LaunchAgents/com.jacobr.log-rotate.plist`. Archives stay.
+
 ## Firefox ads and telemetry off
 
 `scripts/firefox_quiet_prefs.py` writes a managed block into `user.js` in every

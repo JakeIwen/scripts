@@ -134,7 +134,9 @@ table { border-collapse: collapse; width: 100%; text-align: left; font-size: var
 th, td { vertical-align: top; border-bottom: 1px solid var(--line); padding: 7px var(--space-2); overflow-wrap: break-word; }
 th { font-weight: 600; white-space: nowrap; color: var(--muted); font-size: var(--text-small); }
 tr:last-child td { border-bottom: 0; }
-td time { white-space: nowrap; }
+td time, td .nowrap { white-space: nowrap; }
+/* One line per log; the full path is the tooltip, so a long name is cut rather than wrapped letter by letter. */
+code.log-name { display: inline-block; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-3); margin: var(--space-2) 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
@@ -188,4 +190,8 @@ summary .muted { color: var(--muted); }
 .sudo-install { margin: var(--space-2) 0; }
 code.copyable { user-select: all; padding: 2px 6px; background: var(--soft); border: 1px solid var(--line); border-radius: var(--radius-1); }
 .add-job .setting { max-width: none; }
+span.log-source { display: inline-block; max-width: 20ch; overflow-wrap: anywhere; }
+/* The per-log editor sits in a table cell, so its two columns stay narrow. */
+.log-policy .setting { grid-template-columns: minmax(110px, 1fr) minmax(110px, 160px); gap: var(--space-1) var(--space-2); }
+@media (max-width: 650px) { .log-policy .setting { grid-template-columns: 1fr; } }
 .add-job textarea { width: 100%; font: var(--text-small)/1.45 var(--mono); }

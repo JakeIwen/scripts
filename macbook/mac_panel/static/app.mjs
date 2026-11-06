@@ -9,6 +9,7 @@ import {DEFAULT_SECTION, sectionTitle} from './section_copy.mjs';
 import * as crontab from './section_crontab.mjs';
 import * as deferred from './section_deferred.mjs';
 import * as guard from './section_guard.mjs';
+import * as logs from './section_logs.mjs';
 import * as metered from './section_metered.mjs';
 import * as ntfy from './section_ntfy.mjs';
 import * as overview from './section_overview.mjs';
@@ -32,6 +33,7 @@ const MODULES = [
   ['amphetamine', amphetamine, {auto: false}],
   ['guard', guard, {auto: false}],
   ['ntfy', ntfy, {auto: false}],
+  ['logs', logs, {auto: false}],
   ['usage', usage, {auto: false}],
   ['settings', settings, {auto: false}],
 ];

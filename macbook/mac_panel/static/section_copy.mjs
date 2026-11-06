@@ -6,7 +6,7 @@ export const GROUPS = [
   {id: 'home', title: 'Overview', sections: ['overview']},
   {id: 'jobs', title: 'Jobs & services', sections: ['services', 'deferred', 'crontab', 'automations', 'llm-restore']},
   {id: 'network', title: 'Network', sections: ['metered']},
-  {id: 'mac', title: 'Mac', sections: ['amphetamine', 'guard', 'ntfy']},
+  {id: 'mac', title: 'Mac', sections: ['amphetamine', 'guard', 'ntfy', 'logs']},
   {id: 'usage', title: 'Usage', sections: ['usage']},
   {id: 'settings', title: 'Settings', sections: ['settings']},
 ];
@@ -51,6 +51,10 @@ export const SECTION_COPY = {
   ntfy: {
     title: 'ntfy alerts',
     info: 'Which Claude, Codex and panel hooks send phone alerts, read from their configuration. Topic URLs are secrets and never shown. The test button sends one real alert.',
+  },
+  logs: {
+    title: 'Logs',
+    info: 'Every log the Mac\'s jobs write, found from LaunchAgent plists, the tracked crontab and a scan of the state folders. The rotator keeps each one under its size limit by archiving the old part beside it. Sizes and paths only; contents are never read here.',
   },
   usage: {
     title: 'Usage',
@@ -136,6 +140,34 @@ export const USAGE_COPY = {
   noData: 'The usage tool gave no snapshot',
   noHistory: 'No usage history recorded for this range yet',
   staleMinutes: 120,
+};
+
+export const LOGS_COPY = {
+  historyTitle: 'Total live size',
+  historyInfo: 'Bytes in live log files, sampled every 15 minutes while the panel runs. A steady climb with no drops means rotation is not keeping up.',
+  noHistory: 'No log history recorded for this range yet',
+  logsTitle: 'Logs',
+  whatCounts: 'A log is a file a LaunchAgent or cron job redirects its output to, a .log, .out or .err file found under the scanned state folders, or a path you add. Symlinks, files outside your home folder and files you do not own are never rotated.',
+  copyTruncate: 'Rotation copies the file to a numbered archive, then empties the original in place. The file keeps its identity, so a running job keeps appending to it without being restarted.',
+  backups: 'Archives stay beside the log and are included in Time Machine and cloud backups. Growth is bounded by the number of archives kept, not by excluding them from backup.',
+  growth: 'How fast the live file grew per day, from its size at the rotator\'s last two runs. A dash means there is no earlier size yet. Rotation resets the file, so the figure reflects growth since then.',
+  rotateAllInfo: 'Rotates every log whose size is past its limit. Logs under their limit are left alone.',
+  rotateRowInfo: 'Rotates this log now, even if it is under its limit.',
+  policyInfo: 'The size that triggers rotation, how many archives to keep, and whether to compress them. Saved for this file only; Reset returns it to the defaults.',
+  ignoreInfo: 'Stops listing and rotating this path. Unignore it from the list below.',
+  addTitle: 'Add a log path',
+  addInfo: 'Adds a file the automatic search misses. It must be an absolute path inside your home folder; the rotator refuses anything else.',
+  ignoredTitle: 'Ignored paths',
+  conflict: 'The log settings changed since this page loaded.',
+  empty: 'No logs found.',
+  states: {ok: 'ok', due: 'due', disabled: 'off', missing: 'missing', refused: 'refused'},
+  stateHelp: {
+    ok: 'Under its size limit.',
+    due: 'Past its limit; the next run archives it.',
+    disabled: 'Rotation is turned off for this file.',
+    missing: 'The file does not exist right now.',
+    refused: 'The rotator will not touch this path.',
+  },
 };
 
 export const SETTINGS_COPY = {

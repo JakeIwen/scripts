@@ -1,0 +1,11 @@
+{
+  "tool": "log-rotate",
+  "title": "Log rotation (see Logs)",
+  "description": "Hourly check that rotates the Mac's job logs in place (copy-truncate, gzip archives beside each log) so none grows without bound.",
+  "service": "com.jacobr.log-rotate",
+  "settings": "log-rotate",
+  "status": {"argv": ["/usr/bin/env", "PYTHONPATH={repo}/shared/python", "/usr/bin/python3", "-B", "{repo}/macbook/scripts/log_rotate.py", "status", "--json"], "timeout": 30},
+  "actions": [
+    {"name": "rotate", "label": "Rotate now", "description": "Archive and empty every log that is over its limit now, instead of waiting for the hourly check.", "argv": ["/usr/bin/env", "PYTHONPATH={repo}/shared/python", "/usr/bin/python3", "-B", "{repo}/macbook/scripts/log_rotate.py", "rotate", "--json"], "timeout": 120, "confirm": true}
+  ]
+}

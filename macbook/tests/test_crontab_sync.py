@@ -121,6 +121,18 @@ class CrontabSyncTests(unittest.TestCase):
         self.assertEqual(job['command'], '$scripts/cleanup >> "$scripts/cleanup.log" 2>&1')
         self.assertEqual(job['log_path'], '/fixture/cleanup.log')
 
+    def test_every_redirect_target_is_exposed_but_not_in_the_public_job(self):
+        text = ('scripts=/fixture\n'
+                '0 4 * * * $scripts/job > $scripts/out.log 2> $scripts/err.log\n'
+                '1 4 * * * $scripts/job &> $scripts/both.log\n'
+                '2 4 * * * $scripts/job >/dev/null 2>&1\n')
+        self.assertEqual([paths for _, paths in crontab_sync.tracked_log_targets(text)],
+                         [['/fixture/out.log', '/fixture/err.log'], ['/fixture/both.log']])
+        self.set_crontab(text)
+        jobs = self.result_json('status', '--json')['jobs']
+        self.assertEqual(jobs[0]['log_path'], '/fixture/out.log')
+        self.assertNotIn('_log_paths', jobs[0])
+
     def test_pause_and_resume_preserve_line_mode_and_install(self):
         self.set_crontab(ACTIVE_JOB + '\n', mode=0o640)
         status_value = self.result_json('status', '--json')

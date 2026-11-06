@@ -22,6 +22,7 @@ export async function api(path, body, retry = true) {
   if (!response.ok) {
     const error = new Error(result.error || `HTTP ${response.status}`);
     error.status = response.status;
+    error.code = result.code;
     throw error;
   }
   return result;

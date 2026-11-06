@@ -1,0 +1,11 @@
+{
+  "tool": "log-rotate",
+  "title": "Log rotation",
+  "description": "Defaults for rotating the Mac's job logs in place (LaunchAgent com.jacobr.log-rotate). A log's own policy, set in the Logs section, overrides these for that file only.",
+  "settings": [
+    {"name": "max_mb", "label": "Rotate above", "type": "integer", "minimum": 1, "maximum": 500, "default": 10, "unit": "MB", "description": "A log larger than this is archived and emptied at the next hourly check."},
+    {"name": "keep", "label": "Archives to keep", "type": "integer", "minimum": 1, "maximum": 30, "default": 5, "description": "How many rotated copies (<log>.1.gz to <log>.N.gz) stay beside the log. Per-file policies can explicitly choose 0 to discard contents on rotation."},
+    {"name": "compress", "label": "Compress archives", "type": "boolean", "default": true, "description": "Gzip rotated copies."},
+    {"name": "warn_total_mb", "label": "Warn above total", "type": "integer", "minimum": 50, "maximum": 5000, "default": 500, "unit": "MB", "description": "The status turns to a warning when logs plus archives together exceed this."}
+  ]
+}
