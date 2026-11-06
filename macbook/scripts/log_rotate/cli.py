@@ -117,7 +117,7 @@ def _run_rotate(args: argparse.Namespace, home: str) -> Dict[str, Any]:
     with state.run_lock(home):
         ledger = archives.prune(home)
         snapshot = inventory.take_snapshot(home)
-        archives.cleanup_temporaries([entry.path for entry in snapshot.entries], home, ledger)
+        archives.cleanup_temporaries(snapshot.entries, home, ledger)
         return rotate.run_rotation(snapshot, home, only=only, force=args.force)
 
 

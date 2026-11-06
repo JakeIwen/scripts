@@ -34,3 +34,24 @@ class UnlistableScanTests(LogRotateCase):
                     finally:
                         directory.chmod(0o700)
                     self.assertTrue(Path(locked).read_bytes() == b'locked fixture')
+
+
+class TemporaryCleanupScopeTests(LogRotateCase):
+    def _plant(self, relative, name):
+        planted = Path(self.write(relative + '/' + name, b'planted'))
+        old = 1_000_000_000
+        os.utime(planted, (old, old))
+        return planted
+
+    def test_unreadable_folder_entry_never_cleans_beside_the_folder(self):
+        healthy = self.write('.local/state/app/job.log', payload('healthy'))
+        self.set_policy(healthy, '--max-mb', '1')
+        abandoned = self._plant('.local/state/app', '.job.log.rotating.abcdefgh')
+        locked = Path(self.write('Library/Logs/job.log', b'locked fixture')).parent
+        outside = self._plant('Library', '.Logs.rotating.abcdefgh')
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o700)
+        code, value, _ = self.run_cli('rotate', '--json')
+        self.assertEqual((code, value['errors']), (0, []))
+        self.assertTrue(outside.exists())
+        self.assertFalse(abandoned.exists())

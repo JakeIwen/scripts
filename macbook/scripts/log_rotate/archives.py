@@ -9,7 +9,7 @@ import time
 from typing import Dict, List
 
 from . import eligibility, state
-from .records import EXIT_ERROR, LogRotateError
+from .records import EXIT_ERROR, STATE_REFUSED, LogReason, LogRotateError
 
 UNRECORDED_NOTE = "unrecorded archives; adopt to continue"
 
@@ -162,8 +162,18 @@ def prune(home: str) -> dict:
     return retained
 
 
-def cleanup_temporaries(paths: list, home: str, ledger: dict) -> None:
-    """Reclaim abandoned unpublished copies, never an archive inode or an unsafe path."""
+def _cleanup_candidate(entry, home: str) -> bool:
+    """Only a regular tracked log qualifies: a folder or refused entry's parent is not ours to clean."""
+    if getattr(entry, "state", None) == STATE_REFUSED or getattr(entry, "reason", None) == LogReason.UNREADABLE_DIRECTORY:
+        return False
+    try:
+        return stat.S_ISREG(os.lstat(entry.path).st_mode)
+    except OSError:
+        return False
+
+
+def cleanup_temporaries(entries: list, home: str, ledger: dict) -> None:
+    """Reclaim abandoned unpublished copies beside eligible log entries, never an archive inode or an unsafe path."""
     recorded = {(item.get("st_dev"), item.get("st_ino"))
                 for item in ledger.values() if isinstance(item, dict)}
     for archive in ledger:
@@ -173,7 +183,10 @@ def cleanup_temporaries(paths: list, home: str, ledger: dict) -> None:
         except OSError:
             pass
     cutoff = time.time() - 3600
-    for path in paths:
+    for log in entries:
+        if not _cleanup_candidate(log, home):
+            continue
+        path = log.path
         directory, base = os.path.split(path)
         if (eligibility.location_refusal(path, home) is not None
                 or eligibility.directory_problem(directory, home) is not None):
