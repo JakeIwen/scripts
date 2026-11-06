@@ -326,28 +326,22 @@ class LogsSamplingTests(unittest.TestCase):
     def payload(self, *logs, problems=(), **over):
         return {**inventory(*logs, problems=problems), 'service': {'installed': True, 'loaded': True}, **over}
 
-    def test_cache_is_sampled_once_and_refreshed_after_one_cadence(self):
+    def test_each_cadence_consumes_a_fresh_inventory_and_starts_the_next_refresh(self):
         now = [100]
-        runner = FakeRunner([json_command(inventory(entry()))] * 2)
+        runner = FakeRunner([json_command(inventory(entry(bytes=n))) for n in range(4)])
         logs = LogsAdapter(runner, FakeServices(), clock=lambda: now[0])
-        payload = logs.read()
+        logs.read()
         with mock.patch('logs_adapter.threading.Thread') as thread:
-            self.assertEqual(logs.sample(900), payload)
-            self.assertIsNone(logs.sample(900))
-            now[0] = 999
-            self.assertIsNone(logs.sample(900))
-            thread.assert_not_called()
-            now[0] = 1000
-            self.assertIsNone(logs.sample(900))
-            self.assertIsNone(logs.sample(900))
-            thread.assert_called_once()
-            self.assertTrue(thread.call_args.kwargs['daemon'])
-            thread.call_args.kwargs['target']()
-            self.assertEqual(runner.calls[-1][1], 30)
-            self.assertEqual(logs.sample(900), payload)
-            self.assertIsNone(logs.sample(900))
-            thread.assert_called_once()
-        self.assertEqual(len(runner.calls), 2)
+            for tick in range(3):
+                now[0] = 100 + tick * 900
+                self.assertEqual(logs.sample(900)['logs'][0]['bytes'], tick)
+                self.assertIsNone(logs.sample(900))
+                self.assertEqual(thread.call_count, tick + 1)
+                self.assertTrue(thread.call_args.kwargs['daemon'])
+                now[0] += 1  # The refresh completes between ticks, without a page read.
+                thread.call_args.kwargs['target']()
+                self.assertEqual(runner.calls[-1][1], 30)
+        self.assertEqual(len(runner.calls), 4)
 
     def test_slow_inventory_does_not_delay_another_sections_sample(self):
         entered, release, sampled = threading.Event(), threading.Event(), threading.Event()
@@ -381,7 +375,8 @@ class LogsSamplingTests(unittest.TestCase):
             release.set()
             sampler.stop()
             logs.refresh_thread.join(5)
-        self.assertIsNotNone(logs.sample(900))
+        with mock.patch('logs_adapter.threading.Thread'):
+            self.assertIsNotNone(logs.sample(900))
 
     def test_failed_refresh_can_be_retried_without_stale_samples(self):
         logs = LogsAdapter(FakeRunner([CommandResult(1, '', 'unavailable'), json_command(inventory())]),
@@ -395,7 +390,7 @@ class LogsSamplingTests(unittest.TestCase):
             thread.call_args.kwargs['target']()
             self.assertEqual(logs.sample(900)['totals']['files'], 0)
             self.assertIsNone(logs.sample(900))
-            self.assertEqual(thread.call_count, 2)
+            self.assertEqual(thread.call_count, 3)
 
     def test_sampler_uses_a_sampling_method_on_any_adapter(self):
         done, recorded, cadences = threading.Event(), [], []

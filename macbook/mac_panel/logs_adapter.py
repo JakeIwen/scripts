@@ -174,10 +174,11 @@ class LogsAdapter:
         """Sample each cached inventory once; refresh without consuming a shared task slot."""
         with self.cache_lock:
             stale = self.cached is None or self.clock() - self.cached_at >= cadence
-            refresh = stale and not self.refreshing
+            payload = self.cached if self.cached_at != self.sampled_at else None
+            # Prepare the next cadence's inventory as soon as this one is consumed.
+            refresh = (stale or payload is not None) and not self.refreshing
             if refresh:
                 self.refreshing = True
-            payload = self.cached if self.cached_at != self.sampled_at else None
             if payload is not None:
                 self.sampled_at = self.cached_at
         if refresh:
