@@ -52,17 +52,23 @@ confirmed restart as the services table. Static files are read per request.
 
 ## Sections and owners
 
-| Section | Reads and commands |
+Sections are grouped in the sidebar; the hash opens one. Each row names the owner CLI or
+module that holds the section's state: the panel only relays validated requests to it.
+
+| Group, section (hash) | Reads and commands |
 | --- | --- |
-| Deferred jobs | `/bin/zsh macbook/scripts/deferred.zsh list --json`; `cancel`, `retry`, `reschedule`, and `run-now` remain owned by that CLI. Run-now returns an asynchronous task receipt with start and finish times, shown in the job's row. Receipts are bounded and reset when the panel restarts; the job CLI retains durable job state. |
-| Background services | `/bin/launchctl list` plus user `com.jacobr.*` plists; installed system daemons use `launchctl print system/<label>` and keep its stderr as the row's reason when it fails; "Could not find service" means not loaded. An unloaded job that `launchctl print-disabled` lists as disabled (what a local-service `stop` leaves) shows as grey "disabled" rather than a yellow warning. The inventory carries only each log's path, stream and modification time; `GET /api/services/logs/<label>` returns the bounded, redacted tails for one service when its disclosure is open. `/dev/null` streams are not listed. Confirmed user-agent restarts use `launchctl kickstart -k gui/<uid>/<label>`; system daemons are status-only. |
-| User crontab | `/usr/bin/python3 -B macbook/scripts/crontab_sync.py status --json` reads the tracked and live crontabs. Per-job pause/resume and confirmed installation use the same CLI with the displayed revision; redirected log modification times are status hints, not proof that a job succeeded. The adapter derives each job's `program` (script name and arguments, without paths, redirections or interpreter flags) for the table. |
-| llm-restore | `/usr/bin/python3 -I -B shared/sh/llm_restore.py --cron --json`; on/off adds `on` or `off` after `--cron`. This CLI owns its managed crontab block. |
-| BTT guard | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `audit` (a fresh read-only audit on every section load), `service status`, `acceptance` (the scheduled monitor's pending and last automatic edit acceptance, shown as Auto-accept; drift pending acceptance shows yellow, not red), `inspect`. Explicit known-good acceptance uses `checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check. Repair is Terminal-only. |
-| ntfy alerts | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify. Deferred and guard warnings use `macbook/scripts/ntfy_warning.py`; the destination value is never read or displayed. A confirmed test uses `guard notify-test --send`. |
-| Settings | `shared/python/tool_settings.py` loads declarations from `shared/settings/` (plus `~/.config/jacobr/declarations/` for tools that live outside this repository) and revision-checked values from `~/.config/jacobr/`. The generated controls save through that module; reset sends declared defaults. A declaration's optional `label` is the form wording; the name stays the key. A declaration that can't be loaded (malformed, declared in both directories, a dangling link) becomes an error card on that tool, saves to it are refused, and the other forms keep working; an unreadable values file shows on its form, which falls back to defaults. |
-| Automations | `shared/python/tool_automation.py` loads declarations from `shared/automations/`. Each status command prints one validated `tool_automation.status_record`; declared actions run synchronously through the tool's fixed absolute argv and timeout, with confirmation when the declaration requires it. A declaration or status failure remains an error on that automation without taking down the section. |
-| Amphetamine | `macbook/scripts/amphetamine_control.py status/configure` reads and updates Amphetamine's native automatic-lock settings. The checkbox and minutes field apply together. Enabling also allows the locked display to sleep and starts an indefinite keep-awake session. Disabling automatic lock preserves the current session. The battery cutoff is read-only. |
+| Overview (`#overview`) | Reads no source of its own: it draws from the state registry the other sections fill. Needs attention, quick controls (Low Data Mode, network verdict, llm-restore), one card per section, a settings finder. |
+| Jobs & services, Services (`#services`) | `/bin/launchctl list` plus user `com.jacobr.*` plists; installed system daemons use `launchctl print system/<label>`. A job `launchctl print-disabled` lists as disabled shows grey "disabled". The inventory carries each log's path, stream and modification time; `GET /api/services/logs/<label>` returns bounded, redacted tails when a disclosure opens. Confirmed `POST /api/services {action: restart / start / stop, label, confirmed: true}` for user agents (restart `launchctl kickstart -k`; stop disables then boots out, so KeepAlive cannot undo it; start enables then bootstraps or kicks). Stop and start are refused for `com.jacobr.mac-panel` itself; the header's restart stays. Daemons: restart only, through `sudo -n /bin/launchctl kickstart -k system/<label>`, offered when the sudoers rule below is present. |
+| Jobs & services, Deferred jobs (`#deferred`) | `/bin/zsh macbook/scripts/deferred.zsh list --json`; `cancel`, `retry`, `reschedule`, `run-now` and `add` stay owned by that CLI. Run-now returns an asynchronous task receipt shown in the row; receipts are bounded and reset when the panel restarts. The add form takes a name, a due time, a description and a script (must start with `#!`); the adapter writes it to a private temporary file for `deferred.zsh add` and deletes it. |
+| Jobs & services, Crontab (`#crontab`) | `/usr/bin/python3 -B macbook/scripts/crontab_sync.py status --json` reads the tracked and live crontabs. Pause, resume, install and run-now use the same CLI with the displayed revision. Each job carries its next runs for the schedule chart. Log modification times are hints, not proof a job succeeded. |
+| Jobs & services, Automations (`#automations`) | `shared/python/tool_automation.py` loads declarations from `shared/automations/`. Each status command prints one validated `status_record`; declared actions run through the tool's fixed argv and timeout, confirmed when declared. An action declared `async` (the Codex/Claude "Check for updates now") runs through a background task and the card shows its receipt. |
+| Jobs & services, llm-restore (`#llm-restore`) | `/usr/bin/python3 -I -B shared/sh/llm_restore.py --cron --json`; on/off adds `on` or `off`. That CLI owns its crontab block. |
+| Network, Metered (`#metered`) | `macbook/metered/mac-metered status --json` and its mutations: SSID add (offline) and remove (needs the Pi and its revision), sync, approve, revoke, mode, exempt and Low Data Mode. Pi consumers are approved on the Pi; the panel shows what the Pi reported. A history card plots the verdict, Low Data Mode and each consumer from the history store. |
+| Mac, Amphetamine (`#amphetamine`) | `macbook/scripts/amphetamine_control.py status/configure`. The automatic-lock switch and the idle-minutes field each save through `configure` with the displayed revision. The battery cutoff is read-only (Amphetamine owns it). |
+| Mac, BTT guard (`#guard`) | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `audit` (a fresh read-only audit on every load), `service status`, `acceptance` (shown as Auto-accept; drift pending acceptance is yellow), `inspect`. Inspect and audit are unconfirmed and read-only; the known-good checkpoint (`checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check) is armed and sends `confirmed: true`. Repair is Terminal-only. |
+| Mac, ntfy alerts (`#ntfy`) | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify; destinations are never read or shown. The one action is a confirmed test through `guard notify-test --send`. |
+| Usage (`#usage`) | `/usr/bin/python3 -I -B /Users/jacobr/config/mac/usage-budget/usage_budget.py facts --json`, a read-only subcommand that reads the cached snapshot only. Gauges for the Claude, Fable and Codex windows and credits, the routing lean, workers, review and availability, and sparklines from the history store. No account identity is exposed. |
+| Settings (`#settings`) | `shared/python/tool_settings.py` loads declarations from `shared/settings/` (plus `~/.config/jacobr/declarations/`) and revision-checked values from `~/.config/jacobr/`. Each field renders through one row with its description in an info icon, its unit and a "changed from default" marker; save checks the revision and a conflict offers Reload; reset is armed and sends `action: "reset"` with `confirmed: true`. A declaration that cannot be loaded becomes an error card on that tool alone. |
 
 A new automation joins the panel by adding its declaration under
 `shared/automations/` and a status command that prints a
@@ -73,8 +79,9 @@ durable state and every mutation the declaration exposes.
 
 Open `http://127.0.0.1:8769/#amphetamine`. Automatic lock operates only during
 an active Amphetamine session. The panel reads native preferences on refresh,
-so edits from Amphetamine's own preferences appear here too. Set the desired
-minutes (1–240), check or uncheck automatic lock, and Apply. The displayed
+so edits from Amphetamine's own preferences appear here too. Use the switch
+for automatic lock (it saves at once with the saved minutes) and the minutes field
+(1–240) with Apply. The displayed
 session status distinguishes enabled locking from an active keep-awake session.
 
 Applying restarts Amphetamine under a temporary `caffeinate -i` assertion,
@@ -108,32 +115,52 @@ their section. ntfy configuration remains owner-managed rather than panel-editab
 
 ### Refresh behaviour
 
-Deferred jobs and Background services poll every 15 seconds; every section has
-its own Refresh button and "updated N s ago" line, and "Refresh all" refreshes
-the rest. A poll (and "Refresh all") skips a section while it has unsaved edits,
-an open editor, an armed confirmation or a focused field, and says so in that
-line; nothing a reader typed is replaced by a render. Every 15 seconds the page
-also reads `/healthz`: it reports an unreachable panel in the header, renews the
-token and refreshes after a panel restart, and offers a restart when the Python
-on disk is newer than the running process. Action results show in the section's
-notice with a timestamp; successes clear after 20 seconds, errors stay.
+Services, Deferred jobs, Automations and Metered poll every 15 seconds; every section has
+its own Refresh button and "updated N s ago" line, and "Refresh all" refreshes the rest.
+A poll (and "Refresh all") skips a section while it has unsaved edits, an open editor, an
+armed confirmation or a focused field, and says so in that line; nothing a reader typed is
+replaced by a render. Every 15 seconds the page also reads `/healthz`: it reports an
+unreachable panel in the header, renews the token and refreshes after a panel restart, and
+offers a restart when the Python on disk is newer than the running process. Action results
+show in the section's notice with a timestamp; successes clear after 20 seconds, errors stay.
 
-Two-click buttons (restart, run now, cancel job, pause/resume/install crontab,
-checkpoint, test alert, reset to defaults) arm on the first click and disarm on
-Escape, blur or after 8 seconds. Reschedule opens an inline editor whose Apply
-is enabled only once the time differs.
+Every armed action is two-click, worded `Confirm: <verb phrase>`: the first click arms it,
+Escape, blur or 8 seconds disarm it, and the second click sends the request with
+`confirmed: true`. The server refuses these requests with HTTP 400 without it: service
+start, stop and restart, crontab pause, resume, install and run-now, deferred run-now,
+cancel and add, metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
+test, settings reset and confirmed automation actions. Reschedule opens an inline editor
+whose Apply is enabled only once the time differs.
 
-Sections are grouped in a sidebar (a drawer opened by Menu below 900 px). A nav entry
-shows its state dot (green fine, yellow needs attention, red failing, grey idle, hollow
-unknown) and its one-line summary as the hover tooltip; a group heading shows the worst of
-its members. The arrow keys, Home and End move between entries. The URL hash names the open
-section (`#overview` by default, `#services`, `#llm-restore`, ...), so in-page links such as
-crontab's llm-restore link switch sections. Cmd-K (Ctrl-K) searches sections, settings
-fields and any rows sections add; choosing a result scrolls to and highlights the row. Every section
-loads at startup and the polled ones refresh whether or not their tab is open,
-so the dots stay current; a section without auto-refresh reloads when it
-opens more than 15 seconds after its last load. The open tab and the theme choice (system, light, dark)
-are kept in the browser's `localStorage` only.
+Navigation: the sidebar groups Overview; Jobs & services (Services, Deferred jobs,
+Crontab, Automations, llm-restore); Network (Metered); Mac (Amphetamine, BTT guard, ntfy
+alerts); Usage; Settings. It is a drawer opened by Menu below 900 px. A nav entry shows its
+state dot (green fine, yellow needs attention, red failing, grey idle, hollow unknown) and
+its one-line summary as the hover tooltip; a group heading shows the worst of its members.
+The arrow keys, Home and End move between entries. The URL hash names the open section
+(`#overview` by default), so in-page links such as crontab's llm-restore link switch
+sections. Cmd-K (Ctrl-K) focuses the header search over sections, settings fields, services,
+cron and deferred jobs, metered SSIDs and consumers, and actions such as "restart
+mac-panel". A result scrolls to and highlights its row; an action result only navigates to
+the row and focuses its armed button, so the single confirmation path stays. Every section
+loads at startup and the polled ones refresh whether or not their tab is open, so the dots
+stay current; a section without auto-refresh reloads when it opens more than 15 seconds
+after its last load. The open section and theme (system, light, dark) are kept in the
+browser's `localStorage` only.
+
+Charts are inline SVG drawn from the panel's own history: service health, the schedule of
+cron and deferred runs, network metering and usage budgets. History charts have a 24 h /
+7 d toggle and a tooltip (hover, or tap) with the exact value and time.
+
+### History store
+
+`sampler.py` runs a daemon thread that reads the existing adapters and appends samples to
+`~/.local/state/mac-panel/history.sqlite` (directory 700, file 600, WAL): services,
+metered and llm-restore every 60 s, crontab and deferred every 300 s, usage every 900 s.
+Samples are pruned after 30 days. `GET /api/history?section=&since=&until=[&key=]` returns
+`{series: {key: [{ts, level, value, text}]}}`, thinned to at most 5000 samples, behind the
+same token guard as `/api/`. History records only while the panel runs, so gaps are
+expected. `MAC_PANEL_STATE_DIR` relocates the store.
 
 ### Crontab actions
 
@@ -163,9 +190,9 @@ error. The adapter maps both 75 and 3 to HTTP 409; invalid request bodies are HT
 - `app.mjs`: the section registry (id, renderer, auto-refresh, optional `searchItems`,
   `attentionItems`, `cardExtra`), polling, panel health and the Overview refresh.
 - `shell.mjs`: header, grouped sidebar (a drawer below 900 px), section frames, hash
-  routing (`goTo(id, anchor)`, `revealAnchor`), theme. `section_copy.mjs`: groups, titles
-  and each section's info paragraph. `search.mjs` (pure, Node-tested): index and scoring;
-  `search_ui.mjs`: the header popover and Cmd-K.
+  routing (`goTo(id, anchor)`, `revealAnchor`), theme. `section_copy.mjs`: groups, titles,
+  each section's info paragraph and the copy for the migrated sections. `search.mjs` (pure,
+  Node-tested): index and scoring; `search_ui.mjs`: the header popover and Cmd-K.
 - `panel_sections.mjs`: `refresh` (GET, keeps disclosure and focus state), `action` (POST,
   notice, then refresh), the dirty check polls obey, and the state registry
   `state[section] = {payload, summary, level, updatedAt, error}` that nav dots, Overview and
@@ -175,34 +202,45 @@ error. The adapter maps both 75 and 3 to HTTP 409; invalid request bodies are HT
   `settingRow`, `card`, `kv`, `emptyState`, `loadError`, `fieldError`, `tag`, `timeNode`,
   `anchor`) and `panel_dom.mjs` (tables, disclosures, notices, focus keys; re-exports the rest).
 - `charts.mjs`: pure geometry (Node-tested) and the SVG renderers `stateStrip`, `sparkline`,
-  `gauge`, `scheduleStrip`, `rangeToggle`. `tokens.css` holds every colour; `style.css` and
-  `charts.css` use only its variables.
+  `gauge`, `scheduleStrip`, `rangeToggle`. `history_panel.mjs`: a range-toggled block that
+  fetches and briefly caches `/api/history` for a section's charts. `tokens.css` holds every
+  colour; `style.css` and `charts.css` use only its variables.
 - `relative_time.mjs`: pure time parsing and wording, tested under Node.
 - `status_cell.mjs`: the `Level` vocabulary, status lines and `worst`.
 - `section_<name>.mjs`: one renderer per section returning `{node, summary, level}`.
 
-Run a second instance from a worktree with `MAC_PANEL_PORT=8770
-~/.local/share/mac-panel/venv/bin/python macbook/mac_panel/server.py`; it uses that
-worktree's own `tmp/mac-panel/`. The installed LaunchAgent never sets the variable.
+Run a second instance from a worktree with `MAC_PANEL_PORT=8770` (and, to keep its
+history out of `~/.local/state/mac-panel/`, `MAC_PANEL_STATE_DIR=<scratch dir>`):
+`~/.local/share/mac-panel/venv/bin/python macbook/mac_panel/server.py`. It uses that
+worktree's own `tmp/mac-panel/`, and the Host allowlist follows the port. The installed
+LaunchAgent never sets either variable. The instance runs the real tool CLIs, so use it to
+look, not to click actions.
 
 `tests/test_static_page.py` parses every module with Node and checks that each
 import names a served file.
 
 ## Security
 
-The server binds only `127.0.0.1:8769`. Host headers must be exactly
-`127.0.0.1:8769` or `localhost:8769`; every API request requires the per-instance
-page token. Every POST additionally requires a matching Origin, JSON content type
-and a body no larger than 64 KiB. `/healthz` is token-free but still Host-checked.
-There are no CORS headers; a restrictive CSP disallows framing and inline scripts
-and styles (the page uses module scripts, classes and CSS `attr()` only).
+The server binds only `127.0.0.1:<port>` (8769 unless `MAC_PANEL_PORT` is set for a dev
+instance). Host headers must be exactly `127.0.0.1:<port>` or `localhost:<port>`; every API
+request requires the per-instance page token. Every POST additionally requires a matching
+Origin, JSON content type, a body no larger than 64 KiB and, for armed actions,
+`confirmed: true`. `/healthz` is token-free but still Host-checked. There are no CORS
+headers; a restrictive CSP disallows framing and inline scripts and styles (the page uses
+module scripts, classes and CSS custom properties only).
 
-Child tools receive a minimal environment and timeouts. Logs and displayed
-configuration are redacted, with all HTTP(S) URLs hidden because arbitrary ntfy
-topics can be secrets. The panel never reads `pi/secrets/`, displays the Claude
-settings `env` block, invokes BTT repair, or edits tool-owned files itself. Local
-processes running as Jacob can access the page and token; this is a browser-origin
-boundary, not isolation from other processes in the same account.
+Child tools receive a minimal environment and timeouts. Logs and displayed configuration are
+redacted, with all HTTP(S) URLs hidden because arbitrary ntfy topics can be secrets. The
+panel never reads `pi/secrets/`, displays the Claude settings `env` block, invokes BTT
+repair, or edits tool-owned files itself. The only root action is the restart of a
+`com.jacobr.*` system daemon through a rule Jacob installs himself: `panel_service.py
+sudoers --print` shows it and `sudoers --script` prints a zsh installer that checks it with
+`visudo -cf` before installing `/etc/sudoers.d/mac-panel-daemons` (mode 440, root:wheel). It
+allows only `launchctl kickstart -k system/com.jacobr.<name>`, and the panel never installs
+it. The history store is private (700/600) and holds levels, counts and state words, never
+log text or network names beyond what the sections already show. Local processes running as
+Jacob can access the page and token; this is a browser-origin boundary, not isolation from
+other processes in the same account.
 
 ## Tests
 
