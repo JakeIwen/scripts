@@ -330,7 +330,8 @@ for `unrecorded archives; adopt to continue`: these require explicit recovery.
 
 - Defaults (rotate above 10 MB, keep 5, gzip, warn above 500 MB total) are
   declared in `shared/settings/log-rotate.json` and edited in the Mac Panel's
-  Settings section. Per-file policies, extras and ignores are saved in
+  Settings section (default `keep` is at least 1; only a per-file policy can
+  choose 0 to discard contents). Per-file policies, extras and ignores are saved in
   `~/.config/jacobr/log-rotate-files.json` (mode 600, revision-checked); state
   (`last_sizes.json` for growth per day, `last_rotated.json`, `last_run.json`,
   `archives.json` for archive provenance, `rotate.log`) is in `~/.local/state/log-rotate/`. The rotator rotates its own

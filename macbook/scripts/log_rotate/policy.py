@@ -59,6 +59,9 @@ def validate_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
             if not isinstance(value, bool):
                 raise LogRotateError(EXIT_ERROR, "enabled must be on or off", field=name)
             checked[name] = value
+        elif name == "keep" and type(value) is int and value == 0:
+            # Discarding needs the per-file action, never an unconfirmed global default.
+            checked[name] = value
         elif name in DECLARED_POLICY_FIELDS:
             try:
                 checked.update(tool_settings.validate(declaration, {name: value}))

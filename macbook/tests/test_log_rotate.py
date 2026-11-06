@@ -579,6 +579,18 @@ class ConfigTests(LogRotateCase):
             code, _, _ = self.run_cli(command, "--revision", "stale", path, "--json")
             self.assertEqual(code, 3, command)
 
+    def test_global_keep_zero_is_rejected_but_per_file_zero_stays_valid(self):
+        declaration = tool_settings.load_declaration('log-rotate')
+        with self.assertRaises(tool_settings.SettingsError):
+            tool_settings.validate(declaration, {'keep': 0})
+        path = self.write(".local/state/app/default.log", payload("default"))
+        self.set_policy(path, '--keep', '0')
+        self.assertEqual(self.entry(path)['policy']['keep'], 0)
+        code, result, _ = self.run_cli("rotate", "--only", path, "--force", "--json")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(os.path.getsize(path), 0)
+        self.assertFalse(Path(path + '.1.gz').exists())
+
     def test_invalid_values_name_their_field_and_write_nothing(self):
         path = self.write(".local/state/app/a.log", "a")
         revision = self.inventory()["revision"]
