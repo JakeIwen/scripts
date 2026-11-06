@@ -389,8 +389,7 @@ and rejects cases missing any referenced variable, including branches that would
 short-circuit. Unsupported expression kinds fail loudly rather than bypassing
 that validation.
 
-The explicit disjoint-UUID pair owned by `install_text_editing_keys.py` (using
-Finder's imported UUID and the single paste-line UUID) allows the Finder paste
+The explicit disjoint-UUID pair in `editing_key_ids.py` (shared by both installers) allows the Finder paste
 trigger (non-text focus) beside this text-only Cmd-V trigger; all other shortcut
 conflicts still refuse installation, in either installer. BTT's
 [conditions docs](https://docs.folivora.ai/docs/actions/conditions/) allow identical

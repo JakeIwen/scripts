@@ -308,19 +308,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   paste turns interception off even if the tag remains. BTT restart retains the variable. All writes use `set_persistent_string_variable`;
   `--apply` initializes and reads back `"0"` before enabling, and the app-switch
   action reasserts it if `get_string_variable` is empty. This prevents BTT from
-  swallowing Cmd-V on an unbound condition without mismatch pass-through
-  (observed live 2026-11-05). The Foundation evaluator rejects cases missing
+  swallowing Cmd-V on an unbound condition without mismatch pass-through.
+  The Foundation evaluator rejects cases missing
   predicate variables, rather than treating them as false. `INITIAL_VARIABLES`
   is the one initializer map; all installed predicates are checked against it and
   BTT's built-ins. The paste variable test precedes the focused-element dump.
   `trigger_install.py` takes editing-variable logic as an installer hook and
   permits only the explicit disjoint Finder/non-text and editing-key/text Cmd-V
-  UUID pair (actual imported IDs); unrelated same-key triggers still conflict. BTT documents mismatch
-  pass-through but not arbitration with another matching trigger: verify one
-  paste per press live in Finder and text. Also still owed: Chrome/Firefox
-  contenteditable AX roles, normal paste in single-line fields, quick copy/paste,
-  BTT relaunch, apps with nothing focused, and Firefox rich-cut HTML actually
-  pasting as a separate paragraph (flat AXValue alone cannot prove it). Never select by
+  UUID pair; `editing_key_ids.py` owns those shared stable IDs without importing
+  either installer. Unrelated same-key triggers still conflict. Never select by
   posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the

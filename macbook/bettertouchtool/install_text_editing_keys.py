@@ -21,7 +21,7 @@ import uuid
 from btt_common import current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
 import btt_socket
-from install_finder_paste import TRIGGER as FINDER_PASTE_ID
+from editing_key_ids import DISJOINT_TRIGGER_PAIRS, NAMESPACE, PASTE_LINE_ID
 import text_editing_conditions as conditions
 import trigger_install as triggers
 from trigger_install import COMMAND, SHIFT, conflicts, set_enabled
@@ -29,7 +29,6 @@ from trigger_install import COMMAND, SHIFT, conflicts, set_enabled
 DIRECTORY = Path(__file__).resolve().parent
 BACKUPS = DIRECTORY / '.local/text-editing-key-backups'
 LABEL = 'editing keys'
-NAMESPACE = uuid.UUID('5d0f6a3e-2b8c-4f71-9e2a-7c4b1d9e6f30')
 APP_CHANGED = 779
 # The runtime: text_editing_keys.js builds on text_selection.js's AX helpers.
 RUNTIME = tuple(str(DIRECTORY / name) for name in ('text_selection.js', 'text_editing_keys.js'))
@@ -42,12 +41,6 @@ PASTE_KEY = (9, COMMAND)
 
 def stable_uuid(name):
     return str(uuid.uuid5(NAMESPACE, name)).upper()
-
-
-PASTE_LINE_ID = stable_uuid('paste line')
-# Finder file focus and editing-key writable text focus are disjoint. The pair
-# alone is exempt: unrelated Cmd-V triggers must still block both installers.
-DISJOINT_TRIGGER_PAIRS = (frozenset({FINDER_PASTE_ID, PASTE_LINE_ID}),)
 
 
 # Runtime kinds that tag (or consume) a line copy, and the title of the

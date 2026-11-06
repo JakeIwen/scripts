@@ -15,22 +15,13 @@ from typing import NamedTuple
 
 from btt_common import active_triggers, backup_configuration, connect, records
 import btt_socket
+from editing_key_ids import DISJOINT_TRIGGER_PAIRS
 import text_editing_conditions as conditions
 
 PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
 KEYBOARD = 0
 SHIFT, COMMAND = 1 << 17, 1 << 20
 GLOBAL = 'BT.G'
-
-
-def disjoint_trigger_pairs():
-    """Trigger pairs that may share a key because their conditions never overlap.
-
-    Owned by the editing-keys installer (Finder file focus vs writable text focus);
-    resolved lazily because both installers import this module.
-    """
-    from install_text_editing_keys import DISJOINT_TRIGGER_PAIRS
-    return DISJOINT_TRIGGER_PAIRS
 
 
 class RuntimeHook(NamedTuple):
@@ -157,13 +148,12 @@ def saved_errors(database, plan, enabled):
 def conflicts(database, plan):
     """Other enabled shortcuts in an active preset, in any app, on one of the plan's keys."""
     ours = {d['BTTUUID'] for d in plan}
-    disjoint = disjoint_trigger_pairs()
     keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']): d['BTTUUID']
             for d in plan if d['BTTTriggerType'] == KEYBOARD}
     return sorted(row['ZUNIQUEIDENTIFIER'] for row in active_triggers(database, KEYBOARD)
                   if row['ZUNIQUEIDENTIFIER'] not in ours
                   and (key := (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0)) in keys
-                  and frozenset({row['ZUNIQUEIDENTIFIER'], keys[key]}) not in disjoint)
+                  and frozenset({row['ZUNIQUEIDENTIFIER'], keys[key]}) not in DISJOINT_TRIGGER_PAIRS)
 
 
 def wait_saved(database, plan, enabled, label):

@@ -194,7 +194,7 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(keys.DISJOINT_TRIGGER_PAIRS, (frozenset({finder.TRIGGER, keys.PASTE_LINE_ID}),))
         self.assertEqual(keys.PASTE_LINE_ID, keys.stable_uuid('paste line'))
         self.assertEqual(by_note('pastes above the line')['BTTUUID'], keys.PASTE_LINE_ID)
-        self.assertEqual(triggers.disjoint_trigger_pairs(), keys.DISJOINT_TRIGGER_PAIRS)
+        self.assertEqual(triggers.DISJOINT_TRIGGER_PAIRS, keys.DISJOINT_TRIGGER_PAIRS)
 
     def test_variable_logic_is_an_optional_hook_and_finders_action_has_none(self):
         script = finder.action()['BTTAppleScriptString']

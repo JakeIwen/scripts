@@ -16,13 +16,13 @@ import sys
 
 from btt_common import current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
+from editing_key_ids import FINDER_PASTE_ID as TRIGGER
 import finder_paste_condition as condition
 import trigger_install as triggers
 
 DIRECTORY = Path(__file__).resolve().parent
 BACKUPS = DIRECTORY / '.local/finder-paste-backups'
 LABEL = 'Finder paste triggers'
-TRIGGER = 'EDA649C3-026B-4402-9BF9-CE339233EFB2'
 PASTE_KEY = (9, triggers.COMMAND)  # Cmd-V
 # finder_paste.js uses text_selection.js's AX helpers and text_menu_paste.js's Edit-menu lookup.
 RUNTIME = tuple(str(DIRECTORY / name) for name in ('text_selection.js', 'text_menu_paste.js', 'finder_paste.js'))
