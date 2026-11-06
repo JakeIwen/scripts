@@ -137,7 +137,8 @@ class Sampler:
                     continue
                 try:
                     adapter = self.adapters[section]
-                    payload = adapter.sample(interval) if section == Section.LOGS else adapter.read()
+                    sample = getattr(adapter, 'sample', None)
+                    payload = sample(interval) if callable(sample) else adapter.read()
                     if payload is not None:
                         self.store.record(samples(section, payload, self.wall_clock()))
                 except Exception:

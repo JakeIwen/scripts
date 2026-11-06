@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import threading
 
-from background_tasks import BackgroundTasks
+from unittest import mock
 
 from cli_runner import CliRunner, CommandResult
 from logs_adapter import LogsAdapter, agent_problems, log_samples
@@ -249,7 +249,7 @@ class LogsActionTests(unittest.TestCase):
         try:
             self.assertIn('/api/logs', routes.reads)
             self.assertIn('/api/logs', routes.writes)
-            self.assertIs(routes.logs.tasks, routes.tasks)
+            self.assertIs(routes.adapters[Section.LOGS], routes.logs)
         finally:
             routes.close()
 
@@ -324,27 +324,28 @@ class LogsSamplingTests(unittest.TestCase):
     def payload(self, *logs, problems=(), **over):
         return {**inventory(*logs, problems=problems), 'service': {'installed': True, 'loaded': True}, **over}
 
-    def test_cache_is_used_until_stale_with_one_refresh_in_flight(self):
-        class Tasks:
-            def __init__(self):
-                self.operations = []
-            def start(self, section, job, operation):
-                self.operations.append(operation)
-        tasks, now = Tasks(), [100]
+    def test_cache_is_sampled_once_and_refreshed_after_one_cadence(self):
+        now = [100]
         runner = FakeRunner([json_command(inventory(entry()))] * 2)
-        logs = LogsAdapter(runner, FakeServices(), tasks=tasks, clock=lambda: now[0])
+        logs = LogsAdapter(runner, FakeServices(), clock=lambda: now[0])
         payload = logs.read()
-        now[0] = 1899
-        self.assertEqual(logs.sample(900), payload)
-        self.assertEqual(len(runner.calls), 1)
-        now[0] = 1900
-        self.assertIsNone(logs.sample(900))
-        self.assertIsNone(logs.sample(900))
-        self.assertEqual(len(tasks.operations), 1)
-        tasks.operations[0]()
-        self.assertEqual(runner.calls[-1][1], 30)
-        self.assertEqual(logs.sample(900), payload)
-        self.assertEqual(len(tasks.operations), 1)
+        with mock.patch('logs_adapter.threading.Thread') as thread:
+            self.assertEqual(logs.sample(900), payload)
+            self.assertIsNone(logs.sample(900))
+            now[0] = 999
+            self.assertIsNone(logs.sample(900))
+            thread.assert_not_called()
+            now[0] = 1000
+            self.assertIsNone(logs.sample(900))
+            self.assertIsNone(logs.sample(900))
+            thread.assert_called_once()
+            self.assertTrue(thread.call_args.kwargs['daemon'])
+            thread.call_args.kwargs['target']()
+            self.assertEqual(runner.calls[-1][1], 30)
+            self.assertEqual(logs.sample(900), payload)
+            self.assertIsNone(logs.sample(900))
+            thread.assert_called_once()
+        self.assertEqual(len(runner.calls), 2)
 
     def test_slow_inventory_does_not_delay_another_sections_sample(self):
         entered, release, sampled = threading.Event(), threading.Event(), threading.Event()
@@ -363,8 +364,7 @@ class LogsSamplingTests(unittest.TestCase):
                 sampled.set()
             def prune(self):
                 pass
-        tasks = BackgroundTasks()
-        logs = LogsAdapter(FakeRunner([slow_inventory]), FakeServices(), tasks=tasks)
+        logs = LogsAdapter(FakeRunner([slow_inventory]), FakeServices())
         sampler = Sampler({Section.LOGS: logs, Section.RESTORE: OtherAdapter()}, Store(),
                           {Section.LOGS: 900, Section.RESTORE: 60})
         sampler.start()
@@ -373,26 +373,50 @@ class LogsSamplingTests(unittest.TestCase):
             self.assertTrue(sampled.wait(1), 'slow logs inventory blocked the shared sampler')
             self.assertEqual({row['section'] for row in recorded}, {Section.RESTORE})
             self.assertIsNone(logs.sample(900))
-            self.assertEqual(len(tasks.list(Section.LOGS)), 1)
+            self.assertTrue(logs.refresh_thread.daemon)
+            self.assertEqual(len(logs.runner.calls), 1)
         finally:
             release.set()
             sampler.stop()
-            tasks.executor.shutdown(wait=True)
+            logs.refresh_thread.join(5)
         self.assertIsNotNone(logs.sample(900))
 
     def test_failed_refresh_can_be_retried_without_stale_samples(self):
-        class Tasks:
-            def start(self, section, job, operation):
-                self.operation = operation
-        tasks = Tasks()
         logs = LogsAdapter(FakeRunner([CommandResult(1, '', 'unavailable'), json_command(inventory())]),
-                           FakeServices(), tasks=tasks)
-        self.assertIsNone(logs.sample(900))
-        with self.assertRaises(ApiError):
-            tasks.operation()
-        self.assertIsNone(logs.sample(900))
-        tasks.operation()
-        self.assertEqual(logs.sample(900)['totals']['files'], 0)
+                           FakeServices())
+        with mock.patch('logs_adapter.threading.Thread') as thread:
+            self.assertIsNone(logs.sample(900))
+            with self.assertLogs('logs_adapter', level='ERROR'):
+                thread.call_args.kwargs['target']()
+            self.assertFalse(logs.refreshing)
+            self.assertIsNone(logs.sample(900))
+            thread.call_args.kwargs['target']()
+            self.assertEqual(logs.sample(900)['totals']['files'], 0)
+            self.assertIsNone(logs.sample(900))
+            self.assertEqual(thread.call_count, 2)
+
+    def test_sampler_uses_a_sampling_method_on_any_adapter(self):
+        done, recorded, cadences = threading.Event(), [], []
+        class Adapter:
+            def sample(self, cadence):
+                cadences.append(cadence)
+                return {'sessions_open': 2, 'last_snapshot': 42}
+            def read(self):
+                raise AssertionError('sample-capable adapters must not be read')
+        class Store:
+            def record(self, rows):
+                recorded.extend(rows)
+                done.set()
+            def prune(self):
+                pass
+        sampler = Sampler({Section.RESTORE: Adapter()}, Store(), {Section.RESTORE: 60})
+        sampler.start()
+        try:
+            self.assertTrue(done.wait(1))
+        finally:
+            sampler.stop()
+        self.assertEqual(cadences, [60])
+        self.assertEqual(recorded[0]['value'], 2)
 
     def test_cadence_value_and_text(self):
         self.assertEqual(CADENCES[Section.LOGS], 900)

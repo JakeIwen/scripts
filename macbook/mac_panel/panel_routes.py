@@ -29,7 +29,7 @@ class PanelRoutes:
         self.deferred = DeferredAdapter(runner, tasks=self.tasks)
         self.guard = GuardAdapter(runner)
         self.services = ServicesAdapter(runner)
-        self.logs = LogsAdapter(runner, self.services, tasks=self.tasks)
+        self.logs = LogsAdapter(runner, self.services)
         self.adapters = {
             Section.METERED: MeteredAdapter(runner),
             Section.AMPHETAMINE: AmphetamineAdapter(runner),

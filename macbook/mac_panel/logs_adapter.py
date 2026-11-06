@@ -1,18 +1,20 @@
 """Log inventory and rotation relayed to macbook/scripts/log_rotate.py; sizes and paths only, never contents."""
 import json
+import logging
 from pathlib import Path
 import threading
 import time
 
-from cli_runner import CommandResult, checked, json_result
+from cli_runner import checked, json_result
 from crontab_adapter import cli_error
 from log_redaction import redact
-from panel_contracts import ApiError, Level, LogsPayload, Reply, Section
+from panel_contracts import ApiError, Level, LogsPayload, Reply
 from panel_paths import LOG_ROTATE, LOG_ROTATE_ENV, LOG_ROTATE_LABEL
 from wire_validation import confirm, field, object_fields
 
 ACTIONS = frozenset(('rotate', 'policy', 'add', 'ignore', 'unignore', 'adopt'))
 PATH_ACTIONS = ('policy', 'add', 'ignore', 'unignore', 'adopt')
+LOG = logging.getLogger(__name__)
 # Exit codes of the rotator CLI beyond 0 (ok) and 1 (error).
 EXIT_CONFLICT, EXIT_BUSY = 3, 75
 READ_TIMEOUT, ROTATE_TIMEOUT = 60, 600
@@ -136,14 +138,16 @@ def failure(result):
 
 
 class LogsAdapter:
-    def __init__(self, runner, services, tasks=None, clock=time.monotonic):
+    def __init__(self, runner, services, clock=time.monotonic):
         self.runner = runner
         self.services = services
-        self.tasks, self.clock = tasks, clock
+        self.clock = clock
         self.cache_lock = threading.Lock()
         self.cached = None
         self.cached_at = None
         self.refreshing = False
+        self.sampled_at = None
+        self.refresh_thread = None
 
     def run(self, argv, timeout):
         return self.runner.run(tuple(argv), timeout=timeout, env=LOG_ROTATE_ENV)
@@ -166,25 +170,31 @@ class LogsAdapter:
         return payload
 
     def sample(self, cadence):
-        """The shared sampler never inventories: use a fresh cache or queue one refresh."""
+        """Sample each cached inventory once; refresh without consuming a shared task slot."""
         with self.cache_lock:
-            if self.cached is not None and self.clock() - self.cached_at < 2 * cadence:
-                return self.cached
-            if self.refreshing or self.tasks is None:
-                return None
-            self.refreshing = True
-        try:
-            self.tasks.start(Section.LOGS, 'inventory', self.refresh_inventory)
-        except Exception:
-            with self.cache_lock:
-                self.refreshing = False
-            raise
-        return None
+            stale = self.cached is None or self.clock() - self.cached_at >= cadence
+            refresh = stale and not self.refreshing
+            if refresh:
+                self.refreshing = True
+            payload = self.cached if self.cached_at != self.sampled_at else None
+            if payload is not None:
+                self.sampled_at = self.cached_at
+        if refresh:
+            try:
+                self.refresh_thread = threading.Thread(target=self.refresh_inventory,
+                                                       name='panel-log-inventory', daemon=True)
+                self.refresh_thread.start()
+            except Exception:
+                with self.cache_lock:
+                    self.refreshing = False
+                raise
+        return payload
 
     def refresh_inventory(self):
         try:
             self.read(timeout=REFRESH_TIMEOUT)
-            return CommandResult(0, 'Log inventory refreshed', '')
+        except Exception:
+            LOG.exception('Log inventory refresh failed')
         finally:
             with self.cache_lock:
                 self.refreshing = False
