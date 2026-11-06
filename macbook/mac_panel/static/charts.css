@@ -25,7 +25,8 @@
 .lane-rule { stroke: var(--line); stroke-width: 1; }
 .tick { fill: var(--accent); }
 .tick.future { fill: var(--panel); stroke: var(--accent); stroke-width: 1; }
-.now-line { stroke: var(--warn); stroke-width: 1; }
+/* The current-time guide must not intercept taps on the scheduled run beneath it. */
+.now-line { stroke: var(--warn); stroke-width: 1; pointer-events: none; }
 .chart-tip { position: absolute; bottom: calc(100% + 4px); z-index: 10; padding: 4px 8px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-1); box-shadow: var(--shadow); font-size: var(--text-small); white-space: nowrap; pointer-events: none; }
 .chart-tip-value { font-weight: 600; color: var(--text); }
 .chart-tip-detail { color: var(--muted); }
