@@ -203,7 +203,9 @@ class RefusalTests(LogRotateCase):
         self.write(".claude/projects/x.log")
         self.list_via_crontab("/var/log/system.log", inside, "'{}'".format(synced))
         self.assertIn("outside", self.refused("/var/log/system.log")["note"])
+        self.assertEqual(self.refused("/var/log/system.log")["reason"], "outside_home")
         self.assertIn(".claude", self.refused(inside)["note"])
+        self.assertEqual(self.refused(inside)["reason"], "excluded_location")
         self.assertIn("Mobile Documents", self.refused(synced)["note"])
 
     def test_symlinks_and_symlinked_directories_are_refused(self):
@@ -220,6 +222,7 @@ class RefusalTests(LogRotateCase):
         linked = self.path('.local/state/app/session.log')
         os.link(protected, linked)
         self.assertEqual(self.refused(linked)['note'], 'hard-linked file')
+        self.assertEqual(self.refused(linked)['reason'], 'hard_link')
         result = self.run_cli('rotate', '--json')[1]
         self.assertEqual(result['rotated'], [])
         self.assertEqual(os.path.getsize(protected), OVER_ONE_MB)

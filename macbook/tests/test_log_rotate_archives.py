@@ -6,7 +6,7 @@ import types
 from unittest import mock
 
 from log_rotate import archives, copytruncate, eligibility, state
-from log_rotate.records import LogRotateError
+from log_rotate.records import MB, LogRotateError
 from test_log_rotate import LogRotateCase, payload
 
 
@@ -223,3 +223,54 @@ class ArchiveRecoveryTests(LogRotateCase):
         os.unlink(archive)
         self.run_cli('rotate', '--json')
         self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE), {})
+
+
+class InventoryIsolationTests(LogRotateCase):
+    def test_unlistable_extra_is_refused_without_blocking_other_logs(self):
+        healthy = self.write('.local/state/app/job.log', payload('healthy'))
+        self.set_policy(healthy, '--max-mb', '1')
+        locked = self.write('locked/job.log', b'locked')
+        code, _, _ = self.run_cli('add', '--revision', self.inventory()['revision'], locked, '--json')
+        self.assertEqual(code, 0)
+        os.chmod(os.path.dirname(locked), 0o300)
+        try:
+            entry = self.entry(locked)
+            self.assertEqual((entry['state'], entry['note'], entry['reason']),
+                             ('refused', 'unreadable directory', 'unreadable_directory'))
+            code, value, _ = self.run_cli('rotate', '--json')
+            self.assertEqual(code, 0, value)
+            self.assertEqual([item['path'] for item in value['rotated']], [healthy])
+            self.assertEqual(os.path.getsize(healthy), 0)
+        finally:
+            os.chmod(os.path.dirname(locked), 0o700)
+        self.assertEqual(self.read(locked), b'locked')
+
+    def test_disabled_logs_keep_their_state_and_note_beside_app_owned_archives(self):
+        third = self.write('Library/Logs/SomeApp/app.log', payload('third'))
+        disabled = self.write('.local/state/app/disabled.log', payload('disabled'))
+        self.set_policy(disabled, '--enabled', 'off')
+        for path in (third, disabled):
+            Path(path + '.1').write_bytes(b'app owned archive')
+        snapshot = self.inventory()
+        for path in (third, disabled):
+            self.assertEqual(self.entry(path, snapshot)['state'], 'disabled')
+            self.assertEqual(self.entry(path, snapshot)['archives'], 1)
+        third_entry = self.entry(third, snapshot)
+        self.assertEqual((third_entry['note'], third_entry['reason']),
+                         ('third-party app log; enable per file', 'third_party'))
+        self.assertNotIn('note', self.entry(disabled, snapshot))
+        self.assertEqual(snapshot['problems'], [])
+        code, value, _ = self.run_cli('rotate', '--json')
+        self.assertEqual((code, value['rotated']), (0, []))
+        for path in (third, disabled):
+            self.assertEqual(self.read(path + '.1'), b'app owned archive')
+            self.assertEqual(os.path.getsize(path), len(payload('third')))
+
+    def test_enabled_oversized_log_waiting_for_adoption_escalates_to_error(self):
+        path = self.write('.local/state/app/job.log', payload('large', 3 * MB))
+        self.set_policy(path, '--max-mb', '1')
+        Path(path + '.1').write_bytes(b'unrecorded')
+        snapshot = self.inventory()
+        self.assertEqual(self.entry(path, snapshot)['reason'], 'unrecorded_archives')
+        self.assertEqual([problem['level'] for problem in snapshot['problems']], ['warn', 'error'])
+        self.assertIn('rotation is failing', snapshot['problems'][1]['text'])

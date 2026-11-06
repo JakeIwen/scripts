@@ -7,6 +7,8 @@ from pathlib import Path
 import stat
 from typing import Optional
 
+from .records import LogReason
+
 # Credentials and synced state live here; never listed, never opened.
 HARD_LINK_NOTE = "hard-linked file"
 EXCLUDED_HOME_DIRS = (".claude", ".codex", "Library/Mobile Documents")
@@ -55,6 +57,7 @@ class Inspection:
     """refusal set: off limits; info None without a refusal: the file does not exist."""
     refusal: Optional[str]
     info: Optional[os.stat_result]
+    reason: Optional[LogReason] = None
 
 
 def _lstat(path: str) -> Optional[os.stat_result]:
@@ -67,7 +70,8 @@ def _lstat(path: str) -> Optional[os.stat_result]:
 def inspect(path: str, home: str) -> Inspection:
     refusal = location_refusal(path, home)
     if refusal is not None:
-        return Inspection(refusal, None)
+        return Inspection(refusal, None, LogReason.OUTSIDE_HOME if not path.startswith(home + os.sep)
+                          else LogReason.EXCLUDED_LOCATION)
     current = home
     parts = path[len(home) + 1:].split(os.sep)
     for part in parts[:-1]:
@@ -76,20 +80,20 @@ def inspect(path: str, home: str) -> Inspection:
         if info is None:
             return Inspection(None, None)
         if stat.S_ISLNK(info.st_mode):
-            return Inspection("path goes through a symlink", None)
+            return Inspection("path goes through a symlink", None, LogReason.SYMLINK_DIRECTORY)
         if not stat.S_ISDIR(info.st_mode):
             return Inspection(None, None)
     info = _lstat(path)
     if info is None:
         return Inspection(None, None)
     if stat.S_ISLNK(info.st_mode):
-        return Inspection("symlink", None)
+        return Inspection("symlink", None, LogReason.SYMLINK)
     if not stat.S_ISREG(info.st_mode):
-        return Inspection("not a regular file", None)
+        return Inspection("not a regular file", None, LogReason.NOT_REGULAR_FILE)
     if info.st_nlink > 1:
-        return Inspection(HARD_LINK_NOTE, None)
+        return Inspection(HARD_LINK_NOTE, None, LogReason.HARD_LINK)
     if info.st_uid != current_uid():
-        return Inspection("not owned by you", None)
+        return Inspection("not owned by you", None, LogReason.NOT_OWNED)
     return Inspection(None, info)
 
 

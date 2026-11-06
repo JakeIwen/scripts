@@ -156,7 +156,7 @@ function rowActions(entry, data) {
     {confirm: confirmText(`rotate ${basename(entry.path)}`), key: `rotate-${entry.path}`, disabled: Boolean(blocked), title: blocked ?? COPY.rotateRowInfo}),
   button('Ignore', () => action(SECTION, ENDPOINT, {action: 'ignore', path: entry.path, revision: data.revision}),
     {key: `ignore-${entry.path}`, title: COPY.ignoreInfo}));
-  if (entry.note === 'unrecorded archives; adopt to continue') {
+  if (entry.reason === 'unrecorded_archives') {
     cell.append(button('Adopt archives', () => action(SECTION, ENDPOINT,
       {action: 'adopt', path: entry.path, revision: data.revision, confirmed: true}),
     {confirm: confirmText(`adopt archives of ${basename(entry.path)}`), key: `adopt-${entry.path}`}));

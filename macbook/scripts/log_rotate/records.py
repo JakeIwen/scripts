@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, Optional
 
 TOOL = "log-rotate"
@@ -45,6 +46,20 @@ POLICY_FIELDS = DECLARED_POLICY_FIELDS + ("enabled",)
 DEFAULT_ENABLED = True
 
 
+class LogReason(str, Enum):
+    UNRECORDED_ARCHIVES = "unrecorded_archives"
+    THIRD_PARTY = "third_party"
+    HARD_LINK = "hard_link"
+    UNREADABLE_DIRECTORY = "unreadable_directory"
+    OUTSIDE_HOME = "outside_home"
+    EXCLUDED_LOCATION = "excluded_location"
+    SYMLINK = "symlink"
+    SYMLINK_DIRECTORY = "symlink_directory"
+    NOT_REGULAR_FILE = "not_regular_file"
+    NOT_OWNED = "not_owned"
+    ARCHIVE_RECORD_UNREADABLE = "archive_record_unreadable"
+
+
 class LogRotateError(Exception):
     """A failure with the exit code and optional wire details the CLI reports."""
 
@@ -81,6 +96,7 @@ class LogEntry:
     last_rotated: Optional[float]
     state: str
     note: Optional[str] = None
+    reason: Optional[LogReason] = None
 
     def as_dict(self) -> Dict[str, Any]:
         value = {"path": self.path, "source": self.source, "bytes": self.bytes,
@@ -90,4 +106,6 @@ class LogEntry:
                  "state": self.state}
         if self.note is not None:
             value["note"] = self.note
+        if self.reason is not None:
+            value["reason"] = self.reason.value
         return value

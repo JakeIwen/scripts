@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from . import archives as archive_records, eligibility, growth, policy, sources, state
 from .archives import Archive, scan_directory
 from .records import (MB, STATE_DISABLED, STATE_DUE, STATE_MISSING, STATE_OK, STATE_REFUSED,
-                      THIRD_PARTY_NOTE, LogEntry, LogRotateError)
+                      THIRD_PARTY_NOTE, LogEntry, LogReason, LogRotateError)
 
 
 @dataclass
@@ -67,7 +67,7 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
     last_rotated = rotated.get(path) if isinstance(rotated.get(path), (int, float)) else None
     if inspection.refusal is not None:
         return LogEntry(path, candidate.source, 0, 0, 0, None, None, entry_policy, last_rotated,
-                        STATE_REFUSED, inspection.refusal)
+                        STATE_REFUSED, inspection.refusal, inspection.reason)
     directory, base = os.path.split(path)
     if directory not in listings:
         listings[directory] = scan_directory(directory)
@@ -76,16 +76,20 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
     size = info.st_size if info is not None else 0
     entry_state = _entry_state(size, info is not None, entry_policy)
     note = THIRD_PARTY_NOTE if third_party else None
-    try:
-        archive_records.rotation_plan(directory, base, entry_policy.keep, entry_policy.compress, archive_ledger)
-    except (FileNotFoundError, NotADirectoryError):
-        pass
-    except LogRotateError:
-        entry_state, note = STATE_REFUSED, archive_records.UNRECORDED_NOTE
+    reason = LogReason.THIRD_PARTY if third_party else None
+    if entry_policy.enabled:
+        try:
+            archive_records.rotation_plan(directory, base, entry_policy.keep, entry_policy.compress, archive_ledger)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
+        except OSError:
+            entry_state, note, reason = STATE_REFUSED, "unreadable directory", LogReason.UNREADABLE_DIRECTORY
+        except LogRotateError:
+            entry_state, note, reason = STATE_REFUSED, archive_records.UNRECORDED_NOTE, LogReason.UNRECORDED_ARCHIVES
     return LogEntry(path, candidate.source, size, sum(item.size for item in archives), len(archives),
                     info.st_mtime if info is not None else None,
                     growth.rate_for(ledger.get(path), now), entry_policy, last_rotated,
-                    entry_state, note)
+                    entry_state, note, reason)
 
 
 def take_snapshot(home: str, now: Optional[float] = None) -> Snapshot:

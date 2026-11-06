@@ -30,7 +30,7 @@ def policy(**over):
 def entry(path=PATH, **over):
     return {'path': path, 'source': 'launchagent:com.jacobr.metered', 'bytes': 35 * MB, 'archived_bytes': 4 * MB,
             'archives': 2, 'mtime': 1.7e9, 'growth_mb_per_day': 1.5, 'policy': policy(), 'last_rotated': None,
-            'state': 'due', **over}
+            'state': 'due', 'reason': None, **over}
 
 
 def inventory(*logs, ignored=(), problems=(), revision=REVISION):
@@ -72,11 +72,12 @@ class LogsReadTests(unittest.TestCase):
         self.assertEqual(runner.envs, [LOG_ROTATE_ENV] * 3)
 
     def test_inventory_is_decoded_with_service_state(self):
-        logs, runner = adapter([json_command(inventory(entry(), ignored=['/Users/x/skip.log']))])
+        logs, runner = adapter([json_command(inventory(entry(reason='unrecorded_archives'), ignored=['/Users/x/skip.log']))])
         payload = logs.read()
         self.assertEqual(runner.calls[0][0], (*LOG_ROTATE, 'inventory', '--json'))
         self.assertEqual(payload['revision'], REVISION)
         self.assertEqual(payload['logs'][0]['path'], PATH)
+        self.assertEqual(payload['logs'][0]['reason'], 'unrecorded_archives')
         self.assertEqual(payload['ignored'], ['/Users/x/skip.log'])
         self.assertTrue(payload['service']['loaded'])
 
@@ -96,12 +97,13 @@ class LogsReadTests(unittest.TestCase):
 
     def test_malformed_inventory_is_a_bad_gateway(self):
         bad_state = inventory(entry(state='weird'))
+        bad_reason = inventory(entry(reason=12))
         no_policy = inventory(entry())
         del no_policy['logs'][0]['policy']['keep']
         bad_problem = inventory(problems=[{'level': 'fatal', 'text': 'x'}])
         no_problems = inventory()
         del no_problems['problems']
-        for value in (bad_state, no_policy, {'revision': 'x'}, inventory(entry(path='relative.log')), bad_problem, no_problems):
+        for value in (bad_state, bad_reason, no_policy, {'revision': 'x'}, inventory(entry(path='relative.log')), bad_problem, no_problems):
             with self.subTest(value=value), self.assertRaises(ApiError) as caught:
                 adapter([json_command(value)])[0].read()
             self.assertEqual(caught.exception.status, 502)
@@ -299,7 +301,7 @@ await new Promise(setImmediate);
 assert.equal(sent.length, 2);
 assert.equal(sent[1].keep, 1);
 assert.equal('confirmed' in sent[1], false);
-const refused = {...entry, state: 'refused', note: 'unrecorded archives; adopt to continue'};
+const refused = {...entry, state: 'refused', note: 'Human wording can change', reason: 'unrecorded_archives'};
 const actions = logRow(refused, {revision: 'rev'})[7];
 const adopt = walk(actions).find(x => x.dataset.key === 'adopt-/fixture/job.log');
 assert.equal(adopt.textContent, 'Adopt archives');
@@ -308,7 +310,7 @@ assert.equal(sent.length, 2);
 adopt.click();
 await new Promise(setImmediate);
 assert.deepEqual(sent[2], {action: 'adopt', path: entry.path, revision: 'rev', confirmed: true});
-const ordinary = logRow({...entry, state: 'refused', note: 'symlink'}, {revision: 'rev'})[7];
+const ordinary = logRow({...entry, state: 'refused', note: 'unrecorded archives; adopt to continue', reason: 'symlink'}, {revision: 'rev'})[7];
 assert.equal(walk(ordinary).some(x => x.dataset.key === 'adopt-/fixture/job.log'), false);
 console.log('PASS: keep-zero Apply requires two clicks; ordinary policy requires one');
 """

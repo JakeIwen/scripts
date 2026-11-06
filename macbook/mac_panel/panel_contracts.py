@@ -321,6 +321,7 @@ class LogEntry(TypedDict):
     last_rotated: float | None
     state: str
     note: str | None
+    reason: str | None
 
 
 class LogsPayload(TypedDict):

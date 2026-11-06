@@ -54,6 +54,7 @@ def validate_entry(entry):
     if field(entry, 'state', str) not in STATES:
         raise ApiError(502, 'Invalid log state')
     field(entry, 'note', str, nullable=True)
+    field(entry, 'reason', str, nullable=True)
     validate_policy(field(entry, 'policy', dict))
 
 
