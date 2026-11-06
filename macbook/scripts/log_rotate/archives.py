@@ -7,7 +7,10 @@ import re
 import stat
 from typing import Dict, List
 
+from . import eligibility, state
 from .records import EXIT_ERROR, LogRotateError
+
+UNRECORDED_NOTE = "unrecorded archives; adopt to continue"
 
 _ARCHIVE_SUFFIX = re.compile(r"\.(\d+)(\.gz)?\Z")
 
@@ -92,3 +95,36 @@ def publish(source: str, destination: str) -> None:
     except FileExistsError:
         raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(destination)) from None
     os.unlink(source)
+
+
+def prune(home: str) -> dict:
+    """Remove only absent paths; publication records may deliberately precede their files."""
+    ledger = state.read_json(home, state.ARCHIVES_FILE)
+    retained = {}
+    for path, record in ledger.items():
+        try:
+            os.lstat(path)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        retained[path] = record
+    if retained != ledger:
+        state.write_json(home, state.ARCHIVES_FILE, retained)
+    return retained
+
+
+def adopt(path: str, home: str) -> None:
+    """Explicitly trust eligible existing archives, without changing any archive bytes."""
+    directory, base = os.path.split(path)
+    ledger = prune(home)
+    additions = {}
+    for name in os.listdir(directory):
+        if not name.startswith(base + ".") or _ARCHIVE_SUFFIX.fullmatch(name[len(base):]) is None:
+            continue
+        archive = os.path.join(directory, name)
+        inspection = eligibility.inspect(archive, home)
+        if inspection.refusal is not None or inspection.info is None:
+            raise LogRotateError(EXIT_ERROR, "cannot adopt {}: {}".format(
+                archive, inspection.refusal or "file is missing"))
+        additions[archive] = identity(archive)
+    ledger.update(additions)
+    state.write_json(home, state.ARCHIVES_FILE, ledger)

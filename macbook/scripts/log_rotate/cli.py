@@ -7,7 +7,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from . import eligibility, inventory, policy, rotate, state, status
+from . import archives, eligibility, inventory, policy, rotate, state, status
 from .problems import find_problems
 from .records import EXIT_ERROR, EXIT_OK, LogRotateError
 
@@ -39,7 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--clear", action="store_true", help="drop the per-file policy")
     for name, text in (("add", "track a log path the sources miss"),
                        ("ignore", "hide a path and never rotate it"),
-                       ("unignore", "stop ignoring a path")):
+                       ("unignore", "stop ignoring a path"),
+                       ("adopt", "record eligible existing archives so rotation may continue")):
         sub = command(name, text)
         sub.add_argument("--revision", required=True)
         sub.add_argument("path")
@@ -89,6 +90,10 @@ def _edited(home: str, revision: str, path: str, change) -> Dict[str, Any]:
 
 def _run_edit(args: argparse.Namespace, home: str) -> Dict[str, Any]:
     path = _usable_path(args.path, home)
+    if args.command == "adopt":
+        policy.require_rotatable(path, home)
+        with state.run_lock(home):
+            return _edited(home, args.revision, path, lambda data: archives.adopt(path, home))
     if args.command == "policy":
         fields = _policy_fields(args)
         if args.clear == bool(fields):
@@ -110,6 +115,7 @@ def _run_edit(args: argparse.Namespace, home: str) -> Dict[str, Any]:
 def _run_rotate(args: argparse.Namespace, home: str) -> Dict[str, Any]:
     only = _usable_path(args.only, home) if args.only else None
     with state.run_lock(home):
+        archives.prune(home)
         snapshot = inventory.take_snapshot(home)
         return rotate.run_rotation(snapshot, home, only=only, force=args.force)
 

@@ -6,10 +6,10 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from . import eligibility, growth, policy, sources, state
+from . import archives as archive_records, eligibility, growth, policy, sources, state
 from .archives import Archive, scan_directory
 from .records import (MB, STATE_DISABLED, STATE_DUE, STATE_MISSING, STATE_OK, STATE_REFUSED,
-                      THIRD_PARTY_NOTE, LogEntry)
+                      THIRD_PARTY_NOTE, LogEntry, LogRotateError)
 
 
 @dataclass
@@ -57,7 +57,7 @@ def _entry_state(size: int, existing: bool, entry_policy) -> str:
 
 def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, Any],
                  config: policy.FilesConfig, ledger: Dict[str, Any], rotated: Dict[str, Any],
-                 listings: Dict[str, Dict[str, List[Archive]]], now: float) -> LogEntry:
+                 listings: Dict[str, Dict[str, List[Archive]]], archive_ledger: dict, now: float) -> LogEntry:
     path = candidate.path
     entry_policy = policy.effective_policy(defaults, config, path)
     third_party = policy.is_unopted_third_party(candidate.source, path, home, config)
@@ -74,11 +74,18 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
     archives = listings[directory].get(base, [])
     info = inspection.info
     size = info.st_size if info is not None else 0
+    entry_state = _entry_state(size, info is not None, entry_policy)
+    note = THIRD_PARTY_NOTE if third_party else None
+    try:
+        archive_records.rotation_plan(directory, base, entry_policy.keep, entry_policy.compress, archive_ledger)
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except LogRotateError:
+        entry_state, note = STATE_REFUSED, archive_records.UNRECORDED_NOTE
     return LogEntry(path, candidate.source, size, sum(item.size for item in archives), len(archives),
                     info.st_mtime if info is not None else None,
                     growth.rate_for(ledger.get(path), now), entry_policy, last_rotated,
-                    _entry_state(size, info is not None, entry_policy),
-                    THIRD_PARTY_NOTE if third_party else None)
+                    entry_state, note)
 
 
 def take_snapshot(home: str, now: Optional[float] = None) -> Snapshot:
@@ -88,9 +95,10 @@ def take_snapshot(home: str, now: Optional[float] = None) -> Snapshot:
     ledger = state.read_json(home, state.SIZES_FILE).get("paths")
     ledger = ledger if isinstance(ledger, dict) else {}
     rotated = state.read_json(home, state.ROTATED_FILE)
+    archive_ledger = state.read_json(home, state.ARCHIVES_FILE)
     ignored = [path for path in (eligibility.normalize(raw, home) for raw in config.ignored) if path]
     listings = {}  # type: Dict[str, Dict[str, List[Archive]]]
-    entries = [_build_entry(candidate, home, defaults, config, ledger, rotated, listings, now)
+    entries = [_build_entry(candidate, home, defaults, config, ledger, rotated, listings, archive_ledger, now)
                for candidate in sources.ordered_candidates(home, config.extras)
                if candidate.path not in ignored]
     entries.sort(key=lambda entry: (-entry.bytes, entry.path))

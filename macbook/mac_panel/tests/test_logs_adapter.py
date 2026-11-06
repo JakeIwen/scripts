@@ -202,6 +202,16 @@ class LogsActionTests(unittest.TestCase):
         self.assertEqual([call[0] for call in runner.calls],
                          [(*LOG_ROTATE, name, '--json', '--revision', REVISION, PATH) for name in ('add', 'ignore', 'unignore')])
 
+    def test_adopt_requires_confirmation_and_preserves_revision_and_path(self):
+        logs, runner = adapter([json_command(inventory(entry()) | {'log': entry()})])
+        body = {'action': 'adopt', 'revision': REVISION, 'path': PATH}
+        with self.assertRaises(ApiError) as caught:
+            logs.mutate(body)
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(runner.calls, [])
+        logs.mutate({**body, 'confirmed': True})
+        self.assertEqual(runner.calls[0][0], (*LOG_ROTATE, 'adopt', '--json', '--revision', REVISION, PATH))
+
     def test_invalid_requests_never_reach_the_cli(self):
         logs, runner = adapter([])
         bad = [{'action': 'delete'}, {'action': 'add', 'revision': REVISION, 'path': 'relative'},
@@ -251,6 +261,8 @@ import assert from 'node:assert/strict';
 const base = process.argv[1];
 const {Element, section} = await import(base + '/tests/dom_fixture.mjs');
 globalThis.Node = Element;
+globalThis.document.addEventListener = () => {};
+Element.prototype.setAttribute = function (key, value) { this[key] = value; };
 const timer = globalThis.setTimeout;
 globalThis.setTimeout = (...args) => { const value = timer(...args); value.unref(); return value; };
 const {register} = await import(base + '/static/panel_sections.mjs');
@@ -287,6 +299,17 @@ await new Promise(setImmediate);
 assert.equal(sent.length, 2);
 assert.equal(sent[1].keep, 1);
 assert.equal('confirmed' in sent[1], false);
+const refused = {...entry, state: 'refused', note: 'unrecorded archives; adopt to continue'};
+const actions = logRow(refused, {revision: 'rev'})[7];
+const adopt = walk(actions).find(x => x.dataset.key === 'adopt-/fixture/job.log');
+assert.equal(adopt.textContent, 'Adopt archives');
+adopt.click();
+assert.equal(sent.length, 2);
+adopt.click();
+await new Promise(setImmediate);
+assert.deepEqual(sent[2], {action: 'adopt', path: entry.path, revision: 'rev', confirmed: true});
+const ordinary = logRow({...entry, state: 'refused', note: 'symlink'}, {revision: 'rev'})[7];
+assert.equal(walk(ordinary).some(x => x.dataset.key === 'adopt-/fixture/job.log'), false);
 console.log('PASS: keep-zero Apply requires two clicks; ordinary policy requires one');
 """
         with tempfile.TemporaryDirectory() as home:

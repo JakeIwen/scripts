@@ -86,10 +86,35 @@ def _shift_archives(existing: list, directory: str, base: str, keep: int,
             os.unlink(item.path)
         else:
             destination = archive_path(directory, base, item.index + 1, item.gzipped)
-            archives.publish(item.path, destination)
-            ledger[destination] = archives.identity(destination)
+            _publish_recorded(item.path, destination, ledger, home)
         ledger.pop(item.path, None)
         state.write_json(home, state.ARCHIVES_FILE, ledger)
+
+
+def _publish_recorded(source: str, destination: str, ledger: dict, home: str) -> None:
+    # Record before linking: a failed write never leaves a published archive foreign.
+    ledger[destination] = {**archives.identity(source), "path": destination}
+    state.write_json(home, state.ARCHIVES_FILE, ledger)
+    archives.publish(source, destination)
+
+
+def _check_source(path: str, descriptor: int, original: os.stat_result, copied: Optional[int]) -> None:
+    current, opened = os.lstat(path), os.fstat(descriptor)
+    if opened.st_nlink != 1:
+        raise _fail("refused: " + eligibility.HARD_LINK_NOTE)
+    if ((current.st_dev, current.st_ino) != (original.st_dev, original.st_ino)
+            or (opened.st_dev, opened.st_ino) != (original.st_dev, original.st_ino)):
+        raise _fail("file changed before publication")
+    if copied is not None and copied != opened.st_size:
+        raise _fail("grows faster than it can be copied")
+
+
+def _catch_up(source: int, destination: int, copied: int, compress: bool) -> None:
+    # After shifting, never reject late growth: add one more member before truncating.
+    size = os.fstat(source).st_size
+    if size > copied:
+        with os.fdopen(destination, "ab", closefd=False) as output:
+            _copy_pass(source, output, copied, size, compress)
 
 
 def _sync_directory(directory: str) -> None:
@@ -124,29 +149,28 @@ def rotate_file(path: str, home: str, keep: int, compress: bool) -> Tuple[int, O
     temporary_fd = None
     archive = None
     try:
-        ledger = state.read_json(home, state.ARCHIVES_FILE)
+        ledger = archives.prune(home)
         existing = archives.rotation_plan(directory, base, keep, compress, ledger)
         if keep > 0:
             _require_space(directory, info.st_size)
             temporary_fd, temporary = tempfile.mkstemp(dir=directory, prefix=".{}.rotating.".format(base))
             try:
                 copied = _write_archive(descriptor, temporary_fd, compress)
-                if copied != os.fstat(descriptor).st_size:
-                    raise _fail("grows faster than it can be copied")
                 if not _check_temporary(temporary, temporary_fd):
                     raise _fail("foreign file at {}".format(temporary))
+                _check_source(path, descriptor, info, copied)
                 _shift_archives(existing, directory, base, keep, ledger, home)
                 archive = archive_path(directory, base, 1, compress)
-                archives.publish(temporary, archive)
+                _publish_recorded(temporary, archive, ledger, home)
                 temporary = None
-                ledger[archive] = archives.identity(archive)
-                state.write_json(home, state.ARCHIVES_FILE, ledger)
             except OSError as error:
                 raise _fail("archive failed: {}".format(error.strerror or error)) from None
             _sync_directory(directory)
-            if copied != os.fstat(descriptor).st_size:
-                raise _fail("grows faster than it can be copied")
+            _catch_up(descriptor, temporary_fd, copied, compress)
+            ledger[archive] = archives.identity(archive)
+            state.write_json(home, state.ARCHIVES_FILE, ledger)
         else:
+            _check_source(path, descriptor, info, None)
             _shift_archives(existing, directory, base, 0, ledger, home)
         os.ftruncate(descriptor, 0)
         os.fsync(descriptor)

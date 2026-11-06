@@ -11,8 +11,8 @@ from panel_contracts import ApiError, Level, LogsPayload, Reply, Section
 from panel_paths import LOG_ROTATE, LOG_ROTATE_ENV, LOG_ROTATE_LABEL
 from wire_validation import confirm, field, object_fields
 
-ACTIONS = frozenset(('rotate', 'policy', 'add', 'ignore', 'unignore'))
-PATH_ACTIONS = ('policy', 'add', 'ignore', 'unignore')
+ACTIONS = frozenset(('rotate', 'policy', 'add', 'ignore', 'unignore', 'adopt'))
+PATH_ACTIONS = ('policy', 'add', 'ignore', 'unignore', 'adopt')
 # Exit codes of the rotator CLI beyond 0 (ok) and 1 (error).
 EXIT_CONFLICT, EXIT_BUSY = 3, 75
 READ_TIMEOUT, ROTATE_TIMEOUT = 60, 600
@@ -250,7 +250,7 @@ class LogsAdapter:
         if not valid_path(body['path']):
             raise ApiError(400, 'Invalid log path')
         flags = self.policy_flags(body) if action == 'policy' else []
-        if action == 'policy' and body.get('keep') == 0:
+        if action == 'adopt' or (action == 'policy' and body.get('keep') == 0):
             confirm(body)
         result = self.run((*LOG_ROTATE, action, '--json', '--revision', revision, *flags, body['path']), READ_TIMEOUT)
         failure(result)

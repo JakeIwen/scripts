@@ -18,7 +18,7 @@ import crontab_sync
 import tool_automation
 import tool_settings
 
-from log_rotate import cli, copytruncate, eligibility, growth, inventory, rotate, state
+from log_rotate import archives, cli, copytruncate, eligibility, growth, inventory, rotate, state
 from log_rotate.records import MB
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -326,8 +326,8 @@ class RotationTests(LogRotateCase):
                 before = os.lstat(foreign)
                 original = self.read(path)
                 code, result, _ = self.run_cli('rotate', '--only', path, '--json')
-                self.assertEqual(code, 1)
-                self.assertEqual(result['errors'][0]['error'], 'foreign file at ' + foreign)
+                self.assertEqual(code, 0)
+                self.assertEqual(result['skipped'][0]['reason'], 'refused: ' + archives.UNRECORDED_NOTE)
                 self.assertEqual(os.lstat(foreign), before)
                 self.assertEqual(self.read(target), b'foreign')
                 self.assertEqual(self.read(path), original)
@@ -341,8 +341,8 @@ class RotationTests(LogRotateCase):
         Path(archive).write_bytes(b'foreign replacement')
         Path(path).write_bytes(payload('next'))
         code, result, _ = self.run_cli('rotate', '--json')
-        self.assertEqual(code, 1)
-        self.assertIn('foreign file at ' + archive, result['errors'][0]['error'])
+        self.assertEqual(code, 0)
+        self.assertEqual(result['skipped'][0]['reason'], 'refused: ' + archives.UNRECORDED_NOTE)
         self.assertEqual(self.read(archive), b'foreign replacement')
         self.assertEqual(os.path.getsize(path), OVER_ONE_MB)
 
