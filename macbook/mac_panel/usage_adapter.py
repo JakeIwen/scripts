@@ -64,8 +64,6 @@ def decode_routing(value, result):
     result['reasons'] = reasons
     route = value.get('route') if isinstance(value.get('route'), dict) else value
     result['route'] = {key: route[key] for key in ROUTE_KEYS if isinstance(route.get(key), str)}
-    if isinstance(route, dict) and route is not value:
-        result['route'].update({k: v for k, v in route.items() if isinstance(v, str)})
     lines = value.get('lines')
     if isinstance(lines, list) and all(isinstance(item, str) for item in lines):
         result['lines'] = lines
@@ -82,11 +80,11 @@ def decode_availability(raw, result):
         extra = {}
         if isinstance(item, dict):
             item, extra = item.get('state'), item
-        if item not in AVAILABILITY:
+        if not isinstance(item, str) or item not in AVAILABILITY:
             raise ApiError(502, 'Invalid usage availability')
         states[family] = item
         if isinstance(extra.get('window_left'), (int, float)) and not isinstance(extra['window_left'], bool):
-            detail.setdefault(family, {})['window_left'] = extra['window_left']
+            detail.setdefault(family, {})['window_left'] = field(extra, 'window_left', float)
         if isinstance(extra.get('reset'), str):
             detail.setdefault(family, {})['reset'] = timestamp(extra['reset'])
     result['availability'] = states
