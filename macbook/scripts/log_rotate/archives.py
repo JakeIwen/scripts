@@ -163,7 +163,9 @@ def prune(home: str) -> dict:
 
 
 def _cleanup_candidate(entry, home: str) -> bool:
-    """Only a regular tracked log qualifies: a folder or refused entry's parent is not ours to clean."""
+    """Only a regular log we rotate qualifies: a folder, refused or disabled entry's parent is not ours to clean."""
+    if not getattr(getattr(entry, "policy", None), "enabled", False):
+        return False
     if getattr(entry, "state", None) == STATE_REFUSED or getattr(entry, "reason", None) == LogReason.UNREADABLE_DIRECTORY:
         return False
     try:

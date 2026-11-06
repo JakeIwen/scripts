@@ -55,3 +55,14 @@ class TemporaryCleanupScopeTests(LogRotateCase):
         self.assertEqual((code, value['errors']), (0, []))
         self.assertTrue(outside.exists())
         self.assertFalse(abandoned.exists())
+
+    def test_disabled_third_party_log_never_has_its_neighbour_cleaned(self):
+        log = self.write('Library/Logs/Vendor/app.log', payload('vendor'))
+        planted = self._plant('Library/Logs/Vendor', '.app.log.rotating.abcdefgh')
+        code, value, _ = self.run_cli('rotate', '--json')
+        self.assertEqual((code, value['errors']), (0, []))
+        self.assertTrue(planted.exists())
+        self.set_policy(log, '--enabled', 'on')
+        code, value, _ = self.run_cli('rotate', '--json')
+        self.assertEqual((code, value['errors']), (0, []))
+        self.assertFalse(planted.exists())
