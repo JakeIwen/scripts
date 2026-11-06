@@ -1,11 +1,15 @@
 // Usage: allowance left in each window as gauges against the even-spend line, the routing the usage-budget
 // script chose, and the sampled history. Shows only what the sanitized facts carry; no account identity.
 import {gauge, sparkline} from './charts.mjs';
+import {api} from './panel_api.mjs';
 import {historyPanel} from './history_panel.mjs';
-import {card, emptyState, info, kv, node, tag, timeNode} from './panel_dom.mjs';
-import {USAGE_COPY as COPY} from './section_copy.mjs';
+import {card, emptyState, fieldError, info, kv, node, tag, timeNode} from './panel_dom.mjs';
+import {MODE_COPY, USAGE_COPY as COPY, USAGE_SETTINGS_TOOL} from './section_copy.mjs';
+import {toolCard} from './settings_card.mjs';
+import {stageAction} from './search_actions.mjs';
 import {goTo} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
+import {APPLY_KEY, MODE_ANCHOR, modeBlock} from './usage_mode.mjs';
 
 const SECTION = 'usage';
 const PERCENT = 100;
@@ -103,6 +107,10 @@ function routingCard(data) {
     ['Expires', data.expires_at],
     ['Snapshot', snapshotAge(data)],
   ]));
+  const mode = node('div');
+  mode.dataset.anchor = MODE_ANCHOR;
+  mode.append(titled(MODE_COPY.title, MODE_COPY.info), modeBlock(data, SECTION));
+  body.append(mode);
   const notes = [...(data.lines ?? []), ...(data.reasons ?? [])];
   if (notes.length) {
     const list = node('ul', null, 'findings');
@@ -115,6 +123,28 @@ function routingCard(data) {
 function snapshotAge(data) {
   const result = node('span');
   result.append(timeNode(data.fetched_at), ` (${Math.round(data.age_minutes)} min old)`);
+  return result;
+}
+
+// ---- usage-budget settings (the form moved here from Settings) ----
+
+// Not reused from the Settings payload: a save there or here changes the revision, and a stale one would only conflict.
+export async function load() {
+  const [usage, settings] = await Promise.all([
+    api('/api/usage'),
+    api('/api/settings').catch(() => null),
+  ]);
+  const tool = settings?.tools.find(entry => entry.tool === USAGE_SETTINGS_TOOL);
+  return {...usage, budget_settings: tool ? {tools: [tool]} : null};
+}
+
+function settingsCard(data) {
+  const tool = data.budget_settings?.tools[0];
+  if (!tool || tool.error) {
+    return card({title: COPY.settingsTitle, body: fieldError(tool?.error ?? COPY.settingsUnavailable), anchor: COPY.settingsAnchor});
+  }
+  const result = toolCard(tool, SECTION);
+  result.dataset.anchor = COPY.settingsAnchor;
   return result;
 }
 
@@ -161,7 +191,9 @@ export function render(data) {
   const line = node('p', null, 'summary-line');
   line.append(status(level, summary));
   root.append(line);
-  root.append(budgetsCard(data), routingCard(data), historyCard());
+  const top = node('div', null, 'usage-top');
+  top.append(budgetsCard(data), settingsCard(data));
+  root.append(top, routingCard(data), historyCard());
   return {node: root, summary, level};
 }
 
@@ -194,6 +226,8 @@ export function cardExtra(data) {
 export function searchItems() {
   const open = (anchorId, label) => ({label, run: () => goTo(SECTION, anchorId)});
   return [
+    {title: MODE_COPY.searchTitle, subtitle: MODE_COPY.searchInfo, keywords: ['mode', 'burn', 'conserve', 'automatic', 'claude-burn', 'gpt-burn'],
+      anchor: MODE_ANCHOR, actions: [{label: 'Set mode', run: () => stageAction(SECTION, MODE_ANCHOR, APPLY_KEY, {arm: true})}]},
     {title: 'Usage budgets', subtitle: 'Allowance left in each window', keywords: ['claude', 'codex', 'fable', 'credits', 'gauge'],
       anchor: 'budgets', actions: [open('budgets', 'Open')]},
     {title: 'Usage routing', subtitle: 'Lean, workers and review', keywords: ['lean', 'availability', 'workers'],

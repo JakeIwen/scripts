@@ -1,4 +1,5 @@
 // Search index and scoring, pure so Node can test them. The popover that shows the results is search_ui.mjs.
+import {USAGE_SETTINGS_TOOL} from './section_copy.mjs';
 import {settingAnchor, settingLabel} from './settings_fields.mjs';
 
 export const MAX_RESULTS = 12;
@@ -66,7 +67,7 @@ export function settingItems(payload) {
       title: `${declaration.title}: ${settingLabel(setting)}`,
       subtitle: setting.description,
       keywords: [declaration.tool, setting.name],
-      section: 'settings',
+      section: declaration.tool === USAGE_SETTINGS_TOOL ? 'usage' : 'settings',
       anchor: settingAnchor(declaration.tool, setting.name),
     })));
 }
@@ -105,5 +106,8 @@ function sectionRows(sections, payloadOf) {
  * payloadOf(id): the latest payload the state registry holds for that section.
  */
 export function buildIndex({sections, groups, payloadOf}) {
-  return [...staticItems({sections, groups}), ...settingItems(payloadOf('settings')), ...sectionRows(sections, payloadOf)];
+  // The LLM section carries its own copy of its tool's declaration, so those fields stay searchable before Settings loads.
+  const fields = [...settingItems(payloadOf('settings')), ...settingItems(payloadOf('usage')?.budget_settings)];
+  const unique = [...new Map(fields.map(item => [item.id, item])).values()];
+  return [...staticItems({sections, groups}), ...unique, ...sectionRows(sections, payloadOf)];
 }

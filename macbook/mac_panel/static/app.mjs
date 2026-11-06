@@ -20,7 +20,7 @@ import {setupSearch} from './search_ui.mjs';
 import {buildShell, setConnection} from './shell.mjs';
 
 // `auto` sections poll every 15 s. `endpoint: null` means the section renders from the state registry.
-// Optional module exports searchItems, attentionItems and cardExtra join search and Overview when present.
+// Optional module exports load, searchItems, attentionItems and cardExtra join search and Overview when present.
 const MODULES = [
   ['overview', overview, {endpoint: null, auto: false}],
   ['services', services, {auto: true}],
@@ -36,7 +36,7 @@ const MODULES = [
   ['settings', settings, {auto: false}],
 ];
 const SECTIONS = MODULES.map(([id, module, options]) => ({
-  id, title: sectionTitle(id), render: module.render, searchItems: module.searchItems,
+  id, title: sectionTitle(id), render: module.render, load: module.load, searchItems: module.searchItems,
   attentionItems: module.attentionItems, cardExtra: module.cardExtra, ...options,
 }));
 const POLL_MS = 15000;

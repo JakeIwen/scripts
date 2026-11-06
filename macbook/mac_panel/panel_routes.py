@@ -43,6 +43,7 @@ class PanelRoutes:
         }
         self.reads = {f'/api/{name.value}': adapter.read for name, adapter in self.adapters.items()}
         self.writes = {
+            '/api/usage': self.adapters[Section.USAGE].mutate,
             '/api/metered': self.adapters[Section.METERED].mutate,
             '/api/amphetamine': self.adapters[Section.AMPHETAMINE].save,
             '/api/settings': self.adapters[Section.SETTINGS].save,

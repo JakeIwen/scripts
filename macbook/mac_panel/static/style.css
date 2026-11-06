@@ -49,6 +49,11 @@ main > section { max-width: 1180px; min-width: 0; }
 .nav-link[aria-current="page"] { background: var(--raised); border-left-color: var(--accent); font-weight: 600; }
 .backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 40; }
 
+/* ---- LLM section: allowance gauges beside the usage-budget settings ---- */
+.usage-top { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); align-items: start; }
+.usage-top .card { margin: 0 0 var(--space-3); }
+@media (max-width: 899px) { .usage-top { grid-template-columns: 1fr; } }
+
 /* ---- section frame ---- */
 .section-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-3); }
 .section-head .meta { margin-left: auto; }
@@ -189,3 +194,11 @@ summary .muted { color: var(--muted); }
 code.copyable { user-select: all; padding: 2px 6px; background: var(--soft); border: 1px solid var(--line); border-radius: var(--radius-1); }
 .add-job .setting { max-width: none; }
 .add-job textarea { width: 100%; font: var(--text-small)/1.45 var(--mono); }
+
+/* ---- LLM mode picker ---- */
+.mode-block { margin: var(--space-3) 0; }
+.mode-options { display: grid; gap: var(--space-2); margin: var(--space-2) 0; }
+.mode-option { display: grid; grid-template-columns: auto 1fr; column-gap: var(--space-2); align-items: baseline; cursor: pointer; }
+.mode-option input { grid-row: 1 / span 2; }
+.mode-option small { grid-column: 2; }
+.mode-name { display: flex; gap: var(--space-2); align-items: baseline; }

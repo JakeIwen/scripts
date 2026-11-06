@@ -1,12 +1,16 @@
-"""Read only the usage tool's sanitized cached facts through the CLI boundary."""
+"""The usage tool through the CLI boundary: its sanitized cached facts, and the manual mode switch."""
 from datetime import datetime, timezone
 
 from cli_runner import json_result
+from log_redaction import redact
 from panel_contracts import ApiError, UsagePayload
-from wire_validation import field, object_fields
+from wire_validation import confirm, field, object_fields
 
-COMMAND = ('/usr/bin/python3', '-I', '-B',
-           '/Users/jacobr/config/mac/usage-budget/usage_budget.py', 'facts', '--json')
+TOOL = ('/usr/bin/python3', '-I', '-B', '/Users/jacobr/config/mac/usage-budget/usage_budget.py')
+COMMAND = TOOL + ('facts', '--json')
+MODE_COMMAND = TOOL + ('mode',)
+# The tool's mode names, defined once for the wire check; `auto` clears a manual mode back to automatic.
+MODES = ('claude-conserve', 'gpt-conserve', 'balanced-conserve', 'balanced-burn', 'gpt-burn', 'claude-burn', 'auto')
 WINDOWS = ('claude_weekly', 'claude_session', 'fable_weekly', 'codex_weekly', 'codex_session')
 # Normalised field -> the facts keys that may carry it (older shape first, then the positions shape).
 POSITION_SOURCES = {'left': ('left',), 'elapsed_pct': ('elapsed_pct',), 'line_left': ('line_left', 'line'),
@@ -158,3 +162,18 @@ class UsageAdapter:
 
     def read(self) -> UsagePayload:
         return decode_usage(json_result(self.runner.run(COMMAND, timeout=20)))
+
+    def mutate(self, body) -> UsagePayload:
+        """Set (or clear) the manual mode; the tool refuses names it does not know with exit 2, writes nothing."""
+        object_fields(body, ('action', 'mode'), ('confirmed',))
+        if field(body, 'action', str, status=400) != 'mode':
+            raise ApiError(400, 'Unsupported usage action')
+        mode = field(body, 'mode', str, status=400)
+        if mode not in MODES:
+            raise ApiError(400, 'Unknown usage mode')
+        confirm(body)
+        result = self.runner.run(MODE_COMMAND + (mode,), timeout=20)
+        if result.returncode != 0:
+            text = redact((result.stderr.strip() or result.stdout.strip()))
+            raise ApiError(400, text or f'The usage tool exited {result.returncode}')
+        return {**self.read(), 'message': redact(result.stdout.strip())}

@@ -68,8 +68,8 @@ module that holds the section's state: the panel only relays validated requests 
 | Mac, Amphetamine (`#amphetamine`) | `macbook/scripts/amphetamine_control.py status/configure`. The automatic-lock switch and the idle-minutes field each save through `configure` with the displayed revision. The battery cutoff is read-only (Amphetamine owns it). |
 | Mac, BTT guard (`#guard`) | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `audit` (a fresh read-only audit on every load), `service status`, `acceptance` (shown as Auto-accept; drift pending acceptance is yellow), `inspect`. Inspect and audit are unconfirmed and read-only; the known-good checkpoint (`checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check) is armed and sends `confirmed: true`. Repair is Terminal-only. |
 | Mac, ntfy alerts (`#ntfy`) | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify; destinations are never read or shown. The one action is a confirmed test through `guard notify-test --send`. |
-| Usage (`#usage`) | `/usr/bin/python3 -I -B /Users/jacobr/config/mac/usage-budget/usage_budget.py facts --json`, a read-only subcommand that reads the cached snapshot only. Gauges for the Claude, Fable and Codex windows and credits, the routing lean, workers, review and availability, and sparklines from the history store. No account identity is exposed. |
-| Settings (`#settings`) | `shared/python/tool_settings.py` loads declarations from `shared/settings/` (plus `~/.config/jacobr/declarations/`) and revision-checked values from `~/.config/jacobr/`. Each field renders through one row with its description in an info icon, its unit and a "changed from default" marker; save checks the revision and a conflict offers Reload; reset is armed and sends `action: "reset"` with `confirmed: true`. A declaration that cannot be loaded becomes an error card on that tool alone. |
+| LLM (`#usage`, section id and hash unchanged) | `/usr/bin/python3 -I -B /Users/jacobr/config/mac/usage-budget/usage_budget.py facts --json`, a read-only subcommand that reads the cached snapshot only. Gauges for the Claude, Fable and Codex windows and credits, the routing lean, workers, review and availability, and sparklines from the history store. No account identity is exposed. Beside the gauges sits the usage-budget tool's settings card (fields, Save, Reset, revision conflicts), loaded from `/api/settings` on each refresh through the section's `load()`; polling pauses while it has unsaved edits. |
+| Settings (`#settings`) | `shared/python/tool_settings.py` loads declarations from `shared/settings/` (plus `~/.config/jacobr/declarations/`) and revision-checked values from `~/.config/jacobr/`. Each field renders through one row with its description in an info icon, its unit and a "changed from default" marker; save checks the revision and a conflict offers Reload; reset is armed and sends `action: "reset"` with `confirmed: true`. A declaration that cannot be loaded becomes an error card on that tool alone. The usage-budget tool's card is not shown here: a pointer card links to the LLM section, and its fields are searched there (`USAGE_SETTINGS_TOOL` in `section_copy.mjs`). |
 
 A new automation joins the panel by adding its declaration under
 `shared/automations/` and a status command that prints a
@@ -142,7 +142,7 @@ whose Apply is enabled only once the time differs.
 
 Navigation: the sidebar groups Overview; Jobs & services (Services, Deferred jobs,
 Crontab, Automations, llm-restore); Network (Metered); Mac (Amphetamine, BTT guard, ntfy
-alerts); Usage; Settings. It is a drawer opened by Menu below 900 px. A nav entry shows its
+alerts); LLM (id `usage`); Settings. It is a drawer opened by Menu below 900 px. A nav entry shows its
 state dot (green fine, yellow needs attention, red failing, grey idle, hollow unknown) and
 its one-line summary as the hover tooltip; a group heading shows the worst of its members.
 The arrow keys, Home and End move between entries. The shell opens the section named by the URL hash, else the last-viewed section from
@@ -215,7 +215,8 @@ properties set from JS.
   `state[section] = {payload, summary, level, updatedAt, error}` that nav dots, Overview and
   search read (`onState` subscribes).
 - `search_actions.mjs`: navigate to an action row and arm its confirmation without clicking it.
-- `settings_fields.mjs`: declaration-driven setting inputs, values and validation.
+- `settings_fields.mjs`: setting labels and anchor ids.
+- `settings_card.mjs`: `toolCard(tool, sectionId)`, one tool's settings form (Save, Reset, conflict Reload) for whichever section shows it.
 - `task_receipt.mjs`: watch/resume async receipts, show outcomes and request edit-safe refreshes.
 - `deferred_form.mjs`: pure deferred-add validation and request-body conversion.
 - `section_deferred_add.mjs`: the deferred-job add form and inline errors.

@@ -97,3 +97,15 @@ test('section action labels are searchable without running the action', () => {
   assert.equal(search(index, 'launchd')[0], result);
   assert.equal(ran, false);
 });
+
+test('the usage-budget fields are searchable in the LLM section, from either payload, without duplicates', () => {
+  const budget = {tool: 'usage-budget', declaration: {tool: 'usage-budget', title: 'Usage budget',
+    settings: [{name: 'fable_nudge', label: 'Fable alert', description: 'phone alert'}]}, state: {}};
+  const rows = settingItems({tools: [budget]});
+  assert.deepEqual(rows.map(row => [row.section, row.anchor]), [['usage', 'usage-budget-fable_nudge']]);
+  const sections = [{id: 'usage', title: 'LLM'}, {id: 'settings', title: 'Settings'}];
+  const index = buildIndex({sections, groups: [], payloadOf: id => ({
+    usage: {budget_settings: {tools: [budget]}}, settings: {tools: [budget]}}[id])});
+  assert.equal(index.filter(row => row.anchor === 'usage-budget-fable_nudge').length, 1);
+  assert.equal(search(index, 'fable alert')[0].section, 'usage');
+});
