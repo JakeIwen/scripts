@@ -204,24 +204,78 @@ function cutSelectedLine(directory) {
         tagCutLine(editor, board, before);
     } catch (error) {
         // The text is already cut: never undo it or overwrite a newer clipboard.
-        return LINE_CUT_INLINE;
+        return LINE_CUT_INLINE + ' ' + tagFailureReason(error);
     }
     return 'cut line';
 }
 
-function tagCutLine(editor, board, before) {
-    let cutVersion, text;
-    // Browser/Electron Cut can return before publishing the clipboard. Text
-    // confirmation alone does not identify that later clipboard generation.
-    if (!waitFor(() => {
-        cutVersion = Number(board.changeCount);
-        text = ObjC.unwrap(board.stringForType($.NSPasteboardTypeString));
-        return cutVersion > before && [editor.line.text, editor.line.copy].includes(text)
-            && Number(board.changeCount) === cutVersion;
-    }, 20)) throw new Error('The app did not publish the cut line.');
+// The cut's clipboard once the app has published it: a newer generation than
+// the one before Cut that holds the line (or its copy form), read stably.
+function publishedCut(editor, board, before) {
+    const version = Number(board.changeCount);
+    const text = ObjC.unwrap(board.stringForType($.NSPasteboardTypeString));
+    return version > before && [editor.line.text, editor.line.copy].includes(text)
+        && Number(board.changeCount) === version ? {version, text} : null;
+}
+
+// Failures of a write that never took the clipboard: the generation moved
+// under us, so the next publish may be taken. Anything else is final.
+var CLIPBOARD_MOVED = /^(?:The clipboard changed|Clipboard changed after Cut)/;
+var TAG_WAIT_MS = 1000;
+
+// Every sentence our own tag path can throw (tagCutLine, tagPublishedCut,
+// copyPasteboard, writeClipboardText, writeLineClipboard, restorePasteboard).
+// The recorded diagnostic keeps only these: a native exception's text could
+// carry anything, so it never reaches the result.
+var TAG_FAILURE_SENTENCES = [
+    'The app did not publish the cut line.', 'Clipboard changed after Cut.', 'The clipboard changed.',
+    'The clipboard changed during the write.', 'Could not preserve the current clipboard.',
+    'Could not write the clipboard.', 'The clipboard text did not read back.',
+    'The line clipboard tag did not read back.', 'Could not prepare the clipboard text.',
+    'Could not mark the clipboard data.', 'The previous clipboard could not be restored.'
+];
+
+// A write failure and its failed restore arrive as one message of two sentences.
+function tagFailureReason(error) {
+    // Bounded: the sentence scan backtracks on long period-free text, and a
+    // native exception can carry a long value.
+    const message = error && typeof error.message === 'string' ? error.message.slice(0, 1000) : '';
+    const sentences = (message.match(/[^.]*\./g) || []).map(sentence => sentence.trim());
+    const known = sentences.filter(sentence => TAG_FAILURE_SENTENCES.includes(sentence));
+    const leftover = known.length < sentences.length || message.replace(/[^.]*\./g, '').trim() !== '';
+    return known.concat(leftover || !known.length ? ['Unexpected error.'] : []).join(' ');
+}
+
+function tagPublishedCut(editor, board, published) {
     const saved = editor.helpers.copyPasteboard(board);
-    if (saved.version !== cutVersion) throw new Error('Clipboard changed after Cut.');
-    writeLineClipboard(board, editor.line.copy, saved, editor.helpers, text === editor.line.copy);
+    if (saved.version !== published.version) throw new Error('Clipboard changed after Cut.');
+    writeLineClipboard(board, editor.line.copy, saved, editor.helpers, published.text === editor.line.copy);
+}
+
+// Browser/Electron Cut can return before publishing the clipboard, and some
+// apps publish in more than one step. Text confirmation alone does not identify
+// that later clipboard generation, so poll for it and retry a tag whose
+// snapshot or write met a moving clipboard, all before one TAG_WAIT_MS deadline
+// measured in elapsed time (a slow snapshot of promised data counts), so only
+// the attempt in flight can overrun it. A tag that read back as ours is never
+// retried, and a clipboard that no longer holds the line is not ours.
+function tagCutLine(editor, board, before) {
+    const deadline = Date.now() + TAG_WAIT_MS;
+    let failure = null;
+    for (;;) {
+        const published = publishedCut(editor, board, before);
+        if (published) {
+            try {
+                return tagPublishedCut(editor, board, published);
+            } catch (error) {
+                if (!CLIPBOARD_MOVED.test(String(error && error.message))) throw error;
+                failure = error;
+                if (!publishedCut(editor, board, before)) throw failure;
+            }
+        } else if (failure) throw failure;
+        if (Date.now() >= deadline) throw failure || new Error('The app did not publish the cut line.');
+        delay(0.05);
+    }
 }
 
 function writeLineClipboard(board, text, saved, helpers, preserveItems = false) {
@@ -381,7 +435,8 @@ function runEditingKey(options) {
         if (!Object.prototype.hasOwnProperty.call(EDITING_KEYS, options.kind)) throw new Error('Unknown editing key.');
         return EDITING_KEYS[options.kind](options);
     }));
-    if (outcome.result === LINE_CUT_INLINE) outcome.warning = LINE_CUT_INLINE;
+    // The result also carries the tag failure's reason after the warning sentence.
+    if (typeof outcome.result === 'string' && outcome.result.startsWith(LINE_CUT_INLINE)) outcome.warning = LINE_CUT_INLINE;
     if (options.lineClipboardVariable) {
         // A refusal/crash must release conditional Cmd-V even if an older tag
         // remains. Copy/cut only arm it when this run actually wrote a line.

@@ -31,8 +31,9 @@ function pasteboardFake({items = [{[PLAIN_TEXT]:'original','public.rtf':'rich or
         get clearContents() { this.items = []; return ++this.changeCount; },
         prepareForNewContentsWithOptions(options) { this.prepared.push(options); return this.clearContents; },
         writeObjects(items) {
-            this.items = Array.isArray(items) ? items : Array.from({length:Number(items.count)},(_,i) => items.objectAtIndex(i));
-            this.changeCount++;
+            // Native semantics (measured): writeObjects appends and never bumps changeCount;
+            // only clearContents / prepareForNewContents start a new generation.
+            this.items.push(...(Array.isArray(items) ? items : Array.from({length:Number(items.count)},(_,i) => items.objectAtIndex(i))));
             return true;
         }
     };

@@ -289,7 +289,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   not cut. After confirmation, Cut waits up to one second for a newer matching
   clipboard. If its first item's string equals the copy form, it tags a separate copy
   of the app's items (RTF/HTML retained); otherwise it normalizes to plain line text
-  plus one `\n`. A failed tag write warns as a completed cut without undoing it. Cmd-C never touches the field: it
+  plus one `\n`. A failed tag write warns as a completed cut without undoing it, names the reason in the recorded result, and is retried while the app is still publishing (within the same one-second elapsed-time wait). Cmd-C never touches the field: it
   writes the line's text plus `\n` to the clipboard with `text_menu_paste.js`'s
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
   read, and a failed write puts the previous clipboard back. Copy/cut share the

@@ -323,10 +323,14 @@ this restore covers sequences lost before a checkpoint held them.
   cut waits up to one second for the app's clipboard publication (a newer
   changeCount and matching line text). When its first item's string equals the line
   plus one `\n`, the runtime tags a copy of all the app's items, keeping RTF/HTML;
-  otherwise it rewrites plain text to normalize the break or a leading non-text item. A failed tag write
-  restores the app's clipboard unless a newer copy arrived, and reports
-  “Line cut, but Cmd-V will paste it inline.” under “Line cut with a warning”,
-  never presenting the completed cut as a stopped cut.
+  otherwise it rewrites plain text to normalize the break or a leading non-text item.
+  If the clipboard moves between that check and the write (some apps publish a cut
+  in two steps), the tag is retried within the same one-second wait (elapsed time, so a
+  slow clipboard read counts) while the
+  clipboard still holds the line. A failed tag write restores the app's clipboard
+  unless a newer copy arrived, and reports “Line cut, but Cmd-V will paste it
+  inline.” under “Line cut with a warning”, never presenting the completed cut as
+  a stopped cut; the recorded result adds the reason after that sentence.
 - Cmd-C with no selection copies the caret's line (as VS Code does): its text and
   one `\n`, whatever break the app uses, on the last line too, so an empty line
   copies `\n` (in Firefox, the paragraph's text plus `\n`). The runtime writes it

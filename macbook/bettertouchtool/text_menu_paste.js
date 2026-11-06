@@ -50,11 +50,14 @@ function writeClipboardText(board, text, saved, {flags = [], options = 0, preser
         if (!item.setStringForType('1', type)) throw new Error('Could not mark the clipboard data.');
     }
     if (Number(board.changeCount) !== saved.version) throw new Error('The clipboard changed.');
-    let owned = Number(board.prepareForNewContentsWithOptions(options));
+    const owned = Number(board.prepareForNewContentsWithOptions(options));
     try {
         if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
         if (!board.writeObjects(items)) throw new Error('Could not write the clipboard.');
-        owned = Number(board.changeCount);
+        // writeObjects never bumps changeCount, so `owned` stays the generation
+        // prepareForNewContents returned: adopting a newer one here would let a
+        // failed readback restore our text over somebody's newer copy.
+        if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
         if (ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)) !== text)
             throw new Error('The clipboard text did not read back.');
         return owned;

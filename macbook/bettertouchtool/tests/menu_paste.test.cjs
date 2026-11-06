@@ -269,3 +269,17 @@ test('native Cocoa pasteboard arrays preserve text, rich data and privacy tags',
             ['trigger_action','json='+JSON.stringify(action)], {encoding:'utf8',timeout:15000});
         assert.deepEqual(JSON.parse(output), {temporaryText:true,privacyTags:true,plainRestored:true,richRestored:true});
     });
+
+test('a copy landing right after the write is kept and never overwritten by a restore', () => {
+    const {board,context,contents} = fixture();
+    const saved = context.copyPasteboard(board), write = board.writeObjects;
+    board.writeObjects = function (items) {
+        const result = write.call(this,items);
+        this.clearContents;
+        write.call(this,[new Item({'public.utf8-plain-text':'foreign copy'})]);
+        return result;
+    };
+    assert.throws(() => context.writeClipboardText(board,'OURS',saved,{options:1}),
+        /The clipboard changed during the write\./);
+    assert.deepEqual(contents(),[{'public.utf8-plain-text':'foreign copy'}]);
+});

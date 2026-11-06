@@ -39,7 +39,7 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, clipb
     const {board, native:clipboard, contents} = pasteboardFake({items, changeCount:7});
     // An app's own Cut.
     const write = text => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:text})]); };
-    const state = {focused:field.element, other, presses:[], board};
+    const state = {focused:field.element, other, presses:[], board, clock:0};
     const fields = [field, other];
     let selectionWrites = 0, selectionReads = 0;
     const attribute = (element, name, options) => {
@@ -84,7 +84,10 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, clipb
         }
     });
     const context = vm.createContext({$:native, Ref:() => [],
-        delay(seconds) { if (onDelay) onDelay(state, seconds); },
+        // A fake clock for the runtime's Date.now() deadlines: only delay() and
+        // tests (slow attempts) advance it.
+        delay(seconds) { state.clock += seconds * 1000; if (onDelay) onDelay(state, seconds); },
+        Date:class extends Date { static now() { return state.clock; } },
         ObjC:{import() {}, castRefToObject:x => x, unwrap:x => x}});
     for (const file of ['text_selection.js', 'text_editing_keys.js'])
         vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
@@ -567,7 +570,7 @@ test('a failed cut tag write preserves the app clipboard and reports a successfu
     let writes = 0;
     board.writeObjects = function (items) { return ++writes === 2 ? false : write.call(this, items); };
     const message = 'Line cut, but Cmd-V will paste it inline.';
-    assert.deepEqual(run('cut-line'), {ok:true, result:message, warning:message});
+    assert.deepEqual(run('cut-line'), {ok:true, result:message + ' Could not write the clipboard.', warning:message});
     assert.equal(field.text, 'one\nthree');
     assert.deepEqual(contents(), [{[PLAIN_TEXT]:'two\n'}]);
 });
@@ -595,6 +598,7 @@ test('a native copy after Cut is preserved instead of overwritten by the line ta
     const outcome = run('cut-line');
     assert.equal(outcome.ok, true);
     assert.equal(outcome.warning, 'Line cut, but Cmd-V will paste it inline.');
+    assert.equal(outcome.result, outcome.warning + ' The app did not publish the cut line.');
     assert.equal(field.text, 'one\nthree');
     assert.deepEqual(contents(), [{[PLAIN_TEXT]:'newer copy'}]);
 });
@@ -787,4 +791,146 @@ test('Cut with a leading non-text item is normalized instead of duplicating the 
         new Item({'custom/type':'metadata'}), new Item({[PLAIN_TEXT]:text, 'public.rtf':'rich'})]); });
     assert.equal(run('cut-line', TRACK_CLIPBOARD).result, 'cut line');
     assert.deepEqual(contents(), [{[PLAIN_TEXT]:'two\n', [LINE_TYPE]:'1'}]);
+});
+
+
+// An app whose clipboard moves while we read it: `onSnapshot` runs once, the
+// first time the pasteboard's items are read (the tag's snapshot), the way a
+// second publish or someone's copy lands between our poll and our write.
+function movingAtSnapshot(board, onSnapshot) {
+    const items = Object.getOwnPropertyDescriptor(board, 'pasteboardItems').get;
+    let moved = false;
+    Object.defineProperty(board, 'pasteboardItems', {get() {
+        if (!moved) { moved = true; onSnapshot(); }
+        return items.call(this);
+    }});
+}
+
+test('a cut the app publishes in two steps is tagged by retrying within the same wait', () => {
+    const field = cocoaField(THREE, 5);
+    let ticks = 0;
+    const {run, board, contents} = keyFixture(field, {onDelay:() => ticks++});
+    const second = {[PLAIN_TEXT]:'two\n', 'public.html':'<b>two</b>'};
+    // The second publication lands between our poll and our snapshot.
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item(second)]); });
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.deepEqual(outcome, {ok:true, result:'cut line', lineClipboard:true});
+    assert.equal(field.text, 'one\nthree');
+    assert.deepEqual(contents(), [{...second, [LINE_TYPE]:'1'}]);
+    assert.equal(ticks, 1, 'the first snapshot failed and one tick later the retry tagged the second publication');
+});
+
+test('a clipboard replaced after the cut is left alone and the reason is reported', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board, contents} = keyFixture(field);
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:'unrelated secret'})]); });
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    const warning = 'Line cut, but Cmd-V will paste it inline.';
+    assert.deepEqual(outcome, {ok:true, result:warning + ' The clipboard changed.', warning, lineClipboard:false});
+    assert.equal(field.text, 'one\nthree');
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'unrelated secret'}]);
+});
+
+test('a moving clipboard is retried only while it still holds the line, and only until one elapsed second', () => {
+    for (const [replacement, slow, attemptsAllowed] of [['two\n', 300, 4], ['two\n', 0, 21], ['unrelated', 300, 1]]) {
+        const field = cocoaField(THREE, 5);
+        const {run, board, state} = keyFixture(field);
+        const items = Object.getOwnPropertyDescriptor(board, 'pasteboardItems').get;
+        let snapshots = 0, started = null;
+        // The clipboard changes under every snapshot, and each snapshot is slow
+        // (promised data): with the line's text on it every retry is allowed, so
+        // only the elapsed-time deadline can stop them.
+        Object.defineProperty(board, 'pasteboardItems', {get() {
+            snapshots++;
+            if (started === null) started = state.clock;
+            state.clock += slow;
+            board.clearContents;
+            board.writeObjects([new Item({[PLAIN_TEXT]:replacement})]);
+            return items.call(this);
+        }});
+        const outcome = run('cut-line', TRACK_CLIPBOARD);
+        assert.equal(outcome.result, 'Line cut, but Cmd-V will paste it inline. The clipboard changed.');
+        assert.equal(outcome.lineClipboard, false);
+        assert.ok(snapshots <= attemptsAllowed, snapshots + ' attempts');
+        assert.ok(state.clock - started <= 1000 + slow + 50, 'at most one attempt past the deadline: ' + (state.clock - started));
+    }
+});
+
+test('a tag whose write read back as ours is not retried', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board} = keyFixture(field);
+    const write = board.writeObjects;
+    let writes = 0;
+    board.writeObjects = function (items) {
+        const result = write.call(this, items);
+        if (++writes === 2) this.items[0].values.delete(LINE_TYPE);
+        return result;
+    };
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.equal(outcome.result, 'Line cut, but Cmd-V will paste it inline. The line clipboard tag did not read back.');
+    assert.equal(writes, 3, 'the cut, the tag and the restore of the app’s clipboard; no second tag attempt');
+});
+
+test('a tag failure’s reason names no clipboard text', () => {
+    const secret = 'PRIVATE CLIPBOARD TEXT';
+    const field = cocoaField(THREE, 5);
+    const {run, board} = keyFixture(field, {clipboard:[{[PLAIN_TEXT]:secret}]});
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:secret + ' 2'})]); });
+    const outcome = run('cut-line', TRACK_CLIPBOARD);
+    assert.match(outcome.result, /^Line cut, but Cmd-V will paste it inline\. /);
+    assert.equal(JSON.stringify(outcome).includes(secret), false);
+    assert.equal(JSON.stringify(outcome).includes('two'), false);
+});
+
+test('the recorded outcome of a cut whose tag failed carries the reason, not text', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, board, context} = keyFixture(field);
+    const written = [], plain = context.$;
+    // Only the report JSON becomes a writable string; AX names stay plain.
+    context.$ = Object.assign(value => typeof value === 'string' && value.startsWith('{"time"')
+        ? {writeToFileAtomicallyEncodingError(file) { written.push([file, JSON.parse(value)]); return true; }} : value, plain,
+        {NSFileManager:{defaultManager:{fileExistsAtPath:() => true, setAttributesOfItemAtPathError() {}}}});
+    movingAtSnapshot(board, () => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:'unrelated'})]); });
+    run('cut-line', {directory:'/fixture'});
+    const [, report] = written.find(([file]) => file.endsWith('text-transform-last-result.json'));
+    assert.equal(report.ok, true, report.error);
+    assert.equal(report.result, 'Line cut, but Cmd-V will paste it inline. The clipboard changed.');
+    assert.equal(JSON.stringify(report).includes('unrelated'), false);
+});
+
+test('a native exception or non-Error is reduced to a fixed sentence in the recorded reason', () => {
+    const warning = 'Line cut, but Cmd-V will paste it inline. ';
+    for (const thrown of [new Error('NSInvalidArgumentException SENTINEL-9f3 -[NSPasteboard writeObjects:]'), 'SENTINEL-9f3', null,
+        new Error('Could not write the clipboard. SENTINEL-9f3 tail')]) {
+        const {run, board} = keyFixture(cocoaField(THREE, 5));
+        const write = board.writeObjects;
+        let writes = 0;
+        board.writeObjects = function (items) { if (++writes === 2) throw thrown; return write.call(this, items); };
+        const outcome = run('cut-line', TRACK_CLIPBOARD);
+        assert.equal(outcome.ok, true);
+        assert.equal(JSON.stringify(outcome).includes('SENTINEL'), false);
+        assert.equal(outcome.result, warning + (thrown && thrown.message && thrown.message.startsWith('Could')
+            ? 'Could not write the clipboard. Unexpected error.' : 'Unexpected error.'));
+    }
+});
+
+test('a write failure and its failed restore keep both of our own sentences', () => {
+    const {run, board} = keyFixture(cocoaField(THREE, 5));
+    const write = board.writeObjects;
+    let writes = 0;
+    board.writeObjects = function (items) { return ++writes >= 2 ? false : write.call(this, items); };
+    assert.equal(run('cut-line', TRACK_CLIPBOARD).result, 'Line cut, but Cmd-V will paste it inline. '
+        + 'Could not write the clipboard. The previous clipboard could not be restored.');
+});
+
+test('tagFailureReason keeps only allowlisted sentences', () => {
+    const {context} = keyFixture(cocoaField(THREE, 5));
+    const reason = error => context.tagFailureReason(error);
+    assert.equal(reason(new Error('The clipboard changed.')), 'The clipboard changed.');
+    assert.equal(reason(new Error('Could not write the clipboard. The previous clipboard could not be restored.')),
+        'Could not write the clipboard. The previous clipboard could not be restored.');
+    assert.equal(reason(new Error('')), 'Unexpected error.');
+    assert.equal(reason({message:42}), 'Unexpected error.');
+    assert.equal(reason(undefined), 'Unexpected error.');
+    assert.equal(reason(new Error('no period at all')), 'Unexpected error.');
 });
