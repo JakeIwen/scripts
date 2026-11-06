@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a minimal predecessor bootstrap, or explicitly apply/verify/release it over LAN.
+"""Stage a minimal predecessor bootstrap, or explicitly apply/verify/release it over ssh.
 
 Staging is read-only to the host. Apply requires the separate operator maintenance
 boundary documented in pi/docs/backup/CONCURRENCY.md; it never releases holds.
@@ -43,7 +43,7 @@ def main(argv=None):
     stage.add_argument('output', type=Path)
     for action in ('apply', 'abandon', 'verify', 'release'):
         command = commands.add_parser(action)
-        command.add_argument('--target', default='pi@vanpi.lan')
+        command.add_argument('--target', default='pi@vanpi')
         if action in ('apply', 'abandon', 'release'):
             command.add_argument('--maintenance-confirmed', action='store_true')
         if action in ('apply', 'abandon'):

@@ -4,7 +4,7 @@
 #   crontab_pi -> pi user's crontab
 set -eu
 dir=$(cd "$(dirname "$0")" && pwd)  # subshell only; caller's pwd untouched
-pi_ip="${vanpi:-pi@vanpi.lan}"
+pi_ip="${vanpi:-pi@vanpi}"
 
 install_crontab() { # <local file> <sudo|"">
   local file=$dir/$1 as=${2:-}

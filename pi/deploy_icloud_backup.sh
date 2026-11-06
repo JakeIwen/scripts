@@ -2,7 +2,7 @@
 # Targeted deployment; retains existing local settings and Apple credentials.
 set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-target=${1:-pi@vanpi.lan}
+target=${1:-pi@vanpi}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
 export PYTHONPATH="$repo:$repo/pi/scripts/backup"

@@ -247,7 +247,7 @@ For safe target verification without deploying services, run from the checkout:
 bash pi/deploy_time_machine_icloud.sh --check
 ```
 
-Both modes accept an optional SSH target (default `pi@vanpi.lan`); `--check`
+Both modes accept an optional SSH target (default `pi@vanpi`); `--check`
 may precede or follow it. They require the checkout's `.local/test-venv/bin/python`
 and run the canonical `run_tests.py` gate first (parallel, with its existing
 pass cache/coalescing), plus registry-drift and wrapper-syntax checks. A missing

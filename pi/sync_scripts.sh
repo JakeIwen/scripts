@@ -8,7 +8,7 @@ hooks="$dsc/pi/hooks"
 configs="$dsc/pi/configs"
 secrets="$dsc/pi/secrets"
 shared_sh="$dsc/shared/sh"
-pi_ip='pi@vanpi.lan'
+pi_ip='pi@vanpi'
 # pi_ip='pi@100.82.91.76'
 package_units=""
 
@@ -251,6 +251,8 @@ sync_compute() {
     echo "Van compute checkout is missing its executable installer: $compute_installer" >&2
     return 1
   fi
+  # The van-compute installer still defaults to pi@vanpi.lan (its worker LaunchAgent
+  # shares that host), so this step needs the van LAN until that repo splits them.
   if ! "$compute_installer" --if-needed; then
     echo "conditional van_compute deployment failed from $VAN_COMPUTE_CHECKOUT" >&2
     return 1

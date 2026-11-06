@@ -11,12 +11,12 @@
 # --test also runs the feature's tests there, including the real-TUI ones.
 set -eu -o pipefail
 
-host=vanpi.lan  # LAN only: never push a deploy over the metered uplink
+host=vanpi  # a few MB: LAN when the Pi answers there, else Tailscale; bulk copies stay on vanpi.lan
 repo=${0:A:h:h:h}
 cd "$repo"
 
 ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" true || {
-  echo "deploy_pi: $host unreachable on the LAN; not deploying" >&2
+  echo "deploy_pi: $host unreachable; not deploying" >&2
   exit 1
 }
 

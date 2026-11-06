@@ -8,8 +8,10 @@ are not evidence of Pi health. **Never delete or write the existing
 
 `pi/deploy_python.py` resolves its checkout from `__file__`, records Git commit,
 branch, checkout and dirty status, and transfers an allowlisted source release
-with one SSH invocation to `pi@vanpi.lan`. `--dry-run` and `--list-units` are local
-only. Only systemd operations and unit installation use sudo; it does not install
+with one SSH invocation to `pi@vanpi`. `--dry-run` and `--list-units` are local
+only. The broad `pi/sync_scripts.sh` also runs the van-compute installer, whose
+default target is still `pi@vanpi.lan` (its worker LaunchAgent shares that host),
+so that step needs the van LAN. Only systemd operations and unit installation use sudo; it does not install
 dependencies. Review dirty sources and provenance before deploying.
 
 Allowlisted inputs are immediate Python modules in:

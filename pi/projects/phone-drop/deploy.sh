@@ -5,7 +5,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-target="${PHONE_DROP_TARGET:-pi@vanpi.lan}"
+target="${PHONE_DROP_TARGET:-pi@vanpi}"
 
 stage="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" \
   'mktemp -d /tmp/phone-drop-deploy.XXXXXX')"

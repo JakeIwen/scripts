@@ -6,7 +6,7 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
-DEST="pi@vanpi.lan:Documents/agent-shared"
+DEST="pi@vanpi:Documents/agent-shared"
 
 for src in "$@"; do
   # Strip any surrounding quotes macOS drag-and-drop sometimes adds

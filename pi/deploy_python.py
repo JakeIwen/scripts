@@ -800,7 +800,7 @@ def main(argv=None):
     parser.add_argument('--list-units', action='store_true', help='print package-owned units locally; never connect')
     parser.add_argument('--check-consumers', action='store_true',
                         help="read-only: require external consumers' reviewed post-cutover launch forms")
-    parser.add_argument('--target', default='pi@vanpi.lan')
+    parser.add_argument('--target', default='pi@vanpi')
     parser.add_argument('--service', action='append', choices=tuple(SERVICES), help='select service(s); default all')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--activate', action='store_true', help='explicit per-service first cutover (saves old units)')

@@ -15,8 +15,8 @@ dest=.local/share/claude-mods/$mod
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
-# LAN only: nothing here should cross a metered uplink.
-pi=vanpi.lan
+# Deploys are a few MB, so bare vanpi (LAN, else Tailscale) is fine; bulk copies stay on vanpi.lan.
+pi=vanpi
 
 git -C "$here" ls-files -z -- . ':!codex' | COPYFILE_DISABLE=1 tar -C "$here" --null -T - -cf - | tar -C "$stage" -xf -
 ssh $pi "mkdir -p $dest"

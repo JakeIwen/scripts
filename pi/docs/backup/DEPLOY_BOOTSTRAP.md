@@ -80,7 +80,7 @@ python3 -m pi.backup_deploy_bootstrap verify
 python3 -m pi.backup_deploy_bootstrap release --maintenance-confirmed
 ```
 
-The default target is `pi@vanpi.lan`; there is no implicit Tailscale fallback.
+The default target is `pi@vanpi` (LAN when the Pi answers there, else Tailscale).
 `verify` is read-only and permits the expected held maintenance state. The remote
 apply stage is temporary, but the input bundle and crontab originals are copied
 and flushed under `/var/lib/vanpi-backup-deploy/` before any guard publication.

@@ -3,7 +3,7 @@
 set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 check_only=0
-target=pi@vanpi.lan
+target=pi@vanpi
 target_set=0
 for argument in "$@"; do
   case "$argument" in

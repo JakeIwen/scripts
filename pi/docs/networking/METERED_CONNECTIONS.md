@@ -219,7 +219,7 @@ The third compact `policyctl read` column stays zero for existing backup readers
    then the same command without `--dry-run`. This supports genuine unit absence;
    it refuses foreign/vendor units and overrides. It does not fabricate a flat
    predecessor or enable an inactive service.
-3. Stage these non-backup files over `vanpi.lan`: `pi/scripts/vanpi-metered`,
+3. Stage these non-backup files over `vanpi`: `pi/scripts/vanpi-metered`,
    `pi/scripts/metered_shell.bash`, `pi/scripts/connectivity_status.py`,
    `pi/scripts/policyctl`, and `pi/scripts/internet_switches.sh`.
    Preserve each live original before installing. Publish the CLI and connectivity

@@ -3,7 +3,7 @@
 #   root's crontab -> crontab, pi user's -> crontab_pi
 set -eu
 dir=$(cd "$(dirname "$0")" && pwd)  # subshell only; caller's pwd untouched
-pi_ip="${vanpi:-pi@vanpi.lan}"
+pi_ip="${vanpi:-pi@vanpi}"
 
 pull_crontab() { # <sudo|""> <dest file>
   local as=$1 dest=$dir/$2 tmp

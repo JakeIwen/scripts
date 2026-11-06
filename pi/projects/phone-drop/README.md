@@ -39,7 +39,7 @@ bash pi/projects/phone-drop/deploy.sh
 The script is idempotent. It creates the inbox and a token only when missing,
 restarts the service only when the code or unit changed, and then checks that
 health responds and a wrong token is refused. It never prints the token.
-`PHONE_DROP_TARGET` overrides the default `pi@vanpi.lan`. The broad
+`PHONE_DROP_TARGET` overrides the default `pi@vanpi`. The broad
 `pi/sync_scripts.sh` does not touch these files.
 
 Tests run against a real server on a random port:

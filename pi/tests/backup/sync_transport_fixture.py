@@ -107,7 +107,7 @@ def make(case, healthy=True):
         shutil.copyfile(REPO / 'pi' / name, repo / 'pi' / name)
     for name in ('sync_scripts.sh', 'sync_workflow.sh', 'sync_storage_managed.exclude'):
         text = (REPO / 'pi' / name).read_text()
-        text = text.replace("pi_ip='pi@vanpi.lan'", "pi_ip='pi@fixture.invalid'")
+        text = text.replace("pi_ip='pi@vanpi'", "pi_ip='pi@fixture.invalid'")
         (repo / 'pi' / name).write_text(text.replace('dsc="/Users/jacobr/dev/scripts"', 'dsc="' + str(repo) + '"'))
     shutil.copyfile(REPO / 'pi/scripts/update_services.sh', repo / 'pi/scripts/update_services.sh')
     shutil.copyfile(REPO / 'pi/scripts/connectivity_status.py', repo / 'pi/scripts/connectivity_status.py')

@@ -742,7 +742,7 @@ def make_plan(target, recorder_only=False):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--target',default='pi@vanpi.lan')
+    parser.add_argument('--target',default='pi@vanpi')
     sub=parser.add_subparsers(dest='action',required=True)
     for action in ('check','apply'):
         action_parser=sub.add_parser(action)

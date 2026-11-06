@@ -483,7 +483,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `llm_restore.py` would count as a TUI. The Codex child sits on the wrapper's
   pty, so `uncommitted_owners.py` finds its tab through ancestor ttys.
   Pi: `zsh shared/codex_autocontinue/deploy_pi.zsh [--test]` installs the wrapper
-  (not the retirement check) over `vanpi.lan` into
+  (not the retirement check) over `vanpi` into
   `~/.local/share/codex-autocontinue/` with repo paths, keeping `.previous` for
   rollback, and checks hashes; `pi/.bashrc`'s `_codex_tui` runs it. The Mac's
   `_codex_tui` (private `~/config`, `mac/shell/`, loaded by `~/.zshrc`) runs
@@ -726,7 +726,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/claude-mods/clean-output/` is the Claude Code mod behind `/clean`
   (usage in its README). The Mac loads it from the checkout; the Pi, which
   has no checkout, loads the copy `zsh shared/claude-mods/deploy_pi.zsh
-  clean-output` installs over `vanpi.lan` in
+  clean-output` installs over `vanpi` in
   `~/.local/share/claude-mods/clean-output/` (both through `settings.json`
   `env.CLAUDE_CODE_PLUGIN_DIRS`), so re-run it after any change to the mod;
   the mod's own `deploy_pi.zsh` calls it. Its engine-free modules (`hooks/*.ts` except
@@ -1051,10 +1051,12 @@ commands: `ssh vanpi` probes the LAN and falls back to Tailscale, and
 the van LAN (on the LAN, Tailscale goes direct). Never give `vanpi.lan`,
 `vanpi.local` or a Tailscale IP in a link or an example: the first two
 resolve only on the van LAN, and the IP lives in `~/.ssh/config` and
-`/etc/hosts` alone. `vanpi.lan` belongs in code that must never cross the
-metered uplink and has nobody to ask (scheduled jobs, syncs, bulk copies), so
-it fails off the LAN instead of rerouting, and in URLs handed to LAN devices
-without the Mac's hosts line (Sonos chime URIs, scripts running on the Pi).
+`/etc/hosts` alone. Deploys (`deploy_python.py`, `sync_scripts.sh`, the
+`deploy_pi.zsh` scripts, crontab pushes) move a few MB and use bare `vanpi`
+too. `vanpi.lan` belongs in code that must never cross the metered uplink and
+has nobody to ask (scheduled jobs such as the known-terms merge, media rsyncs,
+Time Machine, bulk copies), so it fails off the LAN instead of rerouting, and
+in URLs handed to LAN devices without the Mac's hosts line (Sonos chime URIs).
 Keep device identities, service names and filesystem paths unchanged.
 
 ## UBNT manual-selection protection
