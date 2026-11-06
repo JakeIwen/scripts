@@ -249,15 +249,15 @@ class UsageWindow(TypedDict):
     resets_at: str | None
 
 
-class UsageCredits(TypedDict):
-    left: float | None
-    allowance_per_day: float | None
-    burn_per_day: float | None
+class UsageCredits(TypedDict, total=False):
+    left: float
+    allowance_per_day: float
+    burn_per_day: float
     expires: str
     days_left: float
 
 
-class ClaudePosition(TypedDict):
+class ClaudePosition(TypedDict, total=False):
     left: float
     elapsed_pct: float
     line_left: float
@@ -265,9 +265,8 @@ class ClaudePosition(TypedDict):
     resets_in_h: float
 
 
-class UsageRoute(TypedDict):
-    workers: str
-    review: str
+class GptPosition(ClaudePosition, total=False):
+    on_credits: bool
 
 
 class UsageAvailability(TypedDict):
@@ -275,7 +274,7 @@ class UsageAvailability(TypedDict):
     gpt: str
 
 
-class UsagePayload(TypedDict):
+class _UsageRequired(TypedDict):
     fetched_at: str
     age_minutes: float
     claude_weekly: UsageWindow | None
@@ -283,12 +282,20 @@ class UsagePayload(TypedDict):
     fable_weekly: UsageWindow | None
     codex_weekly: UsageWindow | None
     codex_session: UsageWindow | None
-    credits: UsageCredits
-    claude_position: ClaudePosition | None
-    lean: str
-    reasons: list[str]
-    route: UsageRoute
+    credits: UsageCredits | None
     availability: UsageAvailability
+    reasons: list[str]
+    route: dict[str, str]
+
+
+class UsagePayload(_UsageRequired, total=False):
+    claude_position: ClaudePosition | None
+    gpt_position: GptPosition
+    lean: str
+    lines: list[str]
+    mode_source: str
+    expires_at: str
+    availability_detail: dict[str, dict[str, Any]]
 
 
 class Level(str, Enum):

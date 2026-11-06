@@ -74,11 +74,11 @@ def usage_samples(payload):
         family = 'gpt' if key.startswith('codex') else 'claude'
         rows.append((key + '_left', levels[payload['availability'][family]] if window else Level.UNKNOWN,
                      window['left'] if window else None, None))
-    position = payload['claude_position']
-    rows += [('credits', levels[payload['availability']['gpt']], payload['credits']['left'], None),
-             ('claude_line_left', Level.OK if position else Level.UNKNOWN,
-              position['line_left'] if position else None, None),
-             ('lean', Level.OK, None, payload['lean'])]
+    position = payload.get('claude_position')
+    rows += [('credits', levels[payload['availability']['gpt']], (payload['credits'] or {}).get('left'), None),
+             ('claude_line_left', Level.OK if position and 'line_left' in position else Level.UNKNOWN,
+              position['line_left'] if position and 'line_left' in position else None, None),
+             ('lean', Level.OK, None, payload.get('lean'))]
     return rows
 
 
