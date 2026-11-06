@@ -11,6 +11,9 @@ AUTH = re.compile(r'(?i)\b(authorization\s*[:=]\s*)([^\r\n]+)')
 BEARER = re.compile(r'(?i)\bbearer\s+[a-z0-9._~+/=-]+')
 PAIR = re.compile(r'''(?ix)(["']?\b(?:[a-z0-9_]*(?:token|password|passwd|secret|api_key|ntfy_warning_url))["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)''')
 
+MAC_ADDRESS = re.compile(r'(?i)(?<![0-9a-f])(?:[0-9a-f]{1,2}[:-]){5}[0-9a-f]{1,2}(?![0-9a-f])')
+NETWORK_FIELD = re.compile(r'''(?ix)(["']?\b(?:[a-z0-9_]*(?:ssid|bssid|network))\b["']?\s*[:=]\s*)(?:"(?:\\[^\r\n]|[^"\\\r\n])*"|'(?:\\[^\r\n]|[^'\\\r\n])*'|[^\r\n]+)''')
+
 
 def redact(text: str) -> str:
     # Arbitrary self-hosted ntfy topics cannot be identified by hostname alone.
@@ -18,6 +21,13 @@ def redact(text: str) -> str:
     text = AUTH.sub(r'\1[hidden]', text)
     text = BEARER.sub('Bearer [hidden]', text)
     return PAIR.sub(r'\1[hidden]', text)
+
+
+def redact_log(text: str) -> str:
+    # Network identity fields in API records remain usable; log prose must not expose them.
+    text = redact(text)
+    text = NETWORK_FIELD.sub(r'\1[hidden]', text)
+    return MAC_ADDRESS.sub('[MAC hidden]', text)
 
 
 def redact_data(value):
@@ -69,7 +79,7 @@ def log_tail(path: str, stream: str = LogStream.STDOUT, lines: int = 30, limit: 
         try:
             os.lseek(fd, max(0, info.st_size - limit), os.SEEK_SET)
             content = os.read(fd, limit).decode('utf-8', errors='replace')
-            record.update(text=redact('\n'.join(content.splitlines()[-lines:])),
+            record.update(text=redact_log('\n'.join(content.splitlines()[-lines:])),
                           modified=info.st_mtime)
         finally:
             os.close(fd)

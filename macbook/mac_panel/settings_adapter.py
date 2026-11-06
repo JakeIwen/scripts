@@ -1,6 +1,6 @@
 """Declaration-driven settings; persistence belongs entirely to tool_settings."""
 from panel_contracts import ApiError, SettingsPayload, SettingsToolRecord
-from wire_validation import field, object_fields
+from wire_validation import confirm, field, object_fields
 
 
 def _declaration_error(tool, error) -> SettingsToolRecord:
@@ -29,7 +29,11 @@ class SettingsAdapter:
         return SettingsPayload(tools=[self._read_one(tool) for tool in self.settings.declaration_tools()])
 
     def save(self, body):
-        object_fields(body, ('tool', 'values', 'revision'))
+        object_fields(body, ('tool', 'values', 'revision'), ('action', 'confirmed'))
+        if 'action' in body:
+            if body['action'] != 'reset':
+                raise ApiError(400, 'Unknown settings action')
+            confirm(body)
         tool = field(body, 'tool', str, status=400)
         values = field(body, 'values', dict, status=400)
         revision = field(body, 'revision', str, nullable=True, status=400)

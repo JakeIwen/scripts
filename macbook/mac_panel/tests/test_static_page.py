@@ -13,7 +13,11 @@ from panel_test_support import FakeRunner, request, running_server
 from server import STATIC_NAME, source_changed, static_file
 
 STATIC = DIRECTORY / 'static'
-IMPORT = re.compile(r'''^import\b[^;]*?\bfrom\s+['"]\./([^'"]+)['"];''', re.M)
+# Re-exports count as imports: panel_dom.mjs reaches components.mjs only through `export ... from`.
+IMPORT = re.compile(r'''^(?:import|export)\b[^;]*?\bfrom\s+['"]\./([^'"]+)['"];''', re.M)
+
+
+IMPORT_CSS = re.compile(r'''^@import url\("/([^"]+)"\);''', re.M)
 
 
 class PageAssets(HTMLParser):
@@ -40,6 +44,7 @@ class StaticPageTests(unittest.TestCase):
         page.feed((STATIC / 'index.html').read_text())
         self.assertEqual(page.tokens, ['__PANEL_TOKEN__'])
         self.assertEqual(set(page.assets), {'/app.mjs', '/style.css'})
+        self.assertEqual(IMPORT_CSS.findall((STATIC / 'style.css').read_text()), ['tokens.css', 'charts.css'])
         self.assertEqual(page.scripts, ['module'])
         for asset in page.assets:
             self.assertIsNotNone(static_file(asset), asset)
@@ -59,10 +64,19 @@ class StaticPageTests(unittest.TestCase):
                 imported.add(name)
         self.assertEqual({module.name for module in modules} - imported, {'app.mjs'})
 
+    def test_only_tokens_define_colours(self):
+        literal = re.compile(r'#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch)\(')
+        files = [path for path in STATIC.iterdir() if path.suffix in {'.css', '.mjs', '.html'} and path.name != 'tokens.css']
+        self.assertGreater(len(files), 10)
+        for path in files:
+            self.assertEqual(literal.findall(path.read_text()), [], f'{path.name} defines a colour outside tokens.css')
+
     def test_static_names_are_restricted_to_page_assets(self):
         self.assertEqual(static_file('/'), ('index.html', 'text/html; charset=utf-8'))
         self.assertEqual(static_file('/app.mjs'), ('app.mjs', 'text/javascript; charset=utf-8'))
         self.assertEqual(static_file('/style.css'), ('style.css', 'text/css; charset=utf-8'))
+        for name in ('tokens.css', 'charts.css'):
+            self.assertEqual(static_file(f'/{name}'), (name, 'text/css; charset=utf-8'))
         for path in ('/index.html', '/../server.py', '/App.mjs', '/missing.mjs', '/style.css/', '/app.js', '/tests'):
             self.assertIsNone(static_file(path), path)
 

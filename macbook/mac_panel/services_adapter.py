@@ -1,23 +1,27 @@
-"""Read launchd inventory; only freshly discovered user agents can restart."""
+"""Control freshly discovered launchd jobs through explicitly permitted verbs."""
 import os
 from pathlib import Path
 import plistlib
 import re
+import threading
+import time
 
 from cli_runner import checked
 from log_redaction import log_stat, log_tail, redact, safe_display_path
 from panel_contracts import (ApiError, LogStream, ServiceKind, ServiceLogsPayload, ServiceRecord,
-                             ServicesPayload)
-from panel_paths import HOME
+                             ServicesPayload, ServiceAction, SudoRule)
+from panel_paths import HOME, LABEL, DIRECTORY, PYTHON
 from service_configuration import parse_enabled
 from wire_validation import confirm, field, object_fields
 
-LABEL_PATTERN = re.compile(r'^com\.jacobr\.[A-Za-z0-9_.-]+$')
+LABEL_PATTERN = re.compile(r'^com\.jacobr\.[a-z0-9-]+$')
 LOG_KEYS = (('StandardOutPath', LogStream.STDOUT), ('StandardErrorPath', LogStream.STDERR))
 # A plist pointing a stream at /dev/null has chosen to keep no log; the page should not list one.
 UNUSED_LOG = '/dev/null'
 # launchctl print's answer for a daemon plist that is installed but not bootstrapped (or booted out).
 NOT_LOADED = 'Could not find service'
+SUDO_CACHE_SECONDS = 300
+SUDO_INSTALL_HINT = f'{PYTHON} {DIRECTORY / "panel_service.py"} sudoers --script'
 
 
 def parse_list(text):
@@ -67,8 +71,9 @@ def plist_logs(path, label):
 
 
 class ServicesAdapter:
-    def __init__(self, runner, agents=None, daemons=None, uid=None):
+    def __init__(self, runner, agents=None, daemons=None, uid=None, clock=time.monotonic):
         self.runner = runner
+        self.clock, self.sudo_cache, self.sudo_lock = clock, {}, threading.Lock()
         self.agents = agents if agents is not None else HOME / 'Library/LaunchAgents'
         self.daemons = daemons if daemons is not None else Path('/Library/LaunchDaemons')
         self.uid = os.getuid() if uid is None else uid
@@ -106,7 +111,12 @@ class ServicesAdapter:
             rows.append(self.row(label, ServiceKind.DAEMON, path, reason, loaded=None,
                                  state='unknown', pid=None, last_exit=None))
         self.mark_disabled(rows)
-        return {'services': rows}
+        for row in rows:
+            if row['kind'] == ServiceKind.DAEMON:
+                row['sudo_rule'] = self.daemon_permission(row['label'])
+                row['actions'] = ([ServiceAction.RESTART]
+                                  if row['sudo_rule'] == SudoRule.PRESENT else [])
+        return {'services': rows, 'sudo_install_command': SUDO_INSTALL_HINT}
 
     def mark_disabled(self, rows):
         # The local-service `stop` verb disables a job so KeepAlive cannot undo it: a choice, not a fault.
@@ -126,7 +136,11 @@ class ServicesAdapter:
 
     def row(self, label, kind, path, reason=None, **values) -> ServiceRecord:
         declared, error = plist_logs(path, label)
-        return ServiceRecord(label=label, kind=kind, plist=str(path) if path else None,
+        actions = [] if kind == ServiceKind.DAEMON else list(ServiceAction)
+        if label == LABEL:
+            actions = [ServiceAction.RESTART]
+        return ServiceRecord(actions=actions, sudo_rule=SudoRule.NOT_APPLICABLE,
+                             label=label, kind=kind, plist=str(path) if path else None,
                              logs=[log_stat(value, stream) for stream, value in declared],
                              error=error or reason, disabled=False, **values)
 
@@ -139,16 +153,76 @@ class ServicesAdapter:
         declared, error = plist_logs(path, label)
         if error:
             raise ApiError(502, redact(error))
-        return {'label': label, 'logs': [log_tail(value, stream) for stream, value in declared]}
+        if label == 'com.jacobr.metered':
+            # Free-text Wi-Fi names cannot be identified reliably by structured-field redaction.
+            logs = [dict(log_stat(value, stream), text='Metered log tail withheld to protect network identifiers')
+                    for stream, value in declared]
+        else:
+            logs = [log_tail(value, stream) for stream, value in declared]
+        return {'label': label, 'logs': logs}
+
+    def daemon_permission(self, label):
+        with self.sudo_lock:
+            now = self.clock()
+            cached = self.sudo_cache.get(label)
+            if cached and now - cached[0] < SUDO_CACHE_SECONDS:
+                return cached[1]
+            try:
+                result = self.runner.run(('/usr/bin/sudo', '-n', '-l', '/bin/launchctl',
+                                          'kickstart', '-k', f'system/{label}'))
+                permission = SudoRule.PRESENT if result.returncode == 0 else SudoRule.MISSING
+            except ApiError:
+                permission = SudoRule.MISSING
+            self.sudo_cache[label] = (now, permission)
+            return permission
 
     def restart(self, body):
-        object_fields(body, ('label', 'confirmed'))
+        object_fields(body, ('label',), ('confirmed',))
+        return self.mutate({**body, 'action': ServiceAction.RESTART})
+
+    def mutate(self, body):
+        object_fields(body, ('label', 'action'), ('confirmed',))
         confirm(body)
         label = field(body, 'label', str, status=400)
+        action = field(body, 'action', str, status=400)
         if not LABEL_PATTERN.fullmatch(label):
-            raise ApiError(400, 'Invalid agent label')
+            raise ApiError(400, 'Invalid service label')
+        if action not in tuple(ServiceAction):
+            raise ApiError(400, 'Unsupported service action')
+        # Daemon targets come only from the installed, strictly named inventory.
+        if label in self.owned_plists(self.daemons):
+            if action != ServiceAction.RESTART:
+                raise ApiError(403, 'Daemons support restart only')
+            if self.daemon_permission(label) != SudoRule.PRESENT:
+                raise ApiError(403, 'Daemon restart requires the Mac Panel sudoers rule')
+            checked(self.runner.run(('/usr/bin/sudo', '-n', '/bin/launchctl',
+                                     'kickstart', '-k', f'system/{label}')))
+        else:
+            self.agent_action(label, action)
+        return {'message': f'{action.capitalize()} requested'}
+
+    def agent_action(self, label, action):
+        if label == LABEL and action != ServiceAction.RESTART:
+            raise ApiError(403, 'Mac Panel cannot start or stop itself')
         listed, plists = self.discover_agents()
         if label not in listed and label not in plists:
-            raise ApiError(403, 'Only a freshly discovered user LaunchAgent can restart')
-        checked(self.runner.run(('/bin/launchctl', 'kickstart', '-k', f'gui/{self.uid}/{label}')))
-        return {'message': 'Restart requested'}
+            raise ApiError(403, 'Only a freshly discovered user LaunchAgent can be controlled')
+        domain, target = f'gui/{self.uid}', f'gui/{self.uid}/{label}'
+        def run(*args):
+            return checked(self.runner.run(('/bin/launchctl', *args)))
+        if action == ServiceAction.RESTART:
+            run('kickstart', '-k', target)
+        elif action == ServiceAction.STOP:
+            run('disable', target)
+            if label in listed:
+                run('bootout', target)
+        else:
+            if label not in listed:
+                _, error = plist_logs(plists[label], label)
+                if error:
+                    raise ApiError(403, redact(error))
+            run('enable', target)
+            if label not in listed:
+                run('bootstrap', domain, str(plists[label]))
+            else:
+                run('kickstart', target)

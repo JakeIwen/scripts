@@ -29,7 +29,7 @@ class MeteredPanelTests(unittest.TestCase):
         cases = [
             ({'action': 'ssid-add', 'ssid': '$(touch nope)'}, ('ssid', 'add', '--', '$(touch nope)')),
             ({'action': 'ssid-add', 'ssid': '-Cafe'}, ('ssid', 'add', '--', '-Cafe')),
-            ({'action': 'ssid-remove', 'ssid': 'Cafe', 'revision': 7},
+            ({'action': 'ssid-remove', 'ssid': 'Cafe', 'revision': 7, 'confirmed': True},
              ('ssid', 'remove', '--revision', '7', '--', 'Cafe')),
             ({'action': 'approve', 'consumer': 'mac.codex_update', 'duration': '1h', 'revision': 2},
              ('approve', 'mac.codex_update', '1h', '--revision', '2')),
@@ -56,7 +56,7 @@ class MeteredPanelTests(unittest.TestCase):
     def test_conflicts_are_http_409(self):
         runner = FakeRunner([json_command({'error': 'reload'}, 75)])
         with self.assertRaises(ApiError) as error:
-            MeteredAdapter(runner).mutate({'action': 'ssid-remove', 'ssid': 'Cafe', 'revision': 2})
+            MeteredAdapter(runner).mutate({'action': 'ssid-remove', 'ssid': 'Cafe', 'revision': 2, 'confirmed': True})
         self.assertEqual(error.exception.status, 409)
 
     def test_http_route_keeps_token_origin_and_json_guards(self):

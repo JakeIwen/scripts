@@ -1,4 +1,5 @@
 """Fixed local identities; never resolve the venv interpreter symlink."""
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -7,7 +8,17 @@ DIRECTORY = ROOT / 'macbook/mac_panel'
 DATA = ROOT / 'tmp/mac-panel'
 RECORD = DATA / 'ownership.json'
 LABEL = 'com.jacobr.mac-panel'
-PORT = 8769
+DEFAULT_PORT = 8769
+
+
+def port_from_env(environ):
+    """MAC_PANEL_PORT lets a worktree run a second instance; anything but plain digits keeps the default."""
+    value = environ.get('MAC_PANEL_PORT', '')
+    return int(value) if value.isascii() and value.isdecimal() and 0 < int(value) < 65536 else DEFAULT_PORT
+
+
+# The LaunchAgent plist never sets the override, so the installed panel always serves DEFAULT_PORT.
+PORT = port_from_env(os.environ)
 HOST = f'127.0.0.1:{PORT}'
 URL = f'http://{HOST}'
 CHILD_PATH = '/usr/bin:/bin:/usr/sbin:/sbin'

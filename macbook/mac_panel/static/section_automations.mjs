@@ -1,9 +1,16 @@
 // Automations expose each declared tool's status and its explicit panel commands.
-import {button, keyValues, node, timeNode} from './panel_dom.mjs';
+import {button, card, confirmText, emptyState, info, kv, node, timeNode} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
+import {stageAction} from './search_actions.mjs';
+import {JOBS_COPY} from './section_copy.mjs';
 import {Level, status, worst} from './status_cell.mjs';
+import {latestTask, resumeTasks, taskLine, watchTask} from './task_receipt.mjs';
 
 const SECTION = 'automations';
+const COPY = JOBS_COPY.automations;
+const automationAnchor = automation => `automation-${automation.tool}`;
+const actionKey = (automation, item) => `${automation.tool}-${item.name}`;
+const taskJob = (automation, item) => `automation:${automation.tool}:${item.name}`;
 
 function levelFor(automation) {
   if (automation.status) return automation.status.level ?? Level.UNKNOWN;
@@ -41,49 +48,75 @@ function linksFor(automation) {
   return result;
 }
 
+// A synchronous action answers with its message; an async one answers with a task receipt that is followed to its end.
 function actionsFor(automation) {
   const result = node('div', null, 'actions');
   automation.actions.forEach(item => {
-    const confirmed = item.confirm === true;
     const body = {tool: automation.tool, action: item.name};
-    if (confirmed) body.confirmed = true;
-    result.append(button(item.label, () => action(SECTION, '/api/automations', body), {
-      confirm: confirmed ? `Confirm ${item.label.toLowerCase()}` : undefined,
-      key: `${automation.tool}-${item.name}`,
-      title: item.description,
+    if (item.confirm === true) body.confirmed = true;
+    const after = receipt => { if (item.async) watchTask(SECTION, receipt, `${automation.title}: ${item.label}`); };
+    result.append(button(item.label, () => action(SECTION, '/api/automations', body, {after}), {
+      confirm: item.confirm === true ? confirmText(item.label.toLowerCase()) : undefined,
+      key: actionKey(automation, item), title: item.description,
     }));
+    if (item.async) result.append(info(COPY.asyncInfo));
   });
   return result;
 }
 
-function automationNode(automation) {
-  const root = node('div', null, 'tool');
+function automationCard(automation, tasks) {
   const level = levelFor(automation);
   const summary = automation.status?.summary ?? 'unavailable';
-  root.append(node('h3', automation.title), node('p', automation.description, 'muted'));
+  const body = node('div');
+  if (automation.description) body.append(node('p', automation.description, 'muted'));
   const summaryLine = node('p', null, 'summary-line');
   summaryLine.append(status(level, summary));
-  root.append(summaryLine);
-  root.append(keyValues((automation.status?.fields ?? []).map(field => [field.label, fieldValue(field)])));
-  if (automation.error) root.append(node('p', automation.error, 'error'));
+  body.append(summaryLine, kv((automation.status?.fields ?? []).map(field => [field.label, fieldValue(field)])));
+  if (automation.error) body.append(node('p', automation.error, 'error'));
+  automation.actions.forEach(item => {
+    const task = latestTask(tasks, taskJob(automation, item));
+    if (task) body.append(taskLine(task));
+  });
   const links = linksFor(automation);
-  if (links.childElementCount) root.append(links);
-  if (automation.actions.length) root.append(actionsFor(automation));
-  return {root, level, summary: `${automation.title}: ${summary}`};
+  if (links.childElementCount) body.append(links);
+  if (automation.actions.length) body.append(actionsFor(automation));
+  return {node: card({title: automation.title, level, body, anchor: automationAnchor(automation)}), level, summary: `${automation.title}: ${summary}`};
 }
 
 export function render(data) {
-  const automations = data.automations;
   const root = node('div');
-  if (!automations.length) {
-    root.append(node('p', 'No automations declared'));
+  if (!data.automations.length) {
+    root.append(emptyState(COPY.empty));
     return {node: root, summary: 'no automations', level: Level.IDLE};
   }
-  const rendered = automations.map(automationNode);
-  rendered.forEach(item => root.append(item.root));
+  const rendered = data.automations.map(automation => automationCard(automation, data.tasks));
+  rendered.forEach(item => root.append(item.node));
+  const labels = new Map(data.automations.flatMap(automation => automation.actions.map(item =>
+    [taskJob(automation, item), `${automation.title}: ${item.label}`])));
+  resumeTasks(SECTION, data.tasks, task => labels.get(task.job) ?? task.job);
   return {
     node: root,
     summary: rendered.map(item => item.summary).join(' · '),
     level: worst(rendered.map(item => item.level)),
   };
+}
+
+export function searchItems(data) {
+  return data.automations.map(automation => ({
+    title: automation.title, subtitle: automation.status?.summary ?? 'unavailable', keywords: ['automation', automation.tool],
+    anchor: automationAnchor(automation),
+    actions: automation.actions.map(item => ({
+      label: item.label,
+      run: () => stageAction(SECTION, automationAnchor(automation), actionKey(automation, item), {arm: item.confirm === true}),
+    })),
+  }));
+}
+
+export function attentionItems(data) {
+  return data.automations.map(automation => ({automation, level: levelFor(automation)}))
+    .filter(({level}) => level === Level.WARN || level === Level.ERROR)
+    .map(({automation, level}) => ({
+      level, text: `${automation.title}: ${automation.status?.summary ?? automation.error ?? 'unavailable'}`,
+      anchor: automationAnchor(automation),
+    }));
 }

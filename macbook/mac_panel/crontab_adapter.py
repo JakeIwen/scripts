@@ -3,17 +3,19 @@ import json
 from pathlib import Path
 import re
 import shlex
+import time
 
-from cli_runner import checked, json_result
-from cron_schedule import describe_schedule
+from background_tasks import BackgroundTasks
+from cli_runner import CommandResult, checked, json_result
+from cron_schedule import describe_schedule, next_runs
 from log_redaction import redact, safe_display_path
-from panel_contracts import ApiError, CronJob, CrontabPayload, OwnerKind, Reply
+from panel_contracts import Section, ApiError, CronJob, CrontabPayload, Reply
 from panel_paths import ROOT
 from wire_validation import confirm, field, object_fields
 
 REVISION = re.compile(r'^[0-9a-f]{64}$')
 JOB_ID = re.compile(r'^[0-9a-f]{12}$')
-ACTIONS = frozenset(('pause', 'resume', 'install'))
+ACTIONS = frozenset(('pause', 'resume', 'install', 'run'))
 SYNC = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/scripts/crontab_sync.py'))
 # Tokens shlex emits for the shell punctuation the summary drops.
 COMMAND_SEPARATORS = frozenset(('&&', '||', ';'))
@@ -68,6 +70,16 @@ def program_summary(command):
     return ' '.join([words[0].rsplit('/', 1)[-1], *words[1:]])
 
 
+def program_name(command):
+    """Only an executable basename, never the argument-bearing display summary."""
+    try:
+        words = without_redirections(command_words(command))
+    except ValueError:
+        return 'unknown'
+    executable = next((word for word in words if not ASSIGNMENT.match(word)), '')
+    return executable.rsplit('/', 1)[-1] or 'unknown'
+
+
 def validate_status(value):
     required = ('revision', 'uncommitted', 'jobs', 'live_only', 'repo_only', 'installable')
     object_fields(value, required, status=502)
@@ -118,21 +130,18 @@ def display_log(path):
     return str(target), modified
 
 
-def display_job(job):
+def display_job(job, now=None):
+    now = time.time() if now is None else now
     expression = ' '.join(job['schedule_fields'])
     block, switch = job['managed_block'], job['managed_switch']
-    if block:
-        owner_kind = OwnerKind.MANAGED
-        owner = f'{block} — {switch or "macbook/crontab"}'
-    else:
-        owner_kind, owner = OwnerKind.TRACKED, 'macbook/crontab'
     log_path, log_modified = display_log(job['log_path'])
     return CronJob(id=job['id'], expression=expression,
                    schedule=describe_schedule(expression), command=job['command'],
                    program=program_summary(job['command']),
-                   description=job['description'], owner_kind=owner_kind, owner=owner,
+                   description=job['description'],
                    log_path=log_path, log_modified=log_modified, paused=job['paused'],
-                   managed_block=block, managed_switch=switch)
+                   managed_block=block, managed_switch=switch,
+                   next_runs=[] if job['paused'] else next_runs(job['schedule_fields'], now, now + 7 * 86400))
 
 
 def cli_error(result):
@@ -150,20 +159,22 @@ def cli_error(result):
 
 
 class CrontabAdapter:
-    def __init__(self, runner):
+    def __init__(self, runner, tasks=None):
         self.runner = runner
+        self.tasks = tasks or BackgroundTasks()
 
     def read(self):
         value = validate_status(json_result(self.runner.run((*SYNC, 'status', '--json'))))
         live_only, repo_only = value['live_only'], value['repo_only']
         return CrontabPayload(
-            revision=value['revision'], uncommitted=value['uncommitted'],
+            tasks=self.tasks.list(Section.CRONTAB), revision=value['revision'], uncommitted=value['uncommitted'],
             jobs=[display_job(job) for job in value['jobs']],
-            in_sync=not live_only and not repo_only, order_changed=False,
+            in_sync=not live_only and not repo_only,
             live_only=live_only, repo_only=repo_only, installable=value['installable'])
 
     def mutate(self, body):
         object_fields(body, ('action', 'revision'), ('job', 'confirmed'))
+        confirm(body)
         action = field(body, 'action', str, status=400)
         revision_value = field(body, 'revision', str, status=400)
         if action not in ACTIONS:
@@ -171,14 +182,22 @@ class CrontabAdapter:
         if not REVISION.fullmatch(revision_value):
             raise ApiError(400, 'Invalid crontab revision')
         argv = (*SYNC, action)
-        if action == 'install':
-            confirm(body)
-        else:
+        if action != 'install':
             job = field(body, 'job', str, status=400)
             if not JOB_ID.fullmatch(job):
                 raise ApiError(400, 'Invalid crontab job id')
             argv += (job,)
-        result = self.runner.run((*argv, '--revision', revision_value, '--json'))
+        argv = (*argv, '--revision', revision_value, '--json')
+        if action == 'run':
+            current = self.runner.run((*SYNC, 'status', '--json'))
+            if current.returncode in (3, 75):
+                raise ApiError(409, cli_error(current))
+            value = validate_status(json_result(current))
+            if value['revision'] != revision_value:
+                raise ApiError(409, 'Crontab revision changed; refresh before running')
+            task = self.tasks.start(Section.CRONTAB, f'crontab:{job}', lambda: self.run_job(argv, job))
+            return Reply(task, 202)
+        result = self.runner.run(argv)
         if result.returncode in (3, 75):
             raise ApiError(409, cli_error(result))
         checked(result)
@@ -189,3 +208,20 @@ class CrontabAdapter:
             raise ApiError(502, 'Invalid crontab revision')
         field(value, 'uncommitted', bool)
         return Reply(value)
+
+    def run_job(self, argv, job):
+        result = self.runner.run(argv, timeout=930)
+        if result.returncode:
+            return CommandResult(result.returncode, cli_error(result))
+        value = json_result(result)
+        object_fields(value, ('id', 'exit', 'started', 'finished', 'output', 'timed_out'), status=502)
+        if field(value, 'id', str) != job:
+            raise ApiError(502, 'Unexpected crontab run job id')
+        code = field(value, 'exit', int)
+        for key in ('started', 'finished', 'output'):
+            field(value, key, str)
+        output = value['output']
+        if field(value, 'timed_out', bool):
+            output = 'Job timed out after 900 seconds\n' + output
+        # The CLI's zero means it completed a run, not that the job itself succeeded.
+        return CommandResult(code, output)

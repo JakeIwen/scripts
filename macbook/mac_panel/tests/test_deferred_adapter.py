@@ -49,7 +49,7 @@ class DeferredTests(unittest.TestCase):
         runner = FakeRunner([json_command(inventory()), work, json_command(inventory())])
         adapter = DeferredAdapter(runner)
         try:
-            response = adapter.mutate({'action': 'run-now', 'id': 'test-job'})
+            response = adapter.mutate({'action': 'run-now', 'id': 'test-job', 'confirmed': True})
             self.assertEqual(response.status, 202)
             self.assertTrue(entered.wait(1))
             running = adapter.tasks.get(response.body['id'])
@@ -57,7 +57,7 @@ class DeferredTests(unittest.TestCase):
             self.assertIsInstance(running['started_at'], float)
             self.assertIsNone(running['finished_at'])
             with self.assertRaises(ApiError) as raised:
-                adapter.mutate({'action': 'run-now', 'id': 'test-job'})
+                adapter.mutate({'action': 'run-now', 'id': 'test-job', 'confirmed': True})
             self.assertEqual(raised.exception.status, 409)
             release.set()
             deadline = time.monotonic() + 2
@@ -77,7 +77,7 @@ class DeferredTests(unittest.TestCase):
         runner = FakeRunner([json_command(inventory()), CommandResult(3, 'token=hidden-value')])
         adapter = DeferredAdapter(runner)
         try:
-            response = adapter.mutate({'action': 'run-now', 'id': 'test-job'})
+            response = adapter.mutate({'action': 'run-now', 'id': 'test-job', 'confirmed': True})
             for _ in range(200):
                 result = adapter.tasks.get(response.body['id'])
                 if result['state'] != TaskState.RUNNING:

@@ -95,7 +95,7 @@ class AutomationsEndpointTests(unittest.TestCase):
             'service': 'com.jacobr.alpha',
             'settings': 'alpha',
             'actions': [{'name': 'run-now', 'label': 'Run now',
-                         'description': 'Run immediately.', 'confirm': False}],
+                         'description': 'Run immediately.', 'confirm': False, 'async': False}],
             'status': self.status('Alpha ready'),
             'error': None,
         })

@@ -41,11 +41,13 @@ class ServicesTests(unittest.TestCase):
             agents, daemons = fixture(Path(directory))
             runner = FakeRunner([CommandResult(0, LIST), CommandResult(1, stderr=MISSING),
                                  CommandResult(0, 'disabled services = {\n\t"com.jacobr.unloaded" => disabled\n}\n'),
-                                 CommandResult(0, 'disabled services = {\n\t"com.jacobr.daemon" => enabled\n}\n')])
+                                 CommandResult(0, 'disabled services = {\n\t"com.jacobr.daemon" => enabled\n}\n'),
+                                 CommandResult(1)])
             rows = ServicesAdapter(runner, agents, daemons, uid=501).read()['services']
             self.assertEqual(len(rows), 4)
             self.assertEqual([call[0][1:] for call in runner.calls[2:]],
-                             [('print-disabled', 'gui/501'), ('print-disabled', 'system')])
+                             [('print-disabled', 'gui/501'), ('print-disabled', 'system'),
+                              ('-n', '-l', '/bin/launchctl', 'kickstart', '-k', 'system/com.jacobr.daemon')])
             unloaded = next(row for row in rows if row['label'].endswith('unloaded'))
             self.assertFalse(unloaded['loaded'])
             self.assertTrue(unloaded['disabled'])
@@ -65,7 +67,7 @@ class ServicesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             agents, daemons = fixture(Path(directory))
             runner = FakeRunner([CommandResult(0, LIST), CommandResult(5, stderr='Operation not permitted'),
-                                 CommandResult(1, stderr='print-disabled failed')])
+                                 CommandResult(1, stderr='print-disabled failed'), CommandResult(1)])
             rows = ServicesAdapter(runner, agents, daemons, uid=501).read()['services']
             # An unreadable disabled list keeps the unloaded agent's plain warning.
             self.assertFalse(next(row for row in rows if row['label'].endswith('unloaded'))['disabled'])
@@ -97,6 +99,20 @@ class ServicesTests(unittest.TestCase):
                 self.assertEqual(reply.body['label'], 'com.jacobr.unloaded')
             finally:
                 routes.close()
+
+    def test_metered_free_text_tail_is_withheld_not_guessed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agents, daemons = fixture(root)
+            log = root / 'metered.log'
+            log.write_text('Connected to Private Place without a structured field\n')
+            (agents / 'com.jacobr.metered.plist').write_bytes(plistlib.dumps({
+                'Label': 'com.jacobr.metered', 'StandardOutPath': str(log)}))
+            payload = ServicesAdapter(FakeRunner(), agents, daemons).logs('com.jacobr.metered')
+            self.assertEqual(len(payload['logs']), 1)
+            self.assertNotIn('Private Place', payload['logs'][0]['text'])
+            self.assertIn('withheld to protect network identifiers', payload['logs'][0]['text'])
+            self.assertIsInstance(payload['logs'][0]['modified'], float)
 
     def test_restart_rechecks_inventory_and_rejects_system_or_unknown(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -76,7 +76,8 @@ class CrontabTests(unittest.TestCase):
             self.assertTrue(value['uncommitted'])
             self.assertTrue(value['installable'])
             self.assertEqual(value['jobs'][0]['id'], JOB_ID)
-            self.assertEqual(value['jobs'][0]['owner'], 'codex-release-cleanup — macbook/crontab')
+            self.assertNotIn('owner', value['jobs'][0])
+            self.assertNotIn('order_changed', value)
             self.assertEqual(value['jobs'][0]['program'], 'cleanup')
             self.assertEqual(value['jobs'][0]['log_path'], str(log))
             self.assertIsInstance(value['jobs'][0]['log_modified'], float)
@@ -92,14 +93,14 @@ class CrontabTests(unittest.TestCase):
         ])
         adapter = CrontabAdapter(runner)
         with self.assertRaises(ApiError) as raised:
-            adapter.mutate({'action': 'pause', 'job': JOB_ID, 'revision': REVISION})
+            adapter.mutate({'action': 'pause', 'job': JOB_ID, 'revision': REVISION, 'confirmed': True})
         self.assertEqual(raised.exception.status, 409)
         self.assertIn('revision changed', str(raised.exception))
         with self.assertRaises(ApiError) as raised:
             adapter.mutate({'action': 'install', 'revision': REVISION, 'confirmed': True})
         self.assertEqual(raised.exception.status, 409)
         self.assertIn('private job', str(raised.exception))
-        reply = adapter.mutate({'action': 'resume', 'job': JOB_ID, 'revision': REVISION})
+        reply = adapter.mutate({'action': 'resume', 'job': JOB_ID, 'revision': REVISION, 'confirmed': True})
         self.assertEqual(reply.body['message'], 'Job resumed')
         self.assertEqual(runner.calls[-1][0], (*SYNC, 'resume', JOB_ID, '--revision', REVISION, '--json'))
         for body in ({'action': 'install', 'revision': REVISION},
