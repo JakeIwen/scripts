@@ -10,6 +10,7 @@ import gzip
 import os
 import stat
 import tempfile
+import zlib
 from typing import Optional, Tuple
 
 from . import archives, eligibility, state
@@ -174,26 +175,44 @@ def _finish_pending(source: int, output: int, archive: str, copied: int,
 def _matches_prefix(source: int, archive: str, copied: int, compress: bool) -> bool:
     reader = gzip.open if compress else open
     with reader(archive, "rb") as recorded:
-        offset = 0
-        while offset < copied:
-            chunk = recorded.read(min(CHUNK_BYTES, copied - offset))
-            if not chunk or chunk != os.pread(source, len(chunk), offset):
-                return False
+        offset, matches = 0, True
+        while True:
+            chunk = recorded.read(CHUNK_BYTES)
+            if not chunk:
+                break
+            checked = min(len(chunk), max(copied - offset, 0))
+            if checked and chunk[:checked] != os.pread(source, checked, offset):
+                matches = False
             offset += len(chunk)
-    return True
+        if offset < copied:
+            raise EOFError("pending archive is shorter than its recorded source")
+    return matches
 
 
 def _resume_pending(source: int, info: os.stat_result, existing: list,
                     ledger: dict, home: str) -> Optional[str]:
-    for item in existing:
+    for item in list(existing):
         pending = ledger[item.path].get("pending_truncate")
         if not isinstance(pending, dict):
             continue
         original = pending["source"]
         if (info.st_ino, getattr(info, "st_birthtime", None)) != (original["st_ino"], original["st_birthtime"]):
-            raise _fail("pending rotation source changed")
+            # The archive still belongs to the old inode; the replacement has its own bytes.
+            ledger[item.path] = archives.identity(item.path)
+            state.write_json(home, state.ARCHIVES_FILE, ledger)
+            continue
         copied = pending["source_size"]
-        if info.st_size < copied or not _matches_prefix(source, item.path, copied, item.gzipped):
+        try:
+            matches = info.st_size >= copied and _matches_prefix(source, item.path, copied, item.gzipped)
+        except (OSError, EOFError, gzip.BadGzipFile, zlib.error):
+            # The source has not been truncated; rebuild only after proving this is our archive.
+            archives.require_owned(item.path, ledger)
+            os.unlink(item.path)
+            ledger.pop(item.path)
+            state.write_json(home, state.ARCHIVES_FILE, ledger)
+            existing.remove(item)
+            continue
+        if not matches:
             # The source was truncated or rewritten since publication. Archive its new bytes normally.
             ledger[item.path] = archives.identity(item.path)
             state.write_json(home, state.ARCHIVES_FILE, ledger)

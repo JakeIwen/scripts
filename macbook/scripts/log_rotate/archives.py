@@ -63,10 +63,8 @@ def require_owned(path: str, ledger: dict) -> None:
     # macOS can assign a different device number after reboot.
     keys = ("path", "st_ino", "size", "st_birthtime")
     if isinstance(recorded, dict) and isinstance(recorded.get("pending_truncate"), dict):
-        # A late catch-up may have been fsynced before its size record could be saved.
+        # Size may reflect an uncommitted catch-up or corruption; resume validates the bytes.
         keys = ("path", "st_ino", "st_birthtime")
-        if current["size"] < recorded.get("size", 0):
-            raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
     if not isinstance(recorded, dict) or any(current[key] != recorded.get(key) for key in keys):
         raise LogRotateError(EXIT_ERROR, "foreign file at {}".format(path))
 
@@ -176,6 +174,12 @@ def adopt(path: str, home: str) -> None:
         if inspection.refusal is not None or inspection.info is None:
             raise LogRotateError(EXIT_ERROR, "cannot adopt {}: {}".format(
                 archive, inspection.refusal or "file is missing"))
-        additions[archive] = identity(archive)
+        recorded = ledger.get(archive, {})
+        if isinstance(recorded, dict) and isinstance(recorded.get("pending_truncate"), dict):
+            # Adoption cannot cancel the truncate still owed to this published generation.
+            require_owned(archive, ledger)
+            additions[archive] = recorded
+        else:
+            additions[archive] = identity(archive)
     ledger.update(additions)
     state.write_json(home, state.ARCHIVES_FILE, ledger)

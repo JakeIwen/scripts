@@ -65,9 +65,9 @@ def run_rotation(snapshot: Snapshot, home: str, only: Optional[str] = None, forc
             continue
         try:
             before, archive = rotate_file(entry.path, home, entry.policy.keep, entry.policy.compress)
-        except LogRotateError as error:
-            errors.append({"path": entry.path, "error": error.message})
-            state.append_log(home, "error {}: {}".format(entry.path, error.message))
+        except Exception as error:
+            errors.append({"path": entry.path, "error": str(error)})
+            state.append_log(home, "error {}: {}".format(entry.path, error))
             observed[entry.path] = (size, size)
             continue
         rotated.append({"path": entry.path, "bytes_before": before, "archive": archive})

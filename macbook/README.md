@@ -303,6 +303,8 @@ the still-open archive descriptor (another gzip member) and fsynced before
 truncation. Writes landing between that final catch-up and the truncate are lost,
 and a writer that does not open the file for appending resumes at its old offset and leaves a zero-filled gap, as
 with any copy-truncate; launchd's redirects and shell `>>` append.
+Pending recovery can also lose byte-identical regrowth if the writer truncates
+and rewrites the same inode with exactly the archived bytes before recovery.
 Archives stay in Time Machine; growth is bounded by `keep`, not by exclusions.
 It runs as the hourly LaunchAgent `com.jacobr.log-rotate` on `/usr/bin/python3`.
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import types
 from unittest import mock
 
-from log_rotate import archives, copytruncate, eligibility, state
+from log_rotate import archives, copytruncate, eligibility, rotate, state
 from log_rotate.records import MB, LogRotateError
 from test_log_rotate import PYTHON, REPOSITORY, LogRotateCase, payload
 
@@ -447,14 +447,14 @@ class RetryRetentionTests(LogRotateCase):
         Path(path).write_bytes(payload('gen4'))
         return path
 
-    def assert_retained(self, path, compress, generations=(4, 3, 2)):
+    def assert_retained(self, path, compress, generations=(4, 3, 2), tail=b''):
         suffix = '.gz' if compress else ''
         inodes = set()
         ledger = state.read_json(self.home, state.ARCHIVES_FILE)
         for position, generation in enumerate(generations, 1):
             archive = path + '.%d%s' % (position, suffix)
             with (gzip.open(archive, 'rb') if compress else open(archive, 'rb')) as source:
-                self.assertEqual(source.read(), payload('gen%d' % generation))
+                self.assertEqual(source.read(), payload('gen%d' % generation) + (tail if position == 1 else b''))
             info = os.stat(archive)
             inodes.add((info.st_dev, info.st_ino))
             archives.require_owned(archive, ledger)
@@ -467,6 +467,12 @@ class RetryRetentionTests(LogRotateCase):
         script = """
 import os, sys
 from log_rotate import archives, cli
+real_truncate = os.ftruncate
+def truncate(descriptor, size):
+    real_truncate(descriptor, size)
+    if stage == 'truncated' and size == 0:
+        os._exit(91)
+os.ftruncate = truncate
 path, stage = sys.argv[1:]
 real_publish = archives.publish
 def crash(source, destination):
@@ -617,3 +623,102 @@ cli.main(['rotate', '--only', sys.argv[1], '--json'])
                 for item in directory.glob(Path(path).name + '.[0-9]*'):
                     item.unlink()
                 archives.prune(self.home)
+
+
+class PendingRecoveryFixTests(LogRotateCase):
+    make_log = ArchiveRecoveryTests.make_log
+    rotate = ArchiveRecoveryTests.rotate
+    full_history = RetryRetentionTests.full_history
+    assert_retained = RetryRetentionTests.assert_retained
+    crash_rotation = RetryRetentionTests.crash_rotation
+
+    def test_recreated_source_drops_marker_before_and_after_truncation(self):
+        for stage in ('published', 'truncated'):
+            with self.subTest(stage=stage):
+                path = self.full_history(True)
+                self.crash_rotation(path, stage)
+                os.rename(path, path + '.old')
+                Path(path).write_bytes(payload('gen5'))
+                self.rotate(path)
+                self.assert_retained(path, True, (5, 4, 3))
+                os.unlink(path + '.old')
+                for item in Path(path).parent.glob('job.log.[0-9]*'):
+                    item.unlink()
+                archives.prune(self.home)
+
+    def test_adopt_preserves_pending_rotation_and_three_generations(self):
+        for compress in (True, False):
+            with self.subTest(compress=compress):
+                path = self.full_history(compress)
+                self.crash_rotation(path, 'published')
+                before = state.read_json(self.home, state.ARCHIVES_FILE)
+                ArchiveRecoveryTests.adopt(self, path)
+                self.assertEqual(state.read_json(self.home, state.ARCHIVES_FILE), before)
+                late = b'late bytes after adoption\n'
+                with open(path, 'ab') as output:
+                    output.write(late)
+                self.rotate(path)
+                archive = path + ('.1.gz' if compress else '.1')
+                with (gzip.open(archive, 'rb') if compress else open(archive, 'rb')) as source:
+                    self.assertEqual(source.read(), payload('gen4') + late)
+                self.assert_retained(path, compress, tail=late)
+                for item in Path(path).parent.glob('job.log.[0-9]*'):
+                    item.unlink()
+                archives.prune(self.home)
+
+    def test_unusable_pending_archive_is_replaced_without_losing_history(self):
+        for damage in ('header', 'deflate', 'footer', 'cut', 'unreadable'):
+            with self.subTest(damage=damage):
+                path = self.full_history(True)
+                self.crash_rotation(path, 'published')
+                archive = Path(path + '.1.gz')
+                data = bytearray(archive.read_bytes())
+                if damage == 'unreadable':
+                    archive.chmod(0o000)
+                else:
+                    if damage == 'cut':
+                        data = data[:len(data) // 2]
+                    else:
+                        position = {'header': 0, 'deflate': 200, 'footer': -8}[damage]
+                        data[position] ^= 0xff
+                    archive.write_bytes(data)
+                other = self.write('.local/state/other/job.log', payload('healthy'))
+                self.set_policy(other, '--max-mb', '1')
+                code, value, _ = self.run_cli('rotate', '--json')
+                self.assertEqual((code, value['errors']), (0, []))
+                self.assertEqual(os.path.getsize(other), 0)
+                self.assert_retained(path, True)
+                for item in Path(path).parent.glob('job.log.[0-9]*'):
+                    item.unlink()
+                archives.prune(self.home)
+
+    def test_corrupt_pending_cleanup_refuses_replaced_archive_inode(self):
+        path = self.full_history(True)
+        self.crash_rotation(path, 'published')
+        archive = path + '.1.gz'
+        def replace_then_fail(*args):
+            os.rename(archive, archive + '.saved')
+            Path(archive).write_bytes(b'foreign fixture')
+            raise EOFError('fixture unreadable archive')
+        with mock.patch.object(copytruncate, '_matches_prefix', side_effect=replace_then_fail):
+            code, value, _ = self.run_cli('rotate', '--json')
+        self.assertEqual(code, 1)
+        self.assertIn('foreign file', value['errors'][0]['error'])
+        self.assertEqual(self.read(archive), b'foreign fixture')
+        self.assertEqual(self.read(path), payload('gen4'))
+
+    def test_unexpected_exception_records_warning_and_continues_other_logs(self):
+        path = self.make_log()
+        healthy = self.write('.local/state/other/job.log', payload('healthy'))
+        self.set_policy(healthy, '--max-mb', '1')
+        real_rotate = rotate.rotate_file
+        def fail_one(candidate, *args):
+            if candidate == path:
+                raise RuntimeError('fixture unexpected failure')
+            return real_rotate(candidate, *args)
+        with mock.patch.object(rotate, 'rotate_file', side_effect=fail_one):
+            code, value, _ = self.run_cli('rotate', '--json')
+        self.assertEqual(code, 1)
+        self.assertEqual(value['errors'], [{'path': path, 'error': 'fixture unexpected failure'}])
+        self.assertEqual([item['path'] for item in value['rotated']], [healthy])
+        self.assertEqual(self.run_cli('status', '--json')[1]['level'], 'warn')
