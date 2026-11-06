@@ -1,20 +1,17 @@
 // Inline-SVG charts. The geometry functions are pure (tested under Node); the renderers draw them at the
 // element's measured pixel width so strokes stay 2 px and markers stay round. Colours come from classes
 // in charts.css, which read the tokens. Times are epoch seconds, as the history API returns them.
+import {bindTip, html, responsive, svgNode, tooltip} from './chart_dom.mjs';
+import {clamp, round, timeToX, xToTime} from './chart_scale.mjs';
 import {absoluteText} from './relative_time.mjs';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 export const RANGES = Object.freeze({'24h': 86400, '7d': 7 * 86400});
-const DEFAULT_WIDTH = 320;
 const MIN_BAND_PX = 1.5;
 const TIP_HIT_PX = 24;
 const MARKER_RADIUS = 4;
 const MIN_STATE_GAP = 5 * 60;
 
 export const stateGap = spacing => Math.max(MIN_STATE_GAP, 3 * (spacing ?? 0));
-
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-const round = value => Math.round(value * 10) / 10;
 
 // ---- geometry (pure) ----
 
@@ -23,8 +20,7 @@ export function rangeWindow(range, now) {
   return {from: now - RANGES[range], to: now};
 }
 
-export const timeToX = (ts, {from, to, width}) => clamp((ts - from) / (to - from), 0, 1) * width;
-export const xToTime = (x, {from, to, width}) => from + clamp(x / width, 0, 1) * (to - from);
+export {timeToX, xToTime};
 
 // Taller bands for worse states, so severity is not carried by colour alone.
 export const BAND_HEIGHT = Object.freeze({error: 1, warn: 0.8, unknown: 0.55, ok: 0.6, idle: 0.6, nodata: 0.35});
@@ -120,75 +116,6 @@ export const spanText = seconds => {
   if (seconds < 172800) return `${Math.round(seconds / 3600)} h`;
   return `${Math.round(seconds / 86400)} d`;
 };
-
-// ---- DOM helpers ----
-
-function svgNode(tag, attributes = {}, className) {
-  const element = document.createElementNS(SVG_NS, tag);
-  Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
-  if (className) element.setAttribute('class', className);
-  return element;
-}
-
-function html(tag, className, text) {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text !== undefined) element.textContent = text;
-  return element;
-}
-
-// Redraws at the measured width; the first draw uses a default so a detached chart still has content.
-function responsive(wrap, draw) {
-  let last = 0;
-  const run = width => {
-    const rounded = Math.round(width);
-    if (rounded < 40 || rounded === last) return;
-    last = rounded;
-    draw(rounded);
-  };
-  run(DEFAULT_WIDTH);
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(([entry]) => run(entry.contentRect.width)).observe(wrap);
-}
-
-const activeTips = new Set();
-let tipDismissal = false;
-
-// One tooltip per chart: value first, then the time or detail; hover for a mouse, click or tap for touch.
-function tooltip(wrap) {
-  if (!tipDismissal) {
-    tipDismissal = true;
-    document.addEventListener('pointerdown', event => {
-      activeTips.forEach(tip => { if (!tip.wrap.contains(event.target)) tip.hide(); });
-    });
-  }
-  const box = html('div', 'chart-tip');
-  box.hidden = true;
-  box.setAttribute('role', 'status');
-  wrap.append(box);
-  const tip = {
-    wrap,
-    show(lines, x) {
-      box.replaceChildren(...lines.map((line, index) => html('div', index ? 'chart-tip-detail' : 'chart-tip-value', line)));
-      box.hidden = false;
-      box.style.setProperty('--tip-left', `${clamp(x - box.offsetWidth / 2, 0, Math.max(0, wrap.clientWidth - box.offsetWidth))}px`);
-      activeTips.add(tip);
-    },
-    hide() {
-      box.hidden = true;
-      activeTips.delete(tip);
-    },
-  };
-  return tip;
-}
-
-// Mouse hover shows and leaving hides; touch and click show and stay until a tap elsewhere.
-function bindTip(target, tip, content) {
-  const show = event => tip.show(content(), event.offsetX ?? 0);
-  target.addEventListener('pointerenter', show);
-  target.addEventListener('pointermove', show);
-  target.addEventListener('pointerdown', show);
-  target.addEventListener('pointerleave', event => { if (event.pointerType === 'mouse') tip.hide(); });
-}
 
 const levelWord = level => ({nodata: 'no data', ok: 'ok', idle: 'idle', unknown: 'unknown', warn: 'needs attention', error: 'failing'}[level] ?? level);
 const timeSpan = (start, end) => `${absoluteText(start * 1000)} to ${absoluteText(end * 1000)}`;
