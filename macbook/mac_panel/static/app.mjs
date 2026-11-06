@@ -1,7 +1,7 @@
 // Page entry: one registry feeds the shell, polling and the state registry; also watches the panel's health.
 import {health, renewToken} from './panel_api.mjs';
 import {button, refreshTimes} from './panel_dom.mjs';
-import {editingReason, loadedAge, markPaused, onState, refresh, register, sections} from './panel_sections.mjs';
+import {loadedAge, onState, refresh, refreshIfIdle, refreshPending, register, sections} from './panel_sections.mjs';
 import {absoluteText} from './relative_time.mjs';
 import * as amphetamine from './section_amphetamine.mjs';
 import * as automations from './section_automations.mjs';
@@ -43,23 +43,14 @@ const POLL_MS = 15000;
 const TIME_TICK_MS = 5000;
 const OVERVIEW_DEBOUNCE_MS = 300;
 
-function refreshIfIdle(entry) {
-  const reason = editingReason(entry.id);
-  if (reason) {
-    markPaused(entry.id, reason);
-    return null;
-  }
-  return refresh(entry.id);
-}
-
 function refreshAll() {
-  return Promise.all(sections().map(refreshIfIdle));
+  return Promise.all(sections().map(entry => refreshIfIdle(entry.id)));
 }
 
 // Sections without auto-refresh reload when opened after a poll interval, so an old view is never shown as current.
 function onOpen(id) {
   const entry = sections().find(item => item.id === id);
-  if (id === 'overview' || (!entry.auto && loadedAge(id) > POLL_MS)) refreshIfIdle(entry);
+  if (id === 'overview' || (!entry.auto && loadedAge(id) > POLL_MS)) refreshIfIdle(entry.id);
 }
 
 // Overview redraws from the registry shortly after any other section changes, batching a burst of loads.
@@ -68,7 +59,7 @@ function keepOverviewCurrent() {
   onState(id => {
     if (id === 'overview') return;
     clearTimeout(timer);
-    timer = setTimeout(() => refreshIfIdle(sections()[0]), OVERVIEW_DEBOUNCE_MS);
+    timer = setTimeout(() => refreshIfIdle(sections()[0].id), OVERVIEW_DEBOUNCE_MS);
   });
 }
 
@@ -101,7 +92,7 @@ async function checkHealth() {
 
 function tick() {
   checkHealth();
-  sections().filter(entry => entry.auto).forEach(refreshIfIdle);
+  sections().filter(entry => entry.auto || refreshPending(entry.id)).forEach(entry => refreshIfIdle(entry.id));
 }
 
 register(SECTIONS);

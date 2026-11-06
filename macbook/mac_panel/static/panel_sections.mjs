@@ -8,6 +8,7 @@ const registry = new Map();
 const busy = new Set();
 const failedLoads = new Set();
 const loadedAt = new Map();
+const pendingRefreshes = new Set();
 
 export function register(list) {
   list.forEach(entry => registry.set(entry.id, entry));
@@ -59,6 +60,18 @@ export function markPaused(id, reason) {
   setMeta(id, 'paused', `auto-refresh paused: ${reason}`);
 }
 
+// Polls and task completions share the same edit guard, including edits made during a GET.
+function pauseForEditing(id) {
+  const reason = editingReason(id);
+  if (!reason) return false;
+  markPaused(id, reason);
+  pendingRefreshes.add(id);
+  return true;
+}
+
+export const refreshPending = id => pendingRefreshes.has(id);
+export const refreshIfIdle = id => refresh(id, {whenIdle: true});
+
 // Milliseconds since the section last loaded, so a tab opened later can tell whether it is stale.
 export function loadedAge(id) {
   return loadedAt.has(id) ? Date.now() - loadedAt.get(id) : Infinity;
@@ -71,13 +84,15 @@ function markUpdated(id) {
 }
 
 // An entry with `endpoint: null` has nothing to fetch and renders from the state registry alone.
-export async function refresh(id) {
+export async function refresh(id, {whenIdle = false} = {}) {
+  if (whenIdle && pauseForEditing(id)) return;
   if (busy.has(id)) return;
   busy.add(id);
   const entry = registry.get(id);
   const content = sectionPart(id, '.content');
   try {
     const value = entry.endpoint === null ? null : await api(entry.endpoint ?? `/api/${id}`);
+    if (whenIdle && pauseForEditing(id)) return;
     // Disclosures keep the state the reader gave them; ones new to this render keep the renderer's default.
     const open = new Map([...content.querySelectorAll('details')].map(x => [x.dataset.key, x.open]));
     const focus = focusKey(content);
@@ -85,6 +100,7 @@ export async function refresh(id) {
     content.replaceChildren(result.node);
     content.querySelectorAll('details').forEach(x => { if (open.has(x.dataset.key)) x.open = open.get(x.dataset.key); });
     restoreFocus(content, focus);
+    pendingRefreshes.delete(id);
     markUpdated(id);
     record(id, {payload: value, summary: result.summary, level: result.level, updatedAt: Date.now(), error: null});
     if (failedLoads.delete(id)) notice(id, '');
