@@ -4,6 +4,7 @@ import {clamp} from './chart_scale.mjs';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEFAULT_WIDTH = 320;
+const TIP_OFFSET_PX = 14;
 
 export function svgNode(tag, attributes = {}, className) {
   const element = document.createElementNS(SVG_NS, tag);
@@ -49,10 +50,13 @@ export function tooltip(wrap) {
   wrap.append(box);
   const tip = {
     wrap,
-    show(lines, x) {
+    // `beside` puts the box next to x on the roomier side (inside a tall plot) instead of centred above it.
+    show(lines, x, beside = false) {
       box.replaceChildren(...lines.map((line, index) => html('div', index ? 'chart-tip-detail' : 'chart-tip-value', line)));
       box.hidden = false;
-      box.style.setProperty('--tip-left', `${clamp(x - box.offsetWidth / 2, 0, Math.max(0, wrap.clientWidth - box.offsetWidth))}px`);
+      const room = Math.max(0, wrap.clientWidth - box.offsetWidth);
+      const left = beside ? (x < wrap.clientWidth / 2 ? x + TIP_OFFSET_PX : x - box.offsetWidth - TIP_OFFSET_PX) : x - box.offsetWidth / 2;
+      box.style.setProperty('--tip-left', `${clamp(left, 0, room)}px`);
       activeTips.add(tip);
     },
     hide() {

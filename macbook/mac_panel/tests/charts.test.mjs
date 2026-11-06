@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {lineChartLayout, recordingStart, valuesAt} from '../static/line_chart.mjs';
+import {labelAnchor, niceTicks, spreadLabels, timeTicks} from '../static/chart_scale.mjs';
 import {gaugeGeometry, linePoints, nearestByX, pathData, rangeWindow, scheduleLayout, spanText, stateBands, stateGap, timeToX, xToTime} from '../static/charts.mjs';
 
 const WINDOW = {from: 1000, to: 2000, width: 100};
@@ -98,4 +100,112 @@ test('state gap follows retained spacing but still marks a real outage', () => {
   const samples = [{ts: 0, level: 'ok'}, {ts: 600, level: 'ok'}, {ts: 3000, level: 'ok'}];
   const bands = stateBands(samples, {from: 0, to: 3600, width: 320, maxGap: stateGap(600)});
   assert.deepEqual(bands.filter(band => band.level === 'nodata').map(band => [band.start, band.end]), [[2400, 3000]]);
+});
+
+test('niceTicks rounds outwards to 1, 2, 2.5 or 5 steps with at most the asked count', () => {
+  assert.deepEqual(niceTicks(0, 100, 5).ticks, [0, 25, 50, 75, 100]);
+  assert.deepEqual(niceTicks(0, 120, 5), {ticks: [0, 50, 100, 150], step: 50, min: 0, max: 150});
+  assert.deepEqual(niceTicks(0, 7, 5).ticks, [0, 2, 4, 6, 8]);
+  assert.deepEqual(niceTicks(0, 1, 5).ticks, [0, 0.25, 0.5, 0.75, 1]);
+  assert.deepEqual(niceTicks(0, 0.4, 5).ticks, [0, 0.1, 0.2, 0.3, 0.4]);
+  assert.deepEqual(niceTicks(40, 60, 5).ticks, [40, 45, 50, 55, 60]);
+  assert.deepEqual(niceTicks(0, 120e6, 5).ticks, [0, 50e6, 100e6, 150e6]);
+});
+
+test('niceTicks widens a flat or empty range instead of dividing by zero', () => {
+  const flat = niceTicks(3, 3, 5);
+  assert.ok(flat.min < 3 && flat.max > 3);
+  assert.ok(niceTicks(NaN, NaN, 5).ticks.length >= 2);
+  assert.deepEqual(niceTicks(100, 0, 5).ticks, [0, 25, 50, 75, 100]);
+});
+
+const local = (...parts) => new Date(...parts).getTime() / 1000;
+
+test('timeTicks puts a 24 h axis on aligned local hours and marks midnight', () => {
+  const from = local(2026, 9, 6, 10, 30);
+  const ticks = timeTicks(from, from + 86400, 640);
+  assert.ok(ticks.length >= 6 && ticks.length <= 13);
+  ticks.forEach(tick => {
+    const date = new Date(tick.ts * 1000);
+    assert.equal(date.getMinutes(), 0);
+    assert.equal(date.getHours() % 2, 0);
+    assert.ok(tick.ts >= from && tick.ts <= from + 86400);
+    assert.equal(tick.major, date.getHours() === 0);
+  });
+  assert.equal(ticks.filter(tick => tick.major).length, 1);
+  assert.ok(timeTicks(from, from + 86400, 240).length < ticks.length);
+});
+
+test('timeTicks puts a 7 d axis on local midnights, thinning when narrow', () => {
+  const from = local(2026, 9, 6, 15);
+  const wide = timeTicks(from, from + 7 * 86400, 700);
+  assert.equal(wide.length, 7);
+  assert.ok(wide.every(tick => new Date(tick.ts * 1000).getHours() === 0 && tick.major));
+  assert.ok(timeTicks(from, from + 7 * 86400, 200).length < 7);
+});
+
+test('labelAnchor keeps edge labels inside the chart', () => {
+  assert.deepEqual([0, 100, 200].map(x => labelAnchor(x, 200, 5)), ['start', 'middle', 'end']);
+});
+
+test('spreadLabels separates crowded end labels but leaves room alone', () => {
+  assert.deepEqual(spreadLabels([10, 50], 12, 0, 100), [10, 50]);
+  const spread = spreadLabels([40, 41, 42], 12, 0, 100);
+  assert.ok(spread[1] - spread[0] >= 12 - 0.01 && spread[2] - spread[1] >= 12 - 0.01);
+  assert.ok(Math.max(...spreadLabels([99, 100], 12, 0, 100)) <= 100);
+});
+
+const LINE = {from: 0, to: 1000, width: 400, height: 180, yMin: 0, yMax: 100, now: 1000};
+const points = (...pairs) => pairs.map(([ts, value]) => ({ts, value}));
+
+test('recordingStart reports a first sample that is later than the window start', () => {
+  const late = [{points: points([600, 5], [800, 6])}];
+  assert.equal(recordingStart(late, 0, 1000), 600);
+  assert.equal(recordingStart([{points: points([3, 5])}], 0, 1000), null);
+  assert.equal(recordingStart([{points: points([0, 1])}, {points: points([700, 1])}], 0, 1000), null);
+  assert.equal(recordingStart(late, 0, 1000, 500), 500);
+  assert.equal(recordingStart([{points: []}], 0, 1000), null);
+});
+
+test('lineChartLayout maps values onto the plot and leaves nothing before the first sample', () => {
+  const layout = lineChartLayout({...LINE, series: [{key: 'a', label: 'A', points: points([600, 100], [800, 50], [1000, 0])}]});
+  const {plot} = layout;
+  assert.deepEqual(layout.yTicks.map(tick => tick.value), [0, 25, 50, 75, 100]);
+  assert.equal(layout.yTicks[0].y, plot.top + plot.height);
+  assert.equal(layout.yTicks[4].y, plot.top);
+  const [first, middle, last] = layout.series[0].points;
+  assert.deepEqual([first.x, first.y], [plot.width * 0.6, 0]);
+  assert.deepEqual([middle.x, middle.y], [plot.width * 0.8, plot.height / 2]);
+  assert.deepEqual([last.x, last.y], [plot.width, plot.height]);
+  assert.equal(layout.since, 600);
+  assert.equal(layout.sinceX, plot.width * 0.6);
+  assert.equal(layout.series[0].endText, '0');
+  assert.ok(plot.left + plot.width < LINE.width);
+});
+
+test('lineChartLayout breaks the line at gaps and keeps series with no data empty', () => {
+  const layout = lineChartLayout({...LINE, maxGap: 100, series: [
+    {key: 'a', label: 'A', points: points([0, 10], [50, 20], [600, 30])},
+    {key: 'b', label: 'B', points: []},
+  ]});
+  assert.equal(layout.series[0].segments.length, 2);
+  assert.equal(layout.series[1].last, null);
+  assert.equal(layout.since, null);
+});
+
+test('lineChartLayout fits the axis to the data when no range is given', () => {
+  const layout = lineChartLayout({from: 0, to: 100, width: 300, height: 160, series: [{key: 'a', label: 'A', points: points([0, 3], [100, 118])}]});
+  assert.deepEqual(layout.yTicks.map(tick => tick.value), [0, 50, 100, 150]);
+});
+
+test('valuesAt picks each series nearest sample and ignores time before recording started', () => {
+  const layout = lineChartLayout({...LINE, series: [
+    {key: 'a', label: 'A', points: points([600, 10], [900, 20])},
+    {key: 'b', label: 'B', points: points([700, 30])},
+  ]});
+  const x = layout.plot.width * 0.85;
+  const [a, b] = valuesAt(layout, x);
+  assert.equal(a.ts, 900);
+  assert.equal(b.ts, 700);
+  assert.equal(valuesAt(layout, 0).every(point => point === null), true);
 });
