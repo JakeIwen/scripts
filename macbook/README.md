@@ -314,6 +314,16 @@ never through a symlink and never under `~/.claude`, `~/.codex` or
 `refused` and is never opened. Log contents are never printed, only paths and
 sizes.
 
+Other apps write under `~/Library/Logs` too (for example `Claude/main.log`). A
+log the scan finds there starts out `disabled` with the note "third-party app
+log; enable per file": it is listed and its bytes count in the totals, but the
+rotator leaves it alone until you opt in with a per-file `--enabled on` policy
+or add the path as an extra. A LaunchAgent or crontab log in that folder is
+yours and rotates normally. `inventory --json` also carries `problems`, the
+list of what needs attention (a log past twice its limit, a refused path, a
+total over the warning level, errors in the last run, a stale run), which
+`status` and the Mac Panel's Logs section both show as sent.
+
 - Defaults (rotate above 10 MB, keep 5, gzip, warn above 500 MB total) are
   declared in `shared/settings/log-rotate.json` and edited in the Mac Panel's
   Settings section. Per-file policies, extras and ignores are saved in

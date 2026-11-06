@@ -15,7 +15,8 @@ import tool_settings
 
 from . import eligibility
 from .records import (DECLARED_POLICY_FIELDS, DEFAULT_ENABLED, EXIT_BUSY, EXIT_CONFLICT, EXIT_ERROR,
-                      FILES_CONFIG_TOOL, POLICY_FIELDS, TOOL, LogRotateError, Policy)
+                      FILES_CONFIG_TOOL, POLICY_FIELDS, SOURCE_SCAN, THIRD_PARTY_LOG_DIR, TOOL,
+                      LogRotateError, Policy)
 
 MISSING_REVISION = "missing"
 _TOP_LEVEL = ("policies", "extras", "ignored")
@@ -148,6 +149,12 @@ def effective_policy(defaults: Dict[str, Any], config: FilesConfig, path: str) -
     own = config.policies.get(path, {})
     values = {name: own.get(name, defaults[name]) for name in POLICY_FIELDS}
     return Policy(values["max_mb"], values["keep"], values["compress"], values["enabled"], bool(own))
+
+
+def is_unopted_third_party(source: str, path: str, home: str, config: FilesConfig) -> bool:
+    """A scanned log under ~/Library/Logs that no per-file policy or extra has enabled."""
+    return (source == SOURCE_SCAN and path.startswith(os.path.join(home, THIRD_PARTY_LOG_DIR) + os.sep)
+            and path not in config.extras and "enabled" not in config.policies.get(path, {}))
 
 
 def set_policy(data: Dict[str, Any], path: str, fields: Dict[str, Any]) -> None:

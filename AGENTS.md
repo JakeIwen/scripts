@@ -408,7 +408,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `eligibility.py` owns the safety rules (regular, user-owned, inside `$HOME`,
   no symlinks, never `~/.claude`/`~/.codex`/`Mobile Documents`), `copytruncate.py`
   archives (fsync) before truncating the same inode, `rotate.py` runs a pass
-  (own `rotate.log` last), `growth.py` the MB/day ledger. Defaults are
+  (own `rotate.log` last), `growth.py` the MB/day ledger, `problems.py` the one
+  needs-attention list (`inventory --json` `problems`, `status`, the panel's Logs
+  section; scanned `~/Library/Logs` logs start disabled as third-party). Defaults are
   `shared/settings/log-rotate.json` (tool_settings, `~/.config/jacobr/log-rotate.json`);
   per-file policies/extras/ignores are a separate revision-checked
   `~/.config/jacobr/log-rotate-files.json`, since the settings file rejects keys

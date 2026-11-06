@@ -1,7 +1,7 @@
 """The log inventory: every candidate file with its size, archives, policy, growth and state."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from . import eligibility, growth, policy, sources, state
 from .archives import Archive, scan_directory
 from .records import (MB, STATE_DISABLED, STATE_DUE, STATE_MISSING, STATE_OK, STATE_REFUSED,
-                      LogEntry)
+                      THIRD_PARTY_NOTE, LogEntry)
 
 
 @dataclass
@@ -60,6 +60,9 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
                  listings: Dict[str, Dict[str, List[Archive]]], now: float) -> LogEntry:
     path = candidate.path
     entry_policy = policy.effective_policy(defaults, config, path)
+    third_party = policy.is_unopted_third_party(candidate.source, path, home, config)
+    if third_party:
+        entry_policy = replace(entry_policy, enabled=False)
     inspection = eligibility.inspect(path, home)
     last_rotated = rotated.get(path) if isinstance(rotated.get(path), (int, float)) else None
     if inspection.refusal is not None:
@@ -74,7 +77,8 @@ def _build_entry(candidate: sources.Candidate, home: str, defaults: Dict[str, An
     return LogEntry(path, candidate.source, size, sum(item.size for item in archives), len(archives),
                     info.st_mtime if info is not None else None,
                     growth.rate_for(ledger.get(path), now), entry_policy, last_rotated,
-                    _entry_state(size, info is not None, entry_policy))
+                    _entry_state(size, info is not None, entry_policy),
+                    THIRD_PARTY_NOTE if third_party else None)
 
 
 def take_snapshot(home: str, now: Optional[float] = None) -> Snapshot:

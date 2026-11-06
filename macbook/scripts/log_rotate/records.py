@@ -16,6 +16,8 @@ EXIT_USAGE = 2
 EXIT_CONFLICT = 3
 EXIT_BUSY = 75
 
+# One megabyte is 1048576 bytes everywhere (limits, sizes, totals); the Mac Panel's
+# logs_format.mjs keeps the matching constant.
 MB = 1024 * 1024
 DAY_SECONDS = 86400
 
@@ -31,6 +33,11 @@ STATE_DUE = "due"
 STATE_DISABLED = "disabled"
 STATE_MISSING = "missing"
 STATE_REFUSED = "refused"
+
+# Other apps' logs live here: found by the scan they start out unrotated, and a
+# per-file policy (or adding the path as an extra) opts a file in.
+THIRD_PARTY_LOG_DIR = "Library/Logs"
+THIRD_PARTY_NOTE = "third-party app log; enable per file"
 
 # Editable per-file policy fields (the first three are declared; enabled is per file only).
 DECLARED_POLICY_FIELDS = ("max_mb", "keep", "compress")

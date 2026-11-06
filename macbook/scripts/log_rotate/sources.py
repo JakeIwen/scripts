@@ -10,10 +10,10 @@ from typing import Iterator, List
 import crontab_sync
 
 from . import eligibility
-from .records import SOURCE_CRONTAB, SOURCE_EXTRA, SOURCE_LAUNCHAGENT, SOURCE_SCAN
+from .records import SOURCE_CRONTAB, SOURCE_EXTRA, SOURCE_LAUNCHAGENT, SOURCE_SCAN, THIRD_PARTY_LOG_DIR
 
 # Relative to $HOME; the first is the Mac's job state, the second this repo's scratch logs.
-SCAN_ROOTS = (".local/state", "dev/scripts/tmp", "Library/Logs")
+SCAN_ROOTS = (".local/state", "dev/scripts/tmp", THIRD_PARTY_LOG_DIR)
 SCAN_EXTENSIONS = (".log", ".out", ".err")
 SCAN_MAX_DEPTH = 4
 # Directories never walked: slow and not logs, or (.claude/.codex) agent state at any depth.

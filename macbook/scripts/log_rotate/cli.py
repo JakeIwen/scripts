@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import eligibility, inventory, policy, rotate, state, status
+from .problems import find_problems
 from .records import EXIT_ERROR, EXIT_OK, LogRotateError
 
 _SWITCH = {"on": True, "off": False}
@@ -70,10 +71,17 @@ def _usable_path(raw: str, home: str) -> str:
     return path
 
 
+def _inventory_value(snapshot: inventory.Snapshot, home: str) -> Dict[str, Any]:
+    """The inventory with what needs attention; the Mac Panel renders that list as sent."""
+    value = snapshot.as_dict()
+    value["problems"] = find_problems(snapshot, state.read_json(home, state.RUN_FILE), snapshot.generated_at)
+    return value
+
+
 def _edited(home: str, revision: str, path: str, change) -> Dict[str, Any]:
     policy.update_files_config(revision, change)
     snapshot = inventory.take_snapshot(home)
-    value = snapshot.as_dict()
+    value = _inventory_value(snapshot, home)
     entry = snapshot.entry(path)
     value["log"] = entry.as_dict() if entry is not None else None
     return value
@@ -108,7 +116,7 @@ def _run_rotate(args: argparse.Namespace, home: str) -> Dict[str, Any]:
 
 def dispatch(args: argparse.Namespace, home: str) -> Dict[str, Any]:
     if args.command == "inventory":
-        return inventory.take_snapshot(home).as_dict()
+        return _inventory_value(inventory.take_snapshot(home), home)
     if args.command == "rotate":
         return _run_rotate(args, home)
     if args.command == "status":

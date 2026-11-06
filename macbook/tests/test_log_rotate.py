@@ -502,6 +502,68 @@ class StatusTests(LogRotateCase):
         self.assertIn("total", record["summary"])
 
 
+class ThirdPartyLogTests(LogRotateCase):
+    def third_party(self):
+        return self.write("Library/Logs/OtherApp/main.log", payload("t", 2 * MB))
+
+    def test_scanned_app_logs_start_disabled_but_still_count(self):
+        path = self.third_party()
+        snapshot = self.inventory()
+        entry = self.entry(path, snapshot)
+        self.assertEqual((entry["state"], entry["policy"]["enabled"], entry["policy"]["override"]), ("disabled", False, False))
+        self.assertEqual(entry["note"], "third-party app log; enable per file")
+        self.assertEqual(snapshot["totals"]["bytes"], 2 * MB)
+        self.set_policy(path, "--max-mb", "1")
+        self.assertEqual(self.entry(path)["state"], "disabled")
+        code, value, _ = self.run_cli("rotate", "--json")
+        self.assertEqual((value["rotated"], os.path.getsize(path)), ([], 2 * MB))
+
+    def test_a_per_file_policy_or_an_extra_opts_the_log_in(self):
+        enabled, added = self.third_party(), self.write("Library/Logs/OtherApp/two.log", payload("u", 2 * MB))
+        self.set_policy(enabled, "--max-mb", "1", "--enabled", "on")
+        self.assertEqual(self.entry(enabled)["state"], "due")
+        self.assertNotIn("note", self.entry(enabled))
+        revision = self.inventory()["revision"]
+        self.assertEqual(self.run_cli("add", "--revision", revision, added, "--json")[0], 0)
+        self.assertEqual(self.entry(added)["policy"]["enabled"], True)
+        self.set_policy(enabled, "--clear")
+        self.assertEqual(self.entry(enabled)["state"], "disabled")
+
+    def test_a_launchagent_log_under_library_logs_is_not_third_party(self):
+        path = self.write("Library/Logs/mine.log", payload("m", 2 * MB))
+        os.makedirs(self.path("Library/LaunchAgents"))
+        with open(self.path("Library/LaunchAgents/com.example.mine.plist"), "wb") as output:
+            plistlib.dump({"Label": "com.example.mine", "StandardOutPath": path}, output)
+        entry = self.entry(path)
+        self.assertEqual((entry["source"], entry["policy"]["enabled"]), ("launchagent:com.example.mine", True))
+        self.assertNotIn("note", entry)
+
+
+class ProblemTests(LogRotateCase):
+    def test_inventory_lists_what_needs_attention_and_status_says_the_same(self):
+        big = self.write(".local/state/app/big.log", payload("b", 3 * MB))
+        self.set_policy(big, "--max-mb", "1")
+        found = self.inventory()["problems"]
+        self.assertEqual([(item["level"], item["path"]) for item in found], [("error", big)])
+        self.assertIn("rotation is failing", found[0]["text"])
+        self.assertIn(found[0]["text"], self.status_summary())
+        self.assertEqual(self.inventory()["problems"], found)
+
+    def test_a_refused_entry_is_a_problem_that_names_the_way_out(self):
+        link = self.path("jobs/link.log")
+        self.write("jobs/real.log")
+        os.symlink(self.path("jobs/real.log"), link)
+        os.makedirs(self.path("Library/LaunchAgents"))
+        with open(self.path("Library/LaunchAgents/com.example.link.plist"), "wb") as output:
+            plistlib.dump({"Label": "com.example.link", "StandardOutPath": link}, output)
+        found, = self.inventory()["problems"]
+        self.assertEqual((found["level"], found["path"]), ("warn", link))
+        self.assertIn("ignore", found["text"])
+
+    def status_summary(self):
+        return self.run_cli("status", "--json")[1]["summary"]
+
+
 class EntryPointTests(LogRotateCase):
     def run_entry(self, *argv, extra_env=None):
         environment = {"PATH": "/usr/bin:/bin", "HOME": self.home, "CRONTAB_SYNC_FILE": str(self.crontab),
