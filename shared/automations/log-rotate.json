@@ -1,6 +1,6 @@
 {
   "tool": "log-rotate",
-  "title": "Log rotation",
+  "title": "Log rotation (see Logs)",
   "description": "Hourly check that rotates the Mac's job logs in place (copy-truncate, gzip archives beside each log) so none grows without bound.",
   "service": "com.jacobr.log-rotate",
   "settings": "log-rotate",
