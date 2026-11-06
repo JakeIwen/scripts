@@ -49,7 +49,7 @@ function firefoxMarkerModel({state, editor, length, field}) {
 // `editor` is the focused element; `native` holds its marker functions, merged
 // into each test's own `$`. Elements and leaves compare by value (`equal`).
 function firefoxEditor({paragraphs = ['first', 'mIxEd tail'], blocks = paragraphs.map(text => [text]),
-    chrome = [], field = false, node = 1, start = 0, endNode = node, end = 5, refuseMarkers = false} = {}) {
+    chrome = [], field = false, node = 1, start = 0, endNode = node, end = 5, refuseMarkers = false, breakLeaves = false} = {}) {
     const editor = {element:'firefox editor'};
     const leaves = chrome.map((text, block) => ({text, block:'chrome' + block, editor:false}));
     blocks.forEach((runs, block) => runs.forEach(text => leaves.push({text, block, editor:true})));
@@ -82,8 +82,8 @@ function firefoxEditor({paragraphs = ['first', 'mIxEd tail'], blocks = paragraph
         const caret={node:from.node, offset:from.offset+text.length};
         state.selection={start:caret,end:caret};
     };
-    // A native multiline Paste creates paragraph blocks; flat AXValue omits
-    // their separators. Keep replaceSelection for existing inline transform tests.
+    // Gecko can expose a pasted break as its own newline leaf, or as only a
+    // block boundary. Keep replaceSelection for existing inline transform tests.
     const pasteText = text => {
         const from = state.selection.start, to = state.selection.end;
         const parts = text.split(/\r\n?|[\n\u2029]/);
@@ -91,8 +91,10 @@ function firefoxEditor({paragraphs = ['first', 'mIxEd tail'], blocks = paragraph
         const after = state.leaves[to.node].text.slice(to.offset);
         const inserted = parts.map((part, i) => ({text:(i === 0 ? before : '') + part
             + (i === parts.length - 1 ? after : ''), block:Symbol('pasted block'), editor:true}));
-        state.leaves = [...state.leaves.slice(0, from.node), ...inserted, ...state.leaves.slice(to.node + 1)];
-        const caret = {node:from.node + parts.length - 1, offset:parts.length === 1 ? before.length + text.length
+        const leaves = inserted.flatMap((leaf, i) => breakLeaves && i < inserted.length - 1
+            ? [leaf, {...leaf, text:'\n'}] : [leaf]);
+        state.leaves = [...state.leaves.slice(0, from.node), ...leaves, ...state.leaves.slice(to.node + 1)];
+        const caret = {node:from.node + leaves.length - 1, offset:parts.length === 1 ? before.length + text.length
             : parts[parts.length - 1].length};
         state.selection = {start:caret, end:caret};
     };

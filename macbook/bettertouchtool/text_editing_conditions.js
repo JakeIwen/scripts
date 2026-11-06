@@ -1,6 +1,6 @@
 // Evaluates the editing keys' trigger conditions with Foundation's NSPredicate,
 // the engine BTT uses, so the installer and tests check BTT's own semantics.
-// Input: {predicate, cases:[variables]}. Output: {format, results:[boolean]}.
+// Input: {predicate, cases:[variables]}. Output: {format, keys:[variable names], results:[boolean]}.
 ObjC.import('Foundation');
 
 // Foundation treats missing dictionary keys as nil, unlike BTT's variable
@@ -41,6 +41,7 @@ function run(argv) {
     }
     return JSON.stringify({
         format: ObjC.unwrap(predicate.predicateFormat),
+        keys,
         results: request.cases.map(variables => Boolean(predicate.evaluateWithObject($(variables))))
     });
 }

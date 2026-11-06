@@ -12,6 +12,7 @@ class Item {
     constructor(values = {}) { this.values = new Map(Object.entries(values).map(([k,v]) => [k,data(v)])); }
     get types() { return array([...this.values.keys()]); }
     dataForType(type) { return this.values.get(type); }
+    stringForType(type) { return this.dataForType(type)?.value; }
     setDataForType(value, type) { this.values.set(type,value); return true; }
     setStringForType(value, type) { return this.setDataForType(data(value),type); }
 }
@@ -26,7 +27,7 @@ function pasteboardFake({items = [{[PLAIN_TEXT]:'original','public.rtf':'rich or
         items:items.map(values => new Item(values)), changeCount, prepared:[],
         get pasteboardItems() { return array(this.items); },
         get text() { return this.stringForType(PLAIN_TEXT); },
-        stringForType(type) { return this.items[0]?.dataForType(type)?.value; },
+        stringForType(type) { return this.items.find(item => item.dataForType(type))?.stringForType(type); },
         get clearContents() { this.items = []; return ++this.changeCount; },
         prepareForNewContentsWithOptions(options) { this.prepared.push(options); return this.clearContents; },
         writeObjects(items) {

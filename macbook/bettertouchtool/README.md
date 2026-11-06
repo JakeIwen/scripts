@@ -320,10 +320,13 @@ this restore covers sequences lost before a checkpoint held them.
   since a posted key's delivery cannot be confirmed; if anything stops the cut
   first, the caret goes back unless you have moved it. In Firefox a blank line is
   refused with a notification: its flat text could not confirm the cut. A confirmed
-  cut is rewritten as the line's text plus one `\n`, with the same private
-  whole-line clipboard tag as Cmd-C. A failed tag write preserves the app's
-  clipboard and reports “Line cut, but Cmd-V will paste it inline.” without
-  treating the completed cut as a failure.
+  cut waits up to one second for the app's clipboard publication (a newer
+  changeCount and matching line text). When its first item's string equals the line
+  plus one `\n`, the runtime tags a copy of all the app's items, keeping RTF/HTML;
+  otherwise it rewrites plain text to normalize the break or a leading non-text item. A failed tag write
+  restores the app's clipboard unless a newer copy arrived, and reports
+  “Line cut, but Cmd-V will paste it inline.” under “Line cut with a warning”,
+  never presenting the completed cut as a stopped cut.
 - Cmd-C with no selection copies the caret's line (as VS Code does): its text and
   one `\n`, whatever break the app uses, on the last line too, so an empty line
   copies `\n` (in Firefox, the paragraph's text plus `\n`). The runtime writes it
@@ -336,18 +339,30 @@ this restore covers sequences lost before a checkpoint held them.
   type) is put back. With a selection, or where the condition does not match,
   Cmd-C is the app's normal copy.
 - Cmd-V with our tagged line copy and no selection inserts it above the current
-  logical line and leaves the caret on its original character (shifted by the
-  inserted text's length). Empty and unterminated last lines are supported. The
+  logical line only in an `AXTextArea`, leaving the caret on its original character
+  (shifted by the inserted text's length). Single-line fields, search fields and
+  URL bars use normal Paste at the caret; copy/cut behavior in those fields is
+  unchanged. Empty and unterminated last lines are supported. The
   runtime collapses the selection at the line start, verifies ownership and
   readback, presses Edit > Paste once, and confirms the exact resulting text.
   A failed paste restores the caret only while the original field state is still
   ours; after a confirmed paste caret restoration is best effort. Firefox uses
   native paragraph-start markers and forward marker steps, not numeric writes;
-  blank-only pastes are refused because its flat AXValue cannot confirm them.
+  confirmation accepts the pasted break either omitted or exposed as a newline
+  leaf. Blank-only Firefox pastes and unsupported AX text shapes fall back to
+  normal Paste once. Other pre-press refusals also fall back when the original
+  focus and any owned selection can be confirmed; newer focus/selection is never
+  overwritten. No fallback replays an attempted press. A missing Edit menu or
+  failed runtime turns interception OFF, so the next Cmd-V passes through.
   With a selection, Cmd-V remains the app's normal paste (even with our tag).
 
 The paste condition uses the persistent custom BTT string variable
-`jacobr_editing_keys_line_clipboard` (`"1"` after a tagged copy/cut). BTT documents
+`jacobr_editing_keys_line_clipboard`. Copy/cut set it to `"1"` before starting
+background `runJXA`, closing the quick Cmd-C/Cmd-X then Cmd-V race; a paste that
+arrives before the tag waits up to one second in 50 ms steps, then falls back
+normally. The same wait applies to a stale ON after a native copy: the first
+caret paste can be delayed by up to one second. The transport sets it OFF unless the runtime confirms a tag, including
+missing/non-boolean results, malformed JSON and runJXA failures. BTT documents
 [custom variables in conditions](https://docs.folivora.ai/docs/actions/conditions/)
 and [set_persistent_string_variable](https://docs.folivora.ai/docs/1106_java_script.html), but
 [standard variables](https://docs.folivora.ai/docs/1105_variables.html) offer no
@@ -365,12 +380,17 @@ Clipboard managers must preserve the private type for it to remain a line copy.
 Observed live 2026-11-05: an unbound condition variable caused BTT to swallow
 Cmd-V without running the action or passing the key through. Foundation instead
 silently treated a missing dictionary key as nil/false, so a false truth-table
-result did not model that failure. The evaluator now walks the parsed predicate
+result did not model that failure. `INITIAL_VARIABLES` is the one map initialized
+and read back by the installer. Tests check every installed predicate against
+that map and BTT's built-ins. The paste predicate checks the app, then the variable,
+then `focused_element_details`, avoiding a focused-element dump for an untagged
+paste. The evaluator walks the parsed predicate
 and rejects cases missing any referenced variable, including branches that would
 short-circuit. Unsupported expression kinds fail loudly rather than bypassing
 that validation.
 
-The explicit disjoint-UUID pair in `trigger_install.py` allows the Finder paste
+The explicit disjoint-UUID pair owned by `install_text_editing_keys.py` (using
+Finder's imported UUID and the single paste-line UUID) allows the Finder paste
 trigger (non-text focus) beside this text-only Cmd-V trigger; all other shortcut
 conflicts still refuse installation, in either installer. BTT's
 [conditions docs](https://docs.folivora.ai/docs/actions/conditions/) allow identical
@@ -379,6 +399,18 @@ shortcuts with different conditions, while its
 per-trigger pass-through on mismatch. Neither specifies whether a mismatching
 trigger passes through while another matches: single-paste coexistence needs a
 live check in Finder and a text field.
+
+Live checks still owed to Jacob (offline fixtures are not proof of BTT delivery):
+- Chrome and Firefox contenteditable fields must expose `AXTextArea` for whole-line
+  paste; confirm the caret stays on its character with both ordinary and quick copy/paste.
+  In Firefox also paste a rich HTML line cut and verify it creates a separate
+  paragraph rather than merging inline (flat AXValue alone cannot prove this).
+- Confirm search/URL fields paste normally; check Cmd-V with a selection and in VS Code.
+- Finder must paste only once, with both native data and a stale tagged clipboard.
+- After a BTT relaunch, normal Cmd-V must still work; with nothing focused (for
+  example Preview), the key must pass through rather than be swallowed.
+- Verify Cmd-X and its warning notification in TextEdit. No live keypress, focus
+  changes or general-pasteboard probes were performed for these review fixes.
 
 Notifications retain BTT's documented unnamed body parameter (`""`), not `text`:
 [CLI command reference, display_notification](https://docs.folivora.ai/docs/scripting/cli/).

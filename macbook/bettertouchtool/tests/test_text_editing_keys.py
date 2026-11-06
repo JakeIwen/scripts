@@ -27,11 +27,19 @@ const vm = require('node:vm');
 const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 (async () => {
     const out = [];
-    for (const {script, name, jxa, variable} of entries) {
+    for (const {script, name, jxa, variable, failRead, failJxa} of entries) {
         const calls = [];
         const context = vm.createContext({
-            readFile: async path => { calls.push(['readFile', path]); return 'SOURCE'; },
-            runJXA: async source => { calls.push(['runJXA', source]); return jxa; },
+            readFile: async path => {
+                calls.push(['readFile', path]);
+                if (failRead) throw new Error('fixture read failure');
+                return 'SOURCE';
+            },
+            runJXA: async source => {
+                calls.push(['runJXA', source]);
+                if (failJxa) throw new Error('fixture runJXA rejection');
+                return jxa;
+            },
             callBTT: async (command, args) => {
                 calls.push(['callBTT', command, args]);
                 if (command === 'get_string_variable') return variable;
@@ -82,6 +90,22 @@ class ConditionTests(unittest.TestCase):
             with self.subTest(app=app), self.assertRaisesRegex(RuntimeError, conditions.LINE_CLIPBOARD_VARIABLE):
                 conditions.evaluate(conditions.PASTE_CONDITION,
                     [{'BTTActiveAppBundleIdentifier': app, 'focused_element_details': conditions.CARET}])
+
+    def test_every_installed_condition_reads_only_builtins_or_initialized_variables(self):
+        allowed = set(conditions.BUILTIN_VARIABLES) | set(conditions.INITIAL_VARIABLES)
+        predicates = {d['BTTTriggerConditionsFormat'] for d in keys.definitions() if d.get('BTTTriggerConditionsFormat')}
+        self.assertIn(conditions.PASTE_CONDITION, predicates)
+        for predicate in predicates:
+            with self.subTest(predicate=predicate[:60]):
+                self.assertLessEqual(set(conditions.variables_used(predicate)), allowed)
+        self.assertEqual(conditions.variables_used(conditions.PASTE_CONDITION),
+                         sorted(allowed))
+
+    def test_the_paste_condition_checks_app_then_variable_then_details(self):
+        text = conditions.PASTE_CONDITION
+        order = [text.index(part) for part in ('BTTActiveAppBundleIdentifier', conditions.LINE_CLIPBOARD_VARIABLE,
+                                               'focused_element_details')]
+        self.assertEqual(order, sorted(order))
 
     def test_a_misspelled_predicate_key_fails_loudly(self):
         with self.assertRaisesRegex(RuntimeError, 'misspelled_variable'):
@@ -140,7 +164,8 @@ class EmittedScriptTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 [outcome] = run_entries([self.entry(by_note(note), '{"ok":true,"result":"%s"}' % result)])
                 self.assertEqual(outcome['result'], result)
-                *reads, (_, source) = outcome['calls']
+                reads = [call for call in outcome['calls'] if call[0] == 'readFile']
+                [source] = [call[1] for call in outcome['calls'] if call[0] == 'runJXA']
                 self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
                 self.assertEqual(call_options(source, 'runEditingKey'),
                                  {'kind': kind, 'directory': str(keys.DIRECTORY),
@@ -180,20 +205,58 @@ class EmittedScriptTests(unittest.TestCase):
                          .replace('Finder paste stopped', 'T').replace(json.dumps(list(finder.RUNTIME)),
                                                                         json.dumps(['a.js'])))
         hooked = triggers.runtime_action('f', 'run', {}, 'T', ('a.js',),
-                                         hook=lambda entry, options: ('    BEFORE\n', '    AFTER\n'))['BTTAppleScriptString']
+                                         hook=lambda entry, options: triggers.RuntimeHook('    BEFORE\n', '    AFTER\n'))['BTTAppleScriptString']
         order = [hooked.index(part) for part in ('BEFORE', 'readFile', 'runJXA', 'AFTER', 'display_notification')]
         self.assertEqual(order, sorted(order))
 
-    def test_editing_key_scripts_keep_their_line_clipboard_variable_logic(self):
-        name = json.dumps(conditions.LINE_CLIPBOARD_VARIABLE)
-        update = ('    if (typeof result.lineClipboard === "boolean") await callBTT("set_persistent_string_variable", '
-                  f'{{variable_name: {name}, to: result.lineClipboard ? "1" : "0"}});\n')
-        ensure = f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {name}}});\n'
-        for note, has_ensure in (('pastes above the line', False), ('on app switch', True)):
-            script = by_note(note)['BTTAdditionalActionData']['BTTAppleScriptString']
-            self.assertIn(update, script)
-            self.assertEqual(ensure in script, has_ensure)
-        self.assertNotIn('set_persistent', by_note('in (')['BTTAdditionalActionData']['BTTAppleScriptString'])
+    def variable_writes(self, outcome):
+        return [call[2]['to'] for call in outcome['calls']
+                if call[0] == 'callBTT' and call[1] == 'set_persistent_string_variable']
+
+    def test_copy_and_cut_mark_the_tag_before_reading_sources_and_end_off_without_one(self):
+        on, off = conditions.LINE_CLIPBOARD_ON, conditions.LINE_CLIPBOARD_OFF
+        for note in ('cuts the line', 'copies the line'):
+            definition = by_note(note)
+            for jxa, final in (('{"ok":true,"result":"x","lineClipboard":true}', on),
+                               ('{"ok":true,"result":"x","lineClipboard":false}', off),
+                               ('{"ok":true,"result":"x"}', off),
+                               ('{"ok":true,"result":"x","lineClipboard":"true"}', off),
+                               ('{"ok":false,"error":"no tag"}', off),
+                               ('{"NSLocalizedDescription":"Error: boom"}', off),
+                               ('not json', off), ('null', off)):
+                with self.subTest(note=note, jxa=jxa):
+                    [outcome] = run_entries([self.entry(definition, jxa)])
+                    self.assertEqual(outcome['calls'][0][:2], ['callBTT', 'set_persistent_string_variable'])
+                    self.assertEqual(outcome['calls'][0][2]['to'], on)
+                    self.assertEqual(self.variable_writes(outcome), [on, final])
+                    self.assertGreater([c[0] for c in outcome['calls']].index('readFile'), 0)
+
+    def test_a_crash_in_the_transport_ends_off_and_notifies(self):
+        for note, title, prior in (('cuts the line', 'Cut line stopped', [conditions.LINE_CLIPBOARD_ON]),
+                                   ('pastes above the line', 'Paste line stopped', [])):
+            for flag in ('failRead', 'failJxa'):
+                entry = self.entry(by_note(note), '{"ok":true,"result":"x","lineClipboard":true}')
+                entry[flag] = True
+                with self.subTest(note=note, flag=flag):
+                    [outcome] = run_entries([entry])
+                    self.assertEqual(self.variable_writes(outcome), prior + [conditions.LINE_CLIPBOARD_OFF])
+                    self.assertEqual(outcome['calls'][-1][:2], ['callBTT', 'display_notification'])
+                    self.assertEqual(outcome['calls'][-1][2]['title'], title)
+                    self.assertIn('fixture', outcome['result'])
+
+    def test_paste_does_not_mark_before_running_and_follows_the_reported_tag(self):
+        for jxa, final in (('{"ok":true,"result":"x","lineClipboard":true}', '1'), ('{"ok":true,"result":"x"}', '0'),
+                           ('{"ok":false,"error":"e"}', '0'),
+                           ('{"ok":false,"error":"e","lineClipboard":true}', '0'), ('null', '0'), ('bad', '0')):
+            [outcome] = run_entries([self.entry(by_note('pastes above the line'), jxa)])
+            self.assertEqual(self.variable_writes(outcome), [final])
+
+    def test_wrap_and_finder_transport_never_touch_variables(self):
+        [outcome] = run_entries([self.entry(by_note('in ('), '{"ok":true,"result":"wrapped"}')])
+        self.assertEqual(self.variable_writes(outcome), [])
+        script = finder.action()['BTTAppleScriptString']
+        self.assertNotIn('callBTT("set_persistent', script)
+        self.assertNotIn('lineClipboard', script)
 
     def test_a_raced_native_clipboard_clears_the_custom_condition_variable(self):
         [outcome] = run_entries([self.entry(by_note('pastes above the line'),
@@ -207,7 +270,7 @@ class EmittedScriptTests(unittest.TestCase):
             json.dumps({'ok': True, 'result': message, 'warning': message, 'lineClipboard': False}))])
         self.assertEqual(outcome['result'], message)
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
-            {'title': 'Cut line stopped', '': message}])
+            {'title': 'Line cut with a warning', '': message}])
 
     def test_app_switches_prepare_text_accessibility_outside_excluded_apps(self):
         [outcome] = run_entries([self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')])
@@ -276,7 +339,7 @@ class InstallFlowTests(unittest.TestCase):
 
     def test_an_unconfirmed_variable_initialization_enables_nothing(self):
         with patch.object(btt_socket, 'call', return_value=''):
-            with self.assertRaisesRegex(RuntimeError, 'variable did not initialize'):
+            with self.assertRaisesRegex(RuntimeError, 'did not initialize'):
                 keys.install('db', self.plan)
         self.assertEqual(self.fake.writes, [])
 

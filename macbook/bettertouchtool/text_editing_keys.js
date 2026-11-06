@@ -188,14 +188,12 @@ function cutSelectedLine(directory) {
     const command = editor.helpers.findEditMenuItem(editor.application, selectionAttribute, 'x');
     assertCaretUnchanged(editor);
     const board = $.NSPasteboard.generalPasteboard;
-    let expected, cutVersion;
+    let expected, before;
     try {
         selectLine(editor);
         expected = textWithoutLine(editor);
-        const before = Number(board.changeCount);
+        before = Number(board.changeCount);
         pressCut(editor, command);
-        cutVersion = Number(board.changeCount);
-        if (cutVersion === before) cutVersion = null;
     } catch (error) {
         throw new Error(error.message + caretRestoreNote(editor));
     }
@@ -203,10 +201,7 @@ function cutSelectedLine(directory) {
     if (!waitFor(() => ObjC.unwrap(selectionAttribute(editor.element, 'AXValue')) === expected, 20))
         throw new Error('The app did not confirm the cut; check the text.' + caretRestoreNote(editor));
     try {
-        const saved = editor.helpers.copyPasteboard(board);
-        if (saved.version !== cutVersion || ![editor.line.text, editor.line.copy].includes(
-            ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)))) throw new Error('Clipboard changed after Cut.');
-        writeLineClipboard(board, editor.line.copy, saved, editor.helpers);
+        tagCutLine(editor, board, before);
     } catch (error) {
         // The text is already cut: never undo it or overwrite a newer clipboard.
         return LINE_CUT_INLINE;
@@ -214,8 +209,23 @@ function cutSelectedLine(directory) {
     return 'cut line';
 }
 
-function writeLineClipboard(board, text, saved, helpers) {
-    const owned = helpers.writeClipboardText(board, text, saved, {flags:[LINE_PASTEBOARD_TYPE]});
+function tagCutLine(editor, board, before) {
+    let cutVersion, text;
+    // Browser/Electron Cut can return before publishing the clipboard. Text
+    // confirmation alone does not identify that later clipboard generation.
+    if (!waitFor(() => {
+        cutVersion = Number(board.changeCount);
+        text = ObjC.unwrap(board.stringForType($.NSPasteboardTypeString));
+        return cutVersion > before && [editor.line.text, editor.line.copy].includes(text)
+            && Number(board.changeCount) === cutVersion;
+    }, 20)) throw new Error('The app did not publish the cut line.');
+    const saved = editor.helpers.copyPasteboard(board);
+    if (saved.version !== cutVersion) throw new Error('Clipboard changed after Cut.');
+    writeLineClipboard(board, editor.line.copy, saved, editor.helpers, text === editor.line.copy);
+}
+
+function writeLineClipboard(board, text, saved, helpers, preserveItems = false) {
+    const owned = helpers.writeClipboardText(board, text, saved, {flags:[LINE_PASTEBOARD_TYPE], preserveItems});
     try {
         if (ObjC.unwrap(board.stringForType(LINE_PASTEBOARD_TYPE)) !== '1'
             || Number(board.changeCount) !== owned) throw new Error('The line clipboard tag did not read back.');
@@ -246,11 +256,15 @@ function copyCaretLine(directory) {
 
 // Untagged clipboard data can race the BTT variable: use the app's normal
 // Paste once, never a synthetic Cmd-V that BTT would swallow or intercept again.
-function normalMenuPaste(directory) {
+function pasteTarget(directory) {
     const system = $.AXUIElementCreateSystemWide();
     const application = selectionAttribute(system, 'AXFocusedApplication');
     const element = selectionAttribute(system, 'AXFocusedUIElement');
-    const helpers = editMenuHelpers(directory);
+    return {system, application, element, helpers:editMenuHelpers(directory)};
+}
+
+function normalMenuPaste(directory, target = pasteTarget(directory)) {
+    const {system, application, element, helpers} = target;
     const command = helpers.findEditMenuItem(application, selectionAttribute, 'v');
     if (!helpers.focusUnchanged(system, application, element, selectionAttribute))
         throw new Error('Focus changed before Paste; nothing was pasted.');
@@ -276,20 +290,46 @@ function restoreLinePasteCaret(editor, expected, insertionOffset, pasted, offset
     }
 }
 
-function pasteCaretLine(directory) {
-    const board = $.NSPasteboard.generalPasteboard, version = Number(board.changeCount);
-    if (ObjC.unwrap(board.stringForType(LINE_PASTEBOARD_TYPE)) !== '1') return normalMenuPaste(directory);
+// A line transport sets ON before its background copy finishes. Give that
+// bounded publication window a chance before treating the board as native data.
+function lineClipboardReady(board) {
+    return waitFor(() => ObjC.unwrap(board.stringForType(LINE_PASTEBOARD_TYPE)) === '1', 20);
+}
+
+function prepareLinePaste(directory, board, target) {
+    const version = Number(board.changeCount);
+    // The board may have changed after the wait: bind its tag to this version.
+    if (ObjC.unwrap(board.stringForType(LINE_PASTEBOARD_TYPE)) !== '1') throw new Error('The line tag changed.');
     const pasted = ObjC.unwrap(board.stringForType($.NSPasteboardTypeString));
-    if (typeof pasted !== 'string' || !pasted.endsWith('\n')) throw new Error('Invalid line clipboard; nothing was pasted.');
+    if (typeof pasted !== 'string' || !pasted.endsWith('\n')) throw new Error('Invalid line clipboard.');
+    if (ObjC.unwrap(selectionAttribute(target.element, 'AXRole')) !== 'AXTextArea')
+        throw new Error('Single-line fields use normal Paste.');
     const editor = caretLine(directory, 'pasted');
+    if (!target.helpers.focusUnchanged(target.system, target.application, target.element, selectionAttribute))
+        throw new Error('Focus changed before Paste.');
     const start = editor.lines.start(editor.line, editor.caret);
     const flatPaste = editor.lines.flatText(pasted);
-    // Firefox AXValue omits paragraph breaks: a blank insertion cannot be
-    // distinguished from a menu press that did nothing, so do not guess.
-    if (!flatPaste) throw new Error('A blank line paste can’t be confirmed in Firefox; nothing was pasted.');
+    if (!flatPaste) throw new Error('A blank line paste can’t be confirmed in Firefox.');
     const command = editor.helpers.findEditMenuItem(editor.application, selectionAttribute, 'v');
-    if (!editorHolds(editor, editor.caret, '')) throw new Error('The caret, text or focus changed; nothing was pasted.');
-    let expected, offset, flatStart;
+    return {editor, start, pasted, version, flatPaste, command};
+}
+
+function pasteCaretLine(directory) {
+    const board = $.NSPasteboard.generalPasteboard, target = pasteTarget(directory);
+    if (!lineClipboardReady(board)) return normalMenuPaste(directory, target);
+    let plan;
+    try {
+        plan = prepareLinePaste(directory, board, target);
+    } catch (error) {
+        // No selection has been changed: unsupported editors/line shapes still
+        // get the app's Paste once, but never in a different focused field.
+        return normalMenuPaste(directory, target);
+    }
+    return pastePreparedLine(directory, board, target, plan);
+}
+
+function pastePreparedLine(directory, board, target, {editor, start, pasted, version, flatPaste, command}) {
+    let expected, offset, flatStart, pressed = false;
     const selected = {...editor, line:{range:start, text:''}};
     try {
         const caretOffset = selectionOffsets(selectionAttribute(editor.element, 'AXSelectedTextRange')).location;
@@ -300,19 +340,25 @@ function pasteCaretLine(directory) {
         offset = caretOffset - flatStart;
         if (offset < 0 || editor.text.slice(flatStart, flatStart + editor.line.text.length) !== editor.line.text)
             throw new Error('Cannot place the line in the text; nothing was pasted.');
-        expected = editor.text.slice(0, flatStart) + flatPaste + editor.text.slice(flatStart);
-        // Clipboard first, then text/selection, focus last before the menu press.
+        // Gecko may include a newly pasted break as a newline text leaf, while
+        // older paragraph separators stay absent. Accept either exact result.
+        const candidates = [flatPaste, pasted].map(text => editor.text.slice(0, flatStart) + text + editor.text.slice(flatStart));
         if (Number(board.changeCount) !== version || !editorHolds(editor, start, '')
             || Number(board.changeCount) !== version
             || !editor.helpers.focusUnchanged(editor.system, editor.application, editor.element, selectionAttribute))
             throw new Error('The clipboard, selection or focus changed; nothing was pasted.');
+        // Even an AX error can follow a delivered press; never issue a second one.
+        pressed = true;
         if ($.AXUIElementPerformAction(command, $('AXPress')) !== 0) throw new Error('The app refused its Paste command.');
-        if (!waitFor(() => ObjC.unwrap(selectionAttribute(editor.element, 'AXValue')) === expected, 20))
-            throw new Error('The app did not confirm the paste; check the text.');
+        if (!waitFor(() => {
+            expected = ObjC.unwrap(selectionAttribute(editor.element, 'AXValue'));
+            return candidates.includes(expected);
+        }, 20)) throw new Error('The app did not confirm the paste; check the text.');
     } catch (error) {
+        if (!pressed && restoreCaret(selected)) return normalMenuPaste(directory, target);
         throw new Error(error.message + caretRestoreNote(selected));
     }
-    restoreLinePasteCaret(editor, expected, flatStart + flatPaste.length, pasted, offset);
+    restoreLinePasteCaret(editor, expected, flatStart + expected.length - editor.text.length, pasted, offset);
     return 'pasted line';
 }
 
@@ -331,8 +377,13 @@ function runEditingKey(options) {
         return EDITING_KEYS[options.kind](options);
     }));
     if (outcome.result === LINE_CUT_INLINE) outcome.warning = LINE_CUT_INLINE;
-    if (options.lineClipboardVariable)
-        outcome.lineClipboard = ObjC.unwrap($.NSPasteboard.generalPasteboard.stringForType(LINE_PASTEBOARD_TYPE)) === '1';
+    if (options.lineClipboardVariable) {
+        // A refusal/crash must release conditional Cmd-V even if an older tag
+        // remains. Copy/cut only arm it when this run actually wrote a line.
+        const wroteLine = ['copied line', 'cut line'].includes(outcome.result);
+        outcome.lineClipboard = Boolean(outcome.ok && (options.kind === 'paste-line' || wroteLine)
+            && ObjC.unwrap($.NSPasteboard.generalPasteboard.stringForType(LINE_PASTEBOARD_TYPE)) === '1');
+    }
     return JSON.stringify(outcome);
 }
 

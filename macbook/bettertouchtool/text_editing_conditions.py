@@ -24,21 +24,38 @@ EXCLUDED_APPS = (
 EXCLUDED_PREFIXES = ('com.jetbrains.',)
 
 
-def selection_condition(length_pattern):
+BUILTIN_VARIABLES = ('BTTActiveAppBundleIdentifier', 'focused_element_details')
+LINE_CLIPBOARD_VARIABLE = 'jacobr_editing_keys_line_clipboard'
+LINE_CLIPBOARD_OFF, LINE_CLIPBOARD_ON = '0', '1'
+# Every persistent variable a condition reads, with the value the installer
+# initializes it to: an unbound variable can swallow the key instead of passing it through.
+INITIAL_VARIABLES = {LINE_CLIPBOARD_VARIABLE: LINE_CLIPBOARD_OFF}
+
+
+def app_condition():
     apps = ', '.join(json.dumps(app) for app in EXCLUDED_APPS)
     prefixes = ' OR '.join('BTTActiveAppBundleIdentifier BEGINSWITH ' + json.dumps(p) for p in EXCLUDED_PREFIXES)
+    return 'NOT (BTTActiveAppBundleIdentifier IN {' + apps + '} OR ' + prefixes + ')'
+
+
+def details_condition(length_pattern):
     # BTT's focused-element dump marks settable attributes "(W)": read-only text
     # (terminal output, web pages) and apps without a text tree never match.
-    details = ("focused_element_details MATCHES '(?s)(?=.*AXSelectedText [(]W[)]:  \").*"
-               "AXSelectedTextRange [(]W[)]:  \"pos=[0-9]+ len=" + length_pattern + "\".*'")
-    return 'NOT (BTTActiveAppBundleIdentifier IN {' + apps + '} OR ' + prefixes + ') AND ' + details
+    return ("focused_element_details MATCHES '(?s)(?=.*AXSelectedText [(]W[)]:  \").*"
+            "AXSelectedTextRange [(]W[)]:  \"pos=[0-9]+ len=" + length_pattern + "\".*'")
+
+
+def selection_condition(length_pattern):
+    return app_condition() + ' AND ' + details_condition(length_pattern)
 
 
 WRAP_CONDITION = selection_condition('[1-9][0-9]*')
 CARET_CONDITION = selection_condition('0')
-LINE_CLIPBOARD_VARIABLE = 'jacobr_editing_keys_line_clipboard'
-LINE_CLIPBOARD_OFF, LINE_CLIPBOARD_ON = '0', '1'
-PASTE_CONDITION = CARET_CONDITION + ' AND ' + LINE_CLIPBOARD_VARIABLE + ' == ' + json.dumps(LINE_CLIPBOARD_ON)
+# Cheapest gates first: the excluded-app check and the tag variable are plain
+# comparisons, so the costly focused-element regex only runs for a tagged paste
+# in an allowed app.
+PASTE_CONDITION = (app_condition() + ' AND ' + LINE_CLIPBOARD_VARIABLE + ' == ' + json.dumps(LINE_CLIPBOARD_ON)
+                   + ' AND ' + details_condition('0'))
 
 
 class ConditionCase(NamedTuple):
@@ -97,6 +114,11 @@ def evaluate(predicate, variables):
 def canonical(predicate):
     """BTT re-serializes a stored condition; compare conditions in NSPredicate's format."""
     return evaluate(predicate, [])['format']
+
+
+def variables_used(predicate):
+    """The variable names `predicate` reads, as NSPredicate parses it."""
+    return sorted(evaluate(predicate, [])['keys'])
 
 
 def truth_table_errors():

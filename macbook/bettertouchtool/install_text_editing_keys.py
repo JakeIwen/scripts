@@ -50,23 +50,35 @@ PASTE_LINE_ID = stable_uuid('paste line')
 DISJOINT_TRIGGER_PAIRS = (frozenset({FINDER_PASTE_ID, PASTE_LINE_ID}),)
 
 
+# Runtime kinds that tag (or consume) a line copy, and the title of the
+# notification when one completes with a warning.
+TAGGING_KINDS = {'copy-line': 'Line copied with a warning', 'cut-line': 'Line cut with a warning',
+                 'paste-line': 'Line pasted with a warning'}
+SET_VARIABLE = 'await callBTT("set_persistent_string_variable", {variable_name: %s, to: %s});\n'
+
+
 def _line_clipboard_hook(entry, options):
-    """JS around the runtime that keeps the persistent line-clipboard variable in step."""
+    """JS around the runtime that keeps the persistent line-clipboard variable in step.
+
+    Copy and cut set ON before their background runtime, so a fast Cmd-V enters
+    the bounded tag wait instead of pasting inline. Every tagging kind then ends
+    OFF unless the runtime confirms a tag. App switches only bind a missing variable.
+    """
     name = options.get('lineClipboardVariable')
+    kind = options.get('kind')
     if not name:
-        return '', ''
+        return triggers.RuntimeHook()
     variable = json.dumps(name)
     off, on = map(json.dumps, (conditions.LINE_CLIPBOARD_OFF, conditions.LINE_CLIPBOARD_ON))
-    ensure = ''
     if entry == 'runAppSwitch':
-        ensure = (
+        return triggers.RuntimeHook(
             f'    const lineClipboard = await callBTT("get_string_variable", {{variable_name: {variable}}});\n'
-            f'    if (lineClipboard == null || lineClipboard === "") await callBTT("set_persistent_string_variable", '
-            f'{{variable_name: {variable}, to: {off}}});\n')
-    update = (
-        '    if (typeof result.lineClipboard === "boolean") await callBTT("set_persistent_string_variable", '
-        + f'{{variable_name: {variable}, to: result.lineClipboard ? {on} : {off}}});\n')
-    return ensure, update
+            f'    if (lineClipboard == null || lineClipboard === "") ' + SET_VARIABLE % (variable, off))
+    if kind not in TAGGING_KINDS:
+        return triggers.RuntimeHook()
+    before = '    ' + SET_VARIABLE % (variable, on) if kind != 'paste-line' else ''
+    after = '    ' + SET_VARIABLE % (variable, f'result.ok === true && result.lineClipboard === true ? {on} : {off}')
+    return triggers.RuntimeHook(before, after, TAGGING_KINDS[kind])
 
 
 def _action(function, entry, options, title):
@@ -111,10 +123,10 @@ def definitions():
 def install(database, plan):
     """Create or recreate disabled, verify runtime and disk, then enable; returns written UUIDs."""
     # An unbound condition variable can swallow Cmd-V instead of passing it through.
-    btt_socket.call('set_persistent_string_variable', variable_name=conditions.LINE_CLIPBOARD_VARIABLE,
-                    to=conditions.LINE_CLIPBOARD_OFF)
-    if btt_socket.call('get_string_variable', variable_name=conditions.LINE_CLIPBOARD_VARIABLE).strip() != conditions.LINE_CLIPBOARD_OFF:
-        raise RuntimeError('The line clipboard variable did not initialize; no triggers were enabled.')
+    for name, initial in conditions.INITIAL_VARIABLES.items():
+        btt_socket.call('set_persistent_string_variable', variable_name=name, to=initial)
+        if btt_socket.call('get_string_variable', variable_name=name).strip() != initial:
+            raise RuntimeError('The condition variable %s did not initialize; no triggers were enabled.' % name)
     return triggers.install(database, plan, LABEL, BACKUPS, 'keys-')
 
 

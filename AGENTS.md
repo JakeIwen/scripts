@@ -286,28 +286,41 @@ compare it with this checkout. Deployed files may differ from the repository.
   Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
   trigger; lazy NSMenu enabled flags are not a gate, and an unconfirmed cut
   restores the caret while it still owns the selection. Firefox blank lines are
-  not cut. A confirmed cut is rewritten as plain line text plus one `\n` and
-  the private line tag; a failed tag write warns without undoing the cut. Cmd-C never touches the field: it
+  not cut. After confirmation, Cut waits up to one second for a newer matching
+  clipboard. If its first item's string equals the copy form, it tags a separate copy
+  of the app's items (RTF/HTML retained); otherwise it normalizes to plain line text
+  plus one `\n`. A failed tag write warns as a completed cut without undoing it. Cmd-C never touches the field: it
   writes the line's text plus `\n` to the clipboard with `text_menu_paste.js`'s
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
   read, and a failed write puts the previous clipboard back. Copy/cut share the
   private type defined once as `LINE_PASTEBOARD_TYPE` in `text_editing_keys.js`.
   Cmd-V requires a caret and the persistent BTT custom variable declared in
   `text_editing_conditions.py`; the runtime rechecks the real tag and uses normal
-  Edit > Paste once on stale/untagged data, setting the variable to off. Tagged paste
-  uses the logical line start and restores the original character caret after
-  exact text confirmation. Firefox uses paragraph-start/forward native markers;
-  blank-only pastes fail closed because flat AXValue cannot confirm them. BTT
-  restart retains the variable. All writes use `set_persistent_string_variable`;
+  Edit > Paste once on stale/untagged data, setting the variable to off. Copy/cut
+  transport arms the variable before background runJXA; paste waits up to one
+  second in 50 ms steps for the tag. Missing/non-boolean outcomes and crashes
+  disarm it. Tagged line paste requires `AXTextArea`; single-line/search/URL fields
+  paste normally (copy/cut unchanged). It uses the logical line start and restores
+  the original character caret after exact confirmation. Firefox uses native
+  paragraph-start/forward markers and accepts pasted breaks with or without a
+  newline leaf. Blank-only/unsupported shapes fall back to normal Paste; pre-press
+  fallback preserves newer focus/selection and never replays a press. A failed
+  paste turns interception off even if the tag remains. BTT restart retains the variable. All writes use `set_persistent_string_variable`;
   `--apply` initializes and reads back `"0"` before enabling, and the app-switch
   action reasserts it if `get_string_variable` is empty. This prevents BTT from
   swallowing Cmd-V on an unbound condition without mismatch pass-through
   (observed live 2026-11-05). The Foundation evaluator rejects cases missing
-  predicate variables, rather than treating them as false. `trigger_install.py`
+  predicate variables, rather than treating them as false. `INITIAL_VARIABLES`
+  is the one initializer map; all installed predicates are checked against it and
+  BTT's built-ins. The paste variable test precedes the focused-element dump.
+  `trigger_install.py` takes editing-variable logic as an installer hook and
   permits only the explicit disjoint Finder/non-text and editing-key/text Cmd-V
-  UUID pair; unrelated same-key triggers still conflict. BTT documents mismatch
+  UUID pair (actual imported IDs); unrelated same-key triggers still conflict. BTT documents mismatch
   pass-through but not arbitration with another matching trigger: verify one
-  paste per press live in Finder and text. Never select by
+  paste per press live in Finder and text. Also still owed: Chrome/Firefox
+  contenteditable AX roles, normal paste in single-line fields, quick copy/paste,
+  BTT relaunch, apps with nothing focused, and Firefox rich-cut HTML actually
+  pasting as a separate paragraph (flat AXValue alone cannot prove it). Never select by
   posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the
