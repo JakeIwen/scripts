@@ -49,6 +49,20 @@ py() { command python3 "$@"; }
 functions() { command cat ~/.bashrc | command grep --color=auto -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)' "$@"; }
 fndef() { declare -f -- "$@"; } # print function definition
 als() { type -- "$@"; }
+# pbctee: tee for the clipboard. Prints stdin, then copies it with pbcopy and
+# returns its status. It buffers the input (clipboard text is small) rather
+# than using tee: `tee >(pbcopy)` can return before pbcopy has run, and
+# `tee /dev/fd/N` on Linux reopens the file behind the descriptor, truncating
+# it when stdout is a file. The trailing x keeps $(...) from eating newlines.
+# Text only: bash drops NUL bytes from variables.
+pbctee() {
+  local out
+  out=$(command cat && printf x) || return
+  out=${out%x}
+  printf '%s' "$out"
+  printf '%s' "$out" | pbcopy
+}
+
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
