@@ -1,4 +1,5 @@
 """Network rendering reads local evidence only; failed discovery is never 'missing'."""
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import Mock
 
 from offsite_availability import remote_availability
 from offsite_config import Config
+from pi.tests.backup.offsite_fixtures import core_limits_after
 
 
 class AvailabilityTests(unittest.TestCase):
@@ -82,6 +84,17 @@ class AvailabilityTests(unittest.TestCase):
                         Mock(return_value=subprocess.CompletedProcess([], 0, '{}', ''))):
             self.assertEqual(remote_availability(self.cfg, command=command),
                              {'state': 'unknown', 'reason': 'probe-failed'})
+
+    def test_reading_the_transport_disables_core_dumps_in_a_fresh_process(self):
+        # remote.json can hold the DSM password; the dashboard path reads it with no other protection.
+        config = self.cfg.state / 'config.json'
+        config.write_text(json.dumps(asdict(self.cfg), default=str))
+        body = ('from offsite_availability import remote_availability\n'
+                'import subprocess\n'
+                'remote_availability(cfg, command=lambda *a, **k: subprocess.CompletedProcess(a, 1, "", ""))')
+        before, after = core_limits_after(config, body)
+        self.assertNotEqual(before, (0, 0))
+        self.assertEqual(after, (0, 0))
 
 
 if __name__ == '__main__':

@@ -9,15 +9,22 @@ import re
 import ipaddress
 
 
-def validate_transport(value, extra_fields=()):
-    if (not isinstance(value, dict) or set(value) != {'schema', 'address', 'port', 'transport_password', *extra_fields}
-            or type(value.get('schema')) is not int or value['schema'] != SCHEMA):
+def validate_transport(value, extra_fields=(), kinds=('rest',)):
+    """A transport record (the Pi's remote.json, the receiver's config.json) of a kind in kinds.
+
+    The default accepts REST only, so the NAS receiver, which installs this file
+    alone and passes no kinds, keeps refusing a shared-folder record; the Pi
+    passes TRANSPORT_KINDS. A REST record may name its kind explicitly.
+    """
+    kind = value.get('kind', TransportKind.REST) if isinstance(value, dict) else None
+    if kind not in kinds or kind not in TRANSPORT_KINDS:
         raise ValueError('Missing or invalid offsite transport configuration')
-    if not isinstance(value['address'], str):
-        raise ValueError('Offsite endpoint must be a literal Tailscale IPv4 address')
-    address = ipaddress.IPv4Address(value['address'])
-    if address not in ipaddress.IPv4Network('100.64.0.0/10'):
-        raise ValueError('Offsite endpoint must be a literal Tailscale IPv4 address')
+    if kind == TransportKind.SMB:
+        return validate_smb_transport(value, extra_fields)
+    fields = {'schema', 'address', 'port', 'transport_password', *extra_fields, *(('kind',) if 'kind' in value else ())}
+    if set(value) != fields or type(value.get('schema')) is not int or value['schema'] != SCHEMA:
+        raise ValueError('Missing or invalid offsite transport configuration')
+    validate_tailscale_address(value['address'])
     if type(value['port']) is not int or not 1024 <= value['port'] <= 65535:
         raise ValueError('Invalid offsite receiver port')
     if not isinstance(value['transport_password'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{43,128}', value['transport_password']):
@@ -25,12 +32,43 @@ def validate_transport(value, extra_fields=()):
     return value
 
 
+def validate_tailscale_address(value):
+    # The NAS is reached as a shared Tailscale node, never by a LAN or DNS name.
+    if not isinstance(value, str):
+        raise ValueError('Offsite endpoint must be a literal Tailscale IPv4 address')
+    address = ipaddress.IPv4Address(value)
+    if address not in ipaddress.IPv4Network('100.64.0.0/10'):
+        raise ValueError('Offsite endpoint must be a literal Tailscale IPv4 address')
+
+
+def validate_smb_transport(value, extra_fields=()):
+    """A plain DSM shared folder reached over SMB; messages never quote the password."""
+    if (set(value) != {*SMB_TRANSPORT_FIELDS, *extra_fields} or type(value.get('schema')) is not int
+            or value['schema'] != SCHEMA):
+        raise ValueError('Missing or invalid offsite shared-folder configuration')
+    validate_tailscale_address(value['address'])
+    if type(value['port']) is not int or not 1 <= value['port'] <= 65535:
+        raise ValueError('Invalid offsite shared-folder port')
+    if not isinstance(value['share'], str) or not re.fullmatch(SMB_NAME_PATTERN, value['share']):
+        raise ValueError('Shared folder name must be 1-64 ASCII letters/digits/dot/underscore/hyphen')
+    segments = value['path'].split('/') if isinstance(value['path'], str) else []
+    if (not 1 <= len(segments) <= SMB_PATH_SEGMENTS
+            or any(part in ('.', '..') or not re.fullmatch(SMB_NAME_PATTERN, part) for part in segments)):
+        raise ValueError('Shared-folder repository path must be 1-3 relative folder names')
+    if not isinstance(value['user'], str) or not re.fullmatch(SMB_USER_PATTERN, value['user']):
+        raise ValueError('Shared-folder user must be 1-64 ASCII letters/digits/dot/underscore/hyphen')
+    secret = value['password']
+    if (not isinstance(secret, str) or not SMB_PASSWORD_LENGTH[0] <= len(secret) <= SMB_PASSWORD_LENGTH[1]
+            or not secret.isprintable()):
+        raise ValueError('Shared-folder password must be 16-127 printable characters')
+    return value
+
+
 def validate_marker(marker, label):
     if (not isinstance(marker, dict) or type(marker.get('schema')) is not int or marker['schema'] != SCHEMA or
             not isinstance(label, str) or marker.get('label') != label or not re.fullmatch(LABEL_PATTERN, label) or
             marker.get('repo_path') != REPO_PATH or not isinstance(marker.get('repo_id'), str) or
-            not re.fullmatch(REPO_ID_PATTERN, marker['repo_id']) or
-            not valid_priority(marker.get('priority')) or
+            not re.fullmatch(REPO_ID_PATTERN, marker['repo_id']) or not valid_priority(marker.get('priority')) or
             not isinstance(marker.get('created'), str) or not marker['created']):
         raise RuntimeError('Invalid offsite marker')
 
@@ -49,6 +87,15 @@ RECEIPT_TAG = 'offsite-receipt-v1'
 RECEIPT_FILE = 'offsite-completion.json'
 REMOTE_CONSUMER = 'pi.offsite_backup'
 REMOTE_CONFIG = 'remote.json'
+SMB_TRANSPORT_FIELDS = frozenset({'schema', 'kind', 'address', 'port', 'share', 'path', 'user', 'password'})
+SMB_NAME_PATTERN = r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}'
+SMB_USER_PATTERN = r'[A-Za-z0-9._-]{1,64}'
+SMB_PATH_SEGMENTS = 3
+SMB_DEFAULT_PORT = 445
+# Jacob sets the DSM user's password to a long random one first (plan review R3).
+SMB_PASSWORD_LENGTH = (16, 127)
+# Variables that could send a transport through a proxy; removed from restic's environment.
+PROXY_VARIABLES = ('http_proxy', 'https_proxy', 'all_proxy')
 LABEL_PATTERN = r'[A-Za-z0-9][A-Za-z0-9._-]{0,15}'
 REPO_ID_PATTERN = r'[0-9a-f]{64}'
 PRIORITY_EXAMPLES = {'5tb': 10, '14tb': 20}
@@ -78,6 +125,8 @@ CODE_DIRECTORY = 'code'
 RUN_ID_PATTERN = r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}'
 MANIFEST = 'manifest.json'
 SNAPSHOT_RESTIC = 'bin/restic'
+# A shared-folder run's rclone, frozen beside restic (copied only when remote.json is kind smb).
+SNAPSHOT_RCLONE = 'bin/rclone'
 # The restic pin (version, binary SHA-256, install target) is declared once, in
 # this installer; the snapshot reads it from the live tree.
 RESTIC_INSTALLER = 'backup/install_restic.sh'
@@ -96,8 +145,9 @@ FROZEN_IMPLEMENTATION = (
     'backup/offsite_availability.py', 'backup/offsite_backup.py', 'backup/offsite_config.py',
     'backup/offsite_control.py', 'backup/offsite_dashboard.py',
     'backup/offsite_locks.py', 'backup/offsite_mounts.sh', 'backup/offsite_prepare.py',
-    'backup/offsite_receipts.py', 'backup/offsite_remote.py', 'backup/offsite_repository.py',
-    'backup/offsite_run.py', 'backup/offsite_samba.py', 'backup/offsite_snapshot.py',
+    'backup/offsite_receipts.py', 'backup/offsite_remote.py', 'backup/offsite_remote_init.py',
+    'backup/offsite_repository.py',
+    'backup/offsite_run.py', 'backup/offsite_samba.py', 'backup/offsite_smb.py', 'backup/offsite_snapshot.py',
     'backup/protected_json.py', 'backup/stale_mount_recovery.sh', 'backup/time_machine_store.py',
     'backup/upload_speed_log.py', 'connectivity_status.py', 'disk_policy.sh', 'fix_hfs_fs.sh',
     'mount_disks.sh', 'ntfy_send.sh', 'samba_share_control.sh',
@@ -118,6 +168,11 @@ LIVE_DATA = (
     '/etc/', '/var/lib/', '/run/', '/root/', '/mnt/',
 )
 INSTALLED_RESTIC = '/usr/local/bin/restic'
+INSTALLED_RCLONE = '/usr/local/bin/rclone'
+# Pinned like restic's version in install_restic.sh (bare number), and equal to the
+# Linux test lane's RCLONE_VERSION. No hash-pinned rclone installer exists yet, so
+# the snapshot checks this version and records the copy's SHA-256 instead.
+RCLONE_VERSION = '1.75.1'
 
 
 def command_paths(code_root=None):
@@ -125,6 +180,7 @@ def command_paths(code_root=None):
     root = LIVE_ROOT if code_root is None else Path(code_root)
     return {
         'restic': INSTALLED_RESTIC if code_root is None else str(root / SNAPSHOT_RESTIC),
+        'rclone': INSTALLED_RCLONE if code_root is None else str(root / SNAPSHOT_RCLONE),
         'lsblk': '/usr/bin/lsblk',
         'findmnt': '/usr/bin/findmnt', 'wipefs': '/usr/sbin/wipefs',
         'sfdisk': '/usr/sbin/sfdisk', 'mkfs': '/usr/sbin/mkfs.ext4',
@@ -156,6 +212,15 @@ class Result(str, Enum):
 class TargetKind(str, Enum):
     LOCAL = 'local'
     REMOTE = 'remote'
+
+
+class TransportKind(str, Enum):
+    """remote.json's `kind`; a record without one is REST."""
+    REST = 'rest'  # the NAS receiver: restic's REST backend, auth bound to the repository ID
+    SMB = 'smb'  # a plain DSM shared folder through restic's rclone backend
+
+
+TRANSPORT_KINDS = tuple(kind.value for kind in TransportKind)
 
 
 @dataclass(frozen=True)
@@ -221,11 +286,26 @@ class CompletionReceipt(TypedDict):
     newly_added_packed_bytes: int | None
 
 
-class TransportConfig(TypedDict):
+class OptionalTransportKind(TypedDict, total=False):
+    kind: TransportKind  # only ever TransportKind.REST in a TransportConfig
+
+
+class TransportConfig(OptionalTransportKind):
     schema: int
     address: str
     port: int
     transport_password: str
+
+
+class SmbTransportConfig(TypedDict):
+    schema: int
+    kind: TransportKind
+    address: str
+    port: int
+    share: str
+    path: str  # the repository folder inside the share, 1-3 segments
+    user: str
+    password: str  # the DSM user's password; rclone receives only its obscured form
 
 
 class StatusRecord(TypedDict, total=False):
@@ -252,6 +332,8 @@ class StatusRecord(TypedDict, total=False):
     notification_error: str
     duration_seconds: float
     target_kind: TargetKind
+    # Additive: the configured remote transport; None for local runs and before configuration.
+    transport_kind: TransportKind | None
     progress_measure: str
     history_error: str
     control_revision: str

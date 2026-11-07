@@ -6,7 +6,7 @@ import os
 import re
 import sys
 
-from offsite_config import Config
+from offsite_config import SMB_DEFAULT_PORT, Config
 from offsite_dashboard import dashboard, rates, status
 from offsite_locks import admit
 from offsite_prepare import prepare
@@ -23,15 +23,16 @@ def parser(cfg):
     disk.add_argument('--label', required=True)
     disk.add_argument('--priority', required=True, type=int)
     disk.add_argument('--erase-confirm', help='exact serial; omission prints the layout and refuses erasure')
-    backup = sub.add_parser('backup', help='snapshot sources into a known local repository')
+    # No abbreviations here: the launcher freezes rclone only when it sees the exact --remote.
+    backup = sub.add_parser('backup', help='snapshot sources into a known local repository', allow_abbrev=False)
     backup.add_argument('--label', required=True)
     backup.add_argument('--only', action='append', choices=tuple(cfg.sources()),
                         help='repeat to select several sources; default is all four')
-    check = sub.add_parser('check', help='check a known local repository')
+    check = sub.add_parser('check', help='check a known local repository', allow_abbrev=False)
     check.add_argument('--label', required=True)
     check.add_argument('--read-data-subset', help='restic subset such as 5%%, 1/10, or 10G')
     for command in (backup, check):
-        command.add_argument('--remote', action='store_true', help='use the registered NAS REST target over Tailscale')
+        command.add_argument('--remote', action='store_true', help='use the registered remote target of remote.json over Tailscale')
     receipts = sub.add_parser('receipts', help='list validated encrypted remote completion receipts')
     receipts.add_argument('--label', required=True)
     restore = sub.add_parser('restore-test', help='restore one remote path using a completion receipt and verify bytes')
@@ -39,6 +40,7 @@ def parser(cfg):
     restore.add_argument('--receipt', required=True)
     restore.add_argument('--path', required=True)
     restore.add_argument('--target', required=True, help='absolute path to a separate empty directory')
+    shared_folder(sub)
     sub.add_parser('status', help='print the current/last run as JSON; does not take the backup lock')
     sub.add_parser('dashboard', help='print status, per-source history and verification evidence; read-only')
     rate = sub.add_parser('rates', help='print per-minute logical processing rates; read-only')
@@ -51,8 +53,33 @@ def parser(cfg):
     return root
 
 
+def shared_folder(sub):
+    """Shared-folder (kind smb) setup; see OFFSITE.md "Shared-folder target (no NAS admin)"."""
+    configure = sub.add_parser('configure-smb', help='write remote.json for a DSM shared folder; the password is '
+                               'read from the terminal, or one line on stdin, never an argument')
+    worker = sub.add_parser('configure-smb-run', help='the admitted worker configure-smb starts; password on stdin')
+    for command in (configure, worker):
+        command.add_argument('--address', required=True, help="the NAS's Tailscale IPv4 address")
+        command.add_argument('--share', required=True, help='the DSM shared folder, e.g. Jake_Share')
+        command.add_argument('--path', required=True, help='repository folder inside the share, e.g. vanpi-restic')
+        command.add_argument('--user', required=True, help='the DSM user')
+        command.add_argument('--port', type=int, default=SMB_DEFAULT_PORT)
+    init = sub.add_parser('init-remote', help='create the shared-folder repository and register a label for it')
+    init.add_argument('--label', required=True)
+    init.add_argument('--priority', required=True, type=int)
+    init.add_argument('--adopt', metavar='REPO_ID',
+                      help='skip init; register the existing repository only if its decrypted id is REPO_ID')
+
+
 def mutate(cfg, args, commands):
-    if getattr(args, 'remote', False) or args.command in ('receipts', 'restore-test'):
+    if args.command == 'configure-smb-run':
+        # One file write under job-offsite: no disk, network or upload, so none of the policy locks.
+        from offsite_remote_init import configure_from_pipe
+        print(json.dumps(configure_from_pipe(cfg, args), sort_keys=True))
+        return 0
+    if args.command == 'init-remote':
+        repo = None  # init_remote builds a registering, then a verifying, repository itself
+    elif getattr(args, 'remote', False) or args.command in ('receipts', 'restore-test'):
         from offsite_remote import RemoteRepository
         repo = RemoteRepository(cfg, commands, args.label)
     else:
@@ -63,7 +90,11 @@ def mutate(cfg, args, commands):
             prepare(repo, args.device, args.erase_confirm, args.priority)
             return 0
         commands.locks.hold_policy_locks()
-        if args.command in ('backup', 'resume-run'):
+        if args.command == 'init-remote':
+            from offsite_remote_init import init_remote
+            print(json.dumps(init_remote(cfg, commands, label=args.label, priority=args.priority, adopt=args.adopt),
+                             sort_keys=True))
+        elif args.command in ('backup', 'resume-run'):
             from offsite_control import admit_backup, resume_backup
             if args.command == 'resume-run':
                 selected = resume_backup(repo, args.revision)
@@ -110,6 +141,9 @@ def main(argv=None, *, config=None):
             from offsite_control import request_control
             print(json.dumps(request_control(cfg, args.command, args.label, args.revision), sort_keys=True))
             return 0
+        if args.command == 'configure-smb':
+            from offsite_remote_init import start_configure
+            return start_configure(cfg, args)
         locks = admit(cfg, prepare=args.command == 'prepare-disk')
         try:
             return mutate(cfg, args, Commands(cfg, locks))

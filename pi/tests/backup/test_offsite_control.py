@@ -10,6 +10,7 @@ from offsite_control import control_lock, read_control, request_control, resume_
 from offsite_config import RemoteControlGuard
 from offsite_remote import RemoteRepository
 from offsite_repository import Commands, Interrupted
+from pi.tests.backup.offsite_fixtures import core_limits_after
 from pi.tests.backup.offsite_remote_fixtures import RemoteFixture, SECRET
 
 
@@ -190,6 +191,20 @@ class RemoteControlsTests(unittest.TestCase):
         registry.write_text(json.dumps(value))
         with self.assertRaises(ControlConflict):
             request_control(self.f.cfg, 'resume', self.f.label, plan['revision'])
+
+    def test_resume_reads_the_transport_with_core_dumps_disabled_in_a_fresh_process(self):
+        # The dashboard's resume request reads remote.json (the DSM password for smb) before any worker exists.
+        self.seed_plan()
+        self.assertEqual(self.control('pause').returncode, 0)
+        revision = read_control(self.f.cfg, self.f.label)['revision']
+        body = ('import subprocess\n'
+                'from offsite_control import request_control\n'
+                'request_control(cfg, "resume", %r, %r,\n'
+                '                command=lambda argv, **k: subprocess.CompletedProcess(argv, 0, "", ""))'
+                % (self.f.label, revision))
+        before, after = core_limits_after(self.f.config_file, body, self.f.env)
+        self.assertNotEqual(before, (0, 0))
+        self.assertEqual(after, (0, 0))
 
 
 if __name__ == '__main__':

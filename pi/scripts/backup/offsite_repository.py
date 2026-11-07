@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
 import secrets
 import selectors
 import signal
@@ -14,7 +15,8 @@ import time
 
 from backup_locks import LockClass
 from offsite_config import GUARD_SECONDS, LABEL_PATTERN, MARKER, REPO_ID_PATTERN
-from offsite_config import REPO_PATH, SCHEMA, STOP_SECONDS, MarkerRecord, RepositoryRecords, validate_marker
+from offsite_config import PROXY_VARIABLES, REPO_PATH, SCHEMA, STOP_SECONDS, MarkerRecord, RepositoryRecords
+from offsite_config import validate_marker
 from time_machine_store import atomic_json
 
 # The Pi's registry of known repositories (label -> MarkerRecord), root-only.
@@ -27,6 +29,40 @@ class Interrupted(RuntimeError):
 
 # offsite_mounts.sh release exit codes (OFFSITE.md "Locks").
 RELEASED, RELEASE_BUSY, ALREADY_UNMOUNTED = 0, 3, 4
+REDACTED = '[redacted]'
+
+
+def no_core_dumps():
+    # restic and this process's own commands hold the repository key and the DSM password; a core
+    # file would leave them on disk. As a preexec the child's rclone inherits it; call it directly
+    # before this process reads a credential.
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+class CommandFailed(RuntimeError):
+    """A fixed command exited with an unaccepted status.
+
+    The message is redacted; `output` is the command's raw text, for a caller that
+    only classifies it (offsite_remote_init) and never prints it.
+    """
+
+    def __init__(self, message, output):
+        super().__init__(message)
+        self.output = output
+
+
+def secret_forms(secret):
+    """The secret as printed raw and inside JSON strings (Go's encoder also escapes <, > and &)."""
+    escaped = json.dumps(secret, ensure_ascii=False)[1:-1]
+    go = escaped.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    return {secret, escaped, go, json.dumps(secret)[1:-1]}
+
+
+def redacted(text, hidden):
+    """Diagnostic text with every form of each secret replaced; never applied to text that is parsed."""
+    for form in sorted({form for secret in hidden if secret for form in secret_forms(secret)}, key=len, reverse=True):
+        text = text.replace(form, REDACTED)
+    return text
 
 
 class Commands:
@@ -75,45 +111,39 @@ class Commands:
         """Return the exit code of a command whose accepted nonzero codes carry meaning."""
         return self.execute(name, *args, accept=accept, **kwargs)[0]
 
-    def execute(self, name, *args, accept, timeout=60, input_text=None, line=None,
-                guard=None, cleanup=False, rest_auth=None, holds=True, on_stop=None):
-        """holds=False passes only the job descriptor; on_stop runs once if a
-        stop arrives while a cleanup command (which ignores stops) still runs."""
+    def execute(self, name, *args, accept, timeout=60, input_text=None, line=None, guard=None, cleanup=False,
+                rest_auth=None, rclone_env=None, redact=(), holds=True, on_stop=None):
+        """Run one fixed command; returns (exit code, output).
+
+        The output and every `line` are the command's raw text, so parsed JSON is
+        never altered; only this method's error text is redacted. rest_auth's
+        secret and every string in redact are replaced there, and callers that
+        print output use the repository's redact() (plan review R3).
+        rclone_env (restic only, never with rest_auth) carries the shared-folder
+        transport's RCLONE_* values; afterwards any rclone server restic left
+        behind is stopped. holds=False passes only the job descriptor; on_stop
+        runs once if a stop arrives while a cleanup command (which ignores stops) still runs.
+        """
         if not cleanup:
             self.allowed()
         argv = [self.cfg.commands[name], *map(str, args)]
-        # Every held job/disk/data/slot descriptor is inherited (holds=False:
-        # only the job's), so an orphaned child (restic above all) keeps the
-        # run's holds visible to the drain.
-        environment = self.locks.child_environment({**os.environ, 'LC_ALL': 'C'}, resources=holds)
-        if name == 'restic':
-            environment = {key: value for key, value in environment.items() if not key.startswith('RESTIC_')}
-            environment['RESTIC_PROGRESS_FPS'] = '0.2'
-        if rest_auth is not None:
-            if name != 'restic' or len(rest_auth) != 2:
-                raise ValueError('REST authentication is only allowed for restic')
-            environment.update(RESTIC_REST_USERNAME=rest_auth[0], RESTIC_REST_PASSWORD=rest_auth[1])
-            environment = {key: value for key, value in environment.items()
-                           if key.lower() not in ('http_proxy', 'https_proxy', 'all_proxy')}
-        def safe_line(text):
-            return text.replace(rest_auth[1], '[redacted]') if rest_auth else text
-        original_line = line
-        if line:
-            line = lambda text: original_line(safe_line(text))
+        environment = self._environment(name, holds, rest_auth, rclone_env)
+        hidden = (*redact, *(rest_auth[1:] if rest_auth else ()))
         with subprocess.Popen(argv, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
-                              pass_fds=self.locks.fds(resources=holds), start_new_session=True) as child:
+                              pass_fds=self.locks.fds(resources=holds), start_new_session=True,
+                              preexec_fn=no_core_dumps if name == 'restic' else None) as child:
             try:
                 if input_text is not None:
                     child.stdin.write(input_text.encode())
                     child.stdin.close()
-                output = safe_line(self._read(child, timeout, line, guard, cleanup, on_stop))
+                output = self._read(child, timeout, line, guard, cleanup, on_stop)
                 try:
                     rc = child.wait(timeout=STOP_SECONDS)
                 except subprocess.TimeoutExpired as exc:
                     raise RuntimeError(f'{name} closed output but failed to exit') from exc
                 if rc not in accept:
-                    raise RuntimeError(f'{name} exited {rc}: {output[-3000:].strip()}')
+                    raise CommandFailed(f'{name} exited {rc}: {redacted(output, hidden)[-3000:].strip()}', output)
                 return rc, output
             finally:
                 if child.poll() is None:
@@ -123,6 +153,31 @@ class Commands:
                     except subprocess.TimeoutExpired:
                         os.killpg(child.pid, signal.SIGKILL)
                         child.wait()
+                if rclone_env is not None:
+                    # restic is gone; the run's snapshot (and its rclone) is removed only after this.
+                    from offsite_smb import reap
+                    reap(self.cfg.commands['rclone'])
+
+    def _environment(self, name, holds, rest_auth, rclone_env):
+        # Every held job/disk/data/slot descriptor is inherited (holds=False:
+        # only the job's), so an orphaned child (restic above all) keeps the
+        # run's holds visible to the drain.
+        environment = self.locks.child_environment({**os.environ, 'LC_ALL': 'C'}, resources=holds)
+        if rclone_env is not None:
+            if (name != 'restic' or rest_auth is not None or not rclone_env
+                    or any(not key.startswith('RCLONE_') for key in rclone_env)):
+                raise ValueError('An rclone environment is only allowed for restic, without REST authentication')
+            from offsite_smb import without_ambient
+            environment = {**without_ambient(environment), **rclone_env}
+        if name == 'restic':
+            environment = {key: value for key, value in environment.items() if not key.startswith('RESTIC_')}
+            environment['RESTIC_PROGRESS_FPS'] = '0.2'
+        if rest_auth is not None:
+            if name != 'restic' or len(rest_auth) != 2:
+                raise ValueError('REST authentication is only allowed for restic')
+            environment.update(RESTIC_REST_USERNAME=rest_auth[0], RESTIC_REST_PASSWORD=rest_auth[1])
+            environment = {key: value for key, value in environment.items() if key.lower() not in PROXY_VARIABLES}
+        return environment
 
     def _read(self, child, timeout, line, guard, cleanup, on_stop):
         started = time.monotonic()
@@ -244,6 +299,8 @@ def register(cfg, known: RepositoryRecords, marker: MarkerRecord):
 
 
 class LocalRepository:
+    transport_kind = None  # a local disk has no network transport
+
     def __init__(self, cfg, commands, label):
         if not re.fullmatch(LABEL_PATTERN, label):
             raise ValueError('Label must be 1–16 ASCII letters/digits/dot/underscore/hyphen')
@@ -308,6 +365,10 @@ class LocalRepository:
     def restic(self, *args, **kwargs):
         return self.commands.run('restic', '--repo', self.path, '--password-file',
                                  self.cfg.password, '--no-cache', *args, **kwargs)
+
+    def redact(self, text):
+        """Text fit to print or record; a local repository passes no secret to restic."""
+        return text
 
     def check(self, subset=None):
         owned, verified = [], False
