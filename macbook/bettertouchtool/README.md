@@ -28,7 +28,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `style status` | Center play icon and status-text colors only. |
 | `status` | Playback-status output and compact row spacing. |
 | `notes` | Recent/Pinned Notes setup; `--labels-only --apply` limits edits to labels. |
-| `escape` | Escape dismissal while the three Media dropdowns are visible. |
+| `escape` | Escape dismissal while a Media dropdown is visible (Recent Notes, Pinned Notes, Performance Audio, Lighting Colour). |
 | `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line and Cmd-C copies it; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
 | `finder-paste` | Cmd-V in Finder saves a clipboard image (a ctrl-cmd-shift-4 screenshot) as a PNG in the current folder; copied files and text paste as before. `--apply` installs, `--disable` turns it off; see below. |
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |

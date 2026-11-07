@@ -7,8 +7,10 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import time
+from xml.parsers.expat import ExpatError
 import uuid
 
 from btt_common import ROOT, MEDIA, active_triggers, connect, current_database, records, backup_configuration
@@ -72,24 +74,59 @@ def preflight(database):
     return preset, definition(order), bool(existing)
 
 
-def disk_check(database, plan, preset, require_enabled=False):
+CONDITION_SCAFFOLD = {'$null', 'valueForKey:', 'visible_floating_menu_identifiers'}
+
+
+def condition_names(blob):
+    """The menu ids and names a saved visibility condition tests, in order; None when it is not a predicate archive."""
+    try:
+        objects = plistlib.loads(bytes(blob))['$objects']
+    except (ValueError, KeyError, IndexError, TypeError, ExpatError):
+        return None
+    return [value for value in objects if isinstance(value, str) and value not in CONDITION_SCAFFOLD]
+
+
+def stored_shortcut(database, preset):
+    """The saved shortcut row and its key/condition fields; (None, None) when absent."""
     row = records(database).get(SHORTCUT)
     if not row:
-        return False
-    wanted = plan['definition']
+        return None, None
     if row['parent'] is not None or row['ZBELONGSTOPRESET2'] != preset or row['ZGESTURETYPE'] != 0 or row['ZACTION'] != 281:
         raise RuntimeError('Escape shortcut was stored with the wrong scope/action.')
-    data = json.loads(row['ZACTIONDATA']) if row['ZACTIONDATA'] else {}
-    if any(data.get(k) != v for k, v in wanted['BTTAdditionalActionData'].items()):
-        raise RuntimeError('Escape script did not persist correctly.')
-    if not row['config'].get(PASSTHROUGH):
-        raise RuntimeError('Escape passthrough did not persist; shortcut will not be enabled.')
     with closing(connect(database)) as connection:
         fields = connection.execute('''SELECT ZKEYCODE,ZMODIFIERKEYS,ZTRIGGERONDOWN,ZACTIONCATEGORY,
             ZCONDITIONS,ZISENABLED,ZENABLEDNEW FROM ZBTTBASEENTITY WHERE ZUNIQUEIDENTIFIER=?''', (SHORTCUT,)).fetchone()
     if fields['ZKEYCODE'] != 53 or fields['ZMODIFIERKEYS'] != 0 or fields['ZTRIGGERONDOWN'] != 1 or \
             (fields['ZACTIONCATEGORY'] or 0) != 0 or not fields['ZCONDITIONS']:
         raise RuntimeError('Escape key/visibility condition did not persist; shortcut will not be enabled.')
+    return row, fields
+
+
+def script_current(row, plan):
+    data = json.loads(row['ZACTIONDATA']) if row['ZACTIONDATA'] else {}
+    return all(data.get(k) == v for k, v in plan['definition']['BTTAdditionalActionData'].items())
+
+
+def condition_current(fields, plan):
+    return condition_names(fields['ZCONDITIONS']) == plan['names']
+
+
+def needs_update(database, plan, preset):
+    """True when the saved shortcut is the right record but its script, condition or passthrough predates the plan."""
+    row, fields = stored_shortcut(database, preset)
+    return bool(row) and not (script_current(row, plan) and condition_current(fields, plan) and row['config'].get(PASSTHROUGH))
+
+
+def disk_check(database, plan, preset, require_enabled=False):
+    row, fields = stored_shortcut(database, preset)
+    if not row:
+        return False
+    if not script_current(row, plan):
+        raise RuntimeError('Escape script did not persist correctly.')
+    if not row['config'].get(PASSTHROUGH):
+        raise RuntimeError('Escape passthrough did not persist; shortcut will not be enabled.')
+    if not condition_current(fields, plan):
+        raise RuntimeError('Escape visibility condition did not persist correctly.')
     return not require_enabled or (fields['ZISENABLED'] == 1 and fields['ZENABLEDNEW'] == 1)
 
 
@@ -116,8 +153,8 @@ def install(inspect=False):
     if inspect:
         print(json.dumps({'escape_shortcut_saved': exists, 'menus': [name for _, name in MENUS]}))
         return
-    if exists:
-        disk_check(database, plan, preset)
+    # A stale definition (a menu added since it was installed) is upgraded in place; wrong scope/action raises here.
+    stale = exists and needs_update(database, plan, preset)
     path = backup_configuration(database, plan, prefix='btt-menu-escape-backup-')
     print('Verified BTT configuration snapshot for Escape: '+str(path.parent), flush=True)
     _, fresh, now_exists = preflight(database)
@@ -126,7 +163,7 @@ def install(inspect=False):
     # Truth-table test and disabled API/disk checks precede enabling any key hook.
     try:
         worker('condition-test', path)
-        worker('verify' if exists else 'create', path)
+        worker('update' if stale else 'verify' if exists else 'create', path)
         wait_saved(database, plan, preset)
         worker('enable', path)
         wait_saved(database, plan, preset, enabled=True)
