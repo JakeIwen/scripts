@@ -92,23 +92,29 @@ class EscapeTests(test_repair_rps.RPSDatabaseFixture, unittest.TestCase):
                                'condition-test',str(plan_path)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
 
-    def btt_rewrites(self, plan, calls):
-        """Patched worker: record the mode and make the saved row change the way BTT's would."""
+    def btt_rewrites(self, plan, calls, lagging=None):
+        """Patched worker: record the mode and make the saved row change the way BTT's would.
+
+        With a `lagging` list, the update is queued there (BTT's API answers before its SQLite save)."""
+        def save_update():
+            with sqlite3.connect(self.path) as c:
+                c.execute('UPDATE ZBTTBASEENTITY SET ZACTIONDATA=?,ZCONDITIONS=?,ZISENABLED=0,ZENABLEDNEW=0 WHERE Z_PK=30',
+                          (json.dumps(plan['definition']['BTTAdditionalActionData']).encode(),
+                           condition_archive(plan['names'])))
         def run(mode,path):
             calls.append(mode)
-            with sqlite3.connect(self.path) as c:
-                if mode=='update':
-                    c.execute('UPDATE ZBTTBASEENTITY SET ZACTIONDATA=?,ZCONDITIONS=?,ZISENABLED=0,ZENABLEDNEW=0 WHERE Z_PK=30',
-                              (json.dumps(plan['definition']['BTTAdditionalActionData']).encode(),
-                               condition_archive(plan['names'])))
-                elif mode=='enable':
+            if mode=='update':
+                if lagging is None:save_update()
+                else:lagging.append(save_update)
+            elif mode=='enable':
+                with sqlite3.connect(self.path) as c:
                     c.execute('UPDATE ZBTTBASEENTITY SET ZISENABLED=1,ZENABLEDNEW=1 WHERE Z_PK=30')
         return run
 
-    def install_with(self, plan, calls):
+    def install_with(self, plan, calls, lagging=None):
         with patch.object(escape,'current_database',return_value=self.path), \
              patch.object(escape,'backup_configuration',return_value=self.root/'plan.json'), \
-             patch.object(escape,'worker',side_effect=self.btt_rewrites(plan,calls)):
+             patch.object(escape,'worker',side_effect=self.btt_rewrites(plan,calls,lagging)):
             escape.install()
 
     def test_current_shortcut_is_verified_then_enabled(self):
@@ -144,6 +150,33 @@ class EscapeTests(test_repair_rps.RPSDatabaseFixture, unittest.TestCase):
              patch.object(escape,'worker',side_effect=run), patch.object(escape,'wait_saved',side_effect=RuntimeError('stale')):
             with self.assertRaisesRegex(RuntimeError,'disabled'):escape.install()
         self.assertEqual(calls,['condition-test','update','disable'])
+
+    def test_update_saved_after_the_api_answers_is_waited_for(self):
+        self.add_escape(plan=three_menu_plan(),enabled=1);_,plan,_=escape.preflight(self.path)
+        calls=[];lagging=[]
+        def sleep(seconds):  # the save lands while wait_saved sleeps after its first stale read
+            while lagging:lagging.pop()()
+        with patch.object(escape.time,'sleep',side_effect=sleep) as slept:
+            self.install_with(plan,calls,lagging)
+        self.assertEqual(calls,['condition-test','update','enable'])
+        self.assertTrue(slept.called)
+        self.assertTrue(escape.disk_check(self.path,plan,100,require_enabled=True))
+
+    def test_update_that_is_never_saved_fails_after_the_deadline_and_disables(self):
+        self.add_escape(plan=three_menu_plan());_,plan,_=escape.preflight(self.path)
+        calls=[];lagging=[]
+        clock=iter(range(0,300,3))
+        with patch.object(escape.time,'sleep'), patch.object(escape.time,'monotonic',side_effect=lambda:next(clock)):
+            with self.assertRaisesRegex(RuntimeError,'did not persist.*\n.*disabled'):
+                self.install_with(plan,calls,lagging)
+        self.assertEqual(calls,['condition-test','update','disable'])
+
+    def test_wrong_scope_after_the_update_fails_at_once(self):
+        self.add_escape(plan=three_menu_plan());_,plan,_=escape.preflight(self.path)
+        with sqlite3.connect(self.path) as c:c.execute('UPDATE ZBTTBASEENTITY SET ZACTION=248 WHERE Z_PK=30')
+        with patch.object(escape.time,'sleep') as slept:
+            with self.assertRaisesRegex(RuntimeError,'wrong scope/action'):escape.wait_saved(self.path,plan,100)
+        slept.assert_not_called()
 
     def test_stale_shortcut_with_wrong_scope_or_action_still_raises_without_the_worker(self):
         for override in ({'ZACTION':248},{'ZBELONGSTOPRESET2':101},{'ZGESTURETYPE':767}):
@@ -209,6 +242,7 @@ function run(argv){
         add_new_trigger:json=>{stored=JSON.parse(json);log.push({call:'add',payload:stored});},
         update_trigger:(uuid,options)=>{
             const payload=JSON.parse(options.json);log.push({call:'update',payload:payload});
+            if(state.ignoreUpdates)return;
             stored=Object.assign({},payload);
             if(!stored.BTTTriggerConditionsFormat)stored.BTTTriggerConditionsFormat=stored.BTTTriggerConditionsFormatReadOnly;
             delete stored.BTTTriggerConditionsFormatReadOnly;delete stored.BTTTriggerConditionsData;
@@ -230,8 +264,8 @@ class EscapeWorkerTests(unittest.TestCase):
         self.plan=escape.definition();(self.root/'plan.json').write_text(json.dumps(self.plan))
         (self.root/'harness.js').write_text(FAKE_BTT)
 
-    def run_worker(self, mode, trigger):
-        (self.root/'state.json').write_text(json.dumps({'trigger':trigger}))
+    def run_worker(self, mode, trigger, ignore_updates=False):
+        (self.root/'state.json').write_text(json.dumps({'trigger':trigger,'ignoreUpdates':ignore_updates}))
         result=subprocess.run(['/usr/bin/osascript','-l','JavaScript',str(self.root/'harness.js'),str(escape.WORKER),
                                str(self.root/'plan.json'),mode,str(self.root/'state.json')],
                               capture_output=True,text=True,timeout=60)
@@ -272,6 +306,13 @@ class EscapeWorkerTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 result=self.run_worker('update',self.stale(**changes))
                 self.assertIn(message,result['error']);self.assertEqual(result['log'],[])
+
+    def test_disable_passes_only_when_both_flags_read_back_zero(self):
+        enabled=dict(self.plan['definition'],BTTEnabled=1,BTTEnabled2=1)
+        result=self.run_worker('disable',enabled)
+        self.assertIsNone(result['error']);self.assertEqual(len(result['log']),1)
+        ignored=self.run_worker('disable',enabled,ignore_updates=True)
+        self.assertIn('confirmed disabled',ignored['error'])
 
     def test_enable_writes_back_the_saved_script_key_not_the_export_alias(self):
         result=self.run_worker('enable',dict(self.plan['definition']))

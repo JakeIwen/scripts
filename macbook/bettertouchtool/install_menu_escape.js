@@ -113,6 +113,9 @@ function run(argv) {
         btt.update_trigger(wanted.BTTUUID,{json:JSON.stringify(savableTrigger(current))});
         current=get();
         if(mode==='enable')escapeCheck(current,wanted,plan.names);
+        else if(Number(current.BTTEnabled)!==0 || (current.BTTEnabled2!==undefined && Number(current.BTTEnabled2)!==0)) {
+            throw new Error('Escape could not be confirmed disabled.'); // The installer reports this as unconfirmed.
+        }
     }
     return JSON.stringify(current);
 }

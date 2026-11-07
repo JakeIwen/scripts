@@ -117,16 +117,20 @@ def needs_update(database, plan, preset):
     return bool(row) and not (script_current(row, plan) and condition_current(fields, plan) and row['config'].get(PASSTHROUGH))
 
 
+class StaleDefinition(RuntimeError):
+    """The saved definition does not match the plan yet; BTT's SQLite save can lag its API, so wait_saved retries it."""
+
+
 def disk_check(database, plan, preset, require_enabled=False):
     row, fields = stored_shortcut(database, preset)
     if not row:
         return False
     if not script_current(row, plan):
-        raise RuntimeError('Escape script did not persist correctly.')
+        raise StaleDefinition('Escape script did not persist correctly.')
     if not row['config'].get(PASSTHROUGH):
-        raise RuntimeError('Escape passthrough did not persist; shortcut will not be enabled.')
+        raise StaleDefinition('Escape passthrough did not persist; shortcut will not be enabled.')
     if not condition_current(fields, plan):
-        raise RuntimeError('Escape visibility condition did not persist correctly.')
+        raise StaleDefinition('Escape visibility condition did not persist correctly.')
     return not require_enabled or (fields['ZISENABLED'] == 1 and fields['ZENABLEDNEW'] == 1)
 
 
@@ -140,9 +144,15 @@ def worker(mode, path):
 
 def wait_saved(database, plan, preset, enabled=False):
     deadline = time.monotonic()+5
-    while not disk_check(database, plan, preset, enabled):
+    while True:
+        try:
+            if disk_check(database, plan, preset, enabled):
+                return
+            failure = RuntimeError('Escape shortcut has not been saved to disk.')
+        except StaleDefinition as error:
+            failure = error  # wrong scope/action/key fields raise plain RuntimeError at once
         if time.monotonic() >= deadline:
-            raise RuntimeError('Escape shortcut has not been saved to disk.')
+            raise failure
         time.sleep(.1)
 
 
