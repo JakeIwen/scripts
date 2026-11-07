@@ -226,7 +226,10 @@ class OffsiteEndToEndTests(DeploymentFixture):
     def deployment(self):
         """A staged cohort whose fence and registry guard use the run's registry and legacy lock."""
         deployment = self.fixture()
-        self.env.update(self.f.registry.environment)
+        # The launcher's registry names its own (empty) deploy-state dir; the deployment's bootstrap
+        # readiness and journal live in the one fixture() seeded, so keep that one.
+        state = self.env['VANPI_BACKUP_DEPLOY_STATE_DIR']
+        self.env.update(self.f.registry.environment, VANPI_BACKUP_DEPLOY_STATE_DIR=state)
         return deployment
 
     def backup(self, *sources, remote=False, **extra):
