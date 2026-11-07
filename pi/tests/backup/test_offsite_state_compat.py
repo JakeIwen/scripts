@@ -18,7 +18,7 @@ import unittest
 
 from backup_locks import LockClass
 import backup_locks
-from pi.tests.backup.offsite_remote_fixtures import RemoteFixture
+from pi.tests.backup.offsite_remote_fixtures import RemoteFixture, SmbFixture
 from pi.tests.backup.offsite_state_writes import readers, writes
 
 REPO = Path(__file__).resolve().parents[3]
@@ -102,8 +102,8 @@ class StateCompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout
 
-    def fixture(self):
-        f = RemoteFixture()
+    def fixture(self, kind=RemoteFixture):
+        f = kind()
         self.addCleanup(f.close)
         result = f.prepare()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -169,6 +169,17 @@ finally:
         self.assertEqual({key: old[key] for key in ('status', 'dashboard', 'rates')}, legacy_sections(newest))
         self.assertEqual(set(old['repos']['repos']), {f.label})
         self.assertEqual(len(old['rates']['borg']['samples']), 2)
+
+    def test_v2_readers_parse_state_left_by_a_shared_folder_run(self):
+        # The newest readers' side of this direction is the test above: v2 state has no transport_kind.
+        f = self.fixture(SmbFixture)
+        for args in (('--remote',), ()):
+            result = f.run('backup', *args, '--label', f.label, '--only', 'borg')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            newest = readers(f)
+            self.assertEqual(newest['status']['transport_kind'], 'smb' if args else None)
+            old = json.loads(self.v2_python(V2_READER, str(f.cfg.state)))
+            self.assertEqual({key: old[key] for key in ('status', 'dashboard', 'rates')}, legacy_sections(newest))
 
 
 if __name__ == '__main__':

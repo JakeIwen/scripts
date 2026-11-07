@@ -1488,6 +1488,12 @@ The active design is represented by:
   it never contacts the receiver and never claims an online peer proves a mounted target.
   Both modules ship in the targeted cohort and frozen closure; provider deploy precedes dashboard.
   `install_restic.sh` pins restic 0.19.1. No schedule or automatic retry is installed.
+  `remote.json` has a `kind` (`rest` default, `smb`). `offsite_smb.py` owns the smb
+  runtime (repository string, rclone options and environment, obscure, version check,
+  reaper); `offsite_remote_init.py` owns `configure-smb` (it reads the password
+  holding no lock, then starts its frozen `configure-smb-run` worker) and `init-remote`.
+  `offsite_config.validate_transport` stays self-contained because the NAS installs it
+  alone, and defaults to REST only.
   Runbooks: `pi/docs/backup/OFFSITE.md` and `OFFSITE_NAS.md` beside it.
 - `synology/offsite/`: native DSM receiver and explicit installer. `mounts.py`
   selects exact mounted, marked USB filesystems; `runtime.py` pins the repository

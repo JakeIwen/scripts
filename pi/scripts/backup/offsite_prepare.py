@@ -5,8 +5,8 @@ from pathlib import Path
 import re
 import stat
 
-from offsite_config import LABEL_PATTERN, MARKER, REPO_PATH, SCHEMA, MarkerRecord
-from offsite_repository import durable_json, password, private_directory, records, validate_marker
+from offsite_config import LABEL_PATTERN, MARKER, REPO_PATH, SCHEMA, MarkerRecord, valid_priority
+from offsite_repository import durable_json, password, private_directory, records, register, validate_marker
 
 
 COLUMNS = 'NAME,TYPE,SIZE,MODEL,SERIAL,TRAN,RO,LABEL,PARTLABEL,FSTYPE,MOUNTPOINTS,MAJ:MIN'
@@ -118,7 +118,7 @@ def new_partition(repo, old_disk):
 
 
 def prepare(repo, device, serial, priority):
-    if type(priority) is not int or not 0 <= priority <= 2147483647:
+    if not valid_priority(priority):
         raise ValueError('Priority must be an integer from 0 to 2147483647')
     cfg, commands = repo.cfg, repo.commands
     disk = inspect_disk(repo, device, serial, show=True)
@@ -160,6 +160,5 @@ def prepare(repo, device, serial, priority):
     # The watcher needs only this nonsecret marker; repository contents stay private.
     (repo.mount / MARKER).chmod(0o644)
     commands.run('sync', '-f', repo.mount)
-    known['repos'][repo.label] = marker
-    durable_json(cfg.state / 'repos.json', known)
+    register(cfg, known, marker)
     print(json.dumps(marker, sort_keys=True), flush=True)

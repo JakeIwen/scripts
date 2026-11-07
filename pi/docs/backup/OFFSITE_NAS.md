@@ -109,6 +109,11 @@ restic argv; only controlled `RESTIC_REST_USERNAME`/`RESTIC_REST_PASSWORD` child
 environment values are allowed after all ambient `RESTIC_*` values are cleared.
 Ambient HTTP proxies are also removed for the remote transport.
 
+The Pi's `remote.json` also carries an optional `kind`: absent or `"rest"` for this
+receiver, `"smb"` for the shared-folder target described in
+[OFFSITE.md](OFFSITE.md#shared-folder-target-no-nas-admin). The receiver's own
+validation accepts only the REST shape and rejects `smb`.
+
 ### DSM boot and persistent stop
 
 Installed commands run **from the private installation root**. Replace `python3`

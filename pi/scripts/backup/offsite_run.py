@@ -31,7 +31,9 @@ class Backup:
                       'bytes_total': None, 'percent': None, 'rate': None, 'eta': None,
                       'started': time.time(), 'last_result': None,
                       'sources': {name: {'result': Result.NOT_RUN} for name in selected},
-                      'target_kind': TargetKind.REMOTE if self.remote else TargetKind.LOCAL}
+                      'target_kind': TargetKind.REMOTE if self.remote else TargetKind.LOCAL,
+                      # Known once the repository configures its transport (R11).
+                      'transport_kind': None}
         if self.remote and self.commands.remote_control is not None:
             self.state['control_revision'] = self.commands.remote_control.revision
 
@@ -47,10 +49,11 @@ class Backup:
             self.state['history_error'] = str(exc)
 
     def progress(self, text):
+        # Parse the raw line (redaction could corrupt JSON); print only redacted text.
         try:
             event = json.loads(text)
         except ValueError:
-            print(text, flush=True)
+            print(self.repo.redact(text), flush=True)
             return
         kind = event.get('message_type')
         if kind == 'summary':
@@ -67,7 +70,7 @@ class Backup:
             self.save()
         elif kind == 'error':
             self.errors.append(event)
-            print(text, flush=True)
+            print(self.repo.redact(text), flush=True)
 
     def phase(self, name, source, wait):
         """One source under its own locks: disk shared, then Borg's repository.
@@ -242,6 +245,7 @@ class Backup:
             self.commands.allowed()
             self.repo.mount_source(self.repo.label, on_mount=own_target)
             self.repo.verify()
+            self.state['transport_kind'] = self.repo.transport_kind
             self.target_verified = True
             self.run_sources()
             # A stop seen only during the last source's release still interrupts
@@ -260,6 +264,7 @@ class Backup:
             self.state.update(finished=time.time(), rate=None, eta=None)
             self.state['duration_seconds'] = self.state['finished'] - self.state['started']
             self.state['target_kind'] = TargetKind.REMOTE if self.remote else TargetKind.LOCAL
+            self.state['transport_kind'] = self.repo.transport_kind
             self.state['progress_measure'] = 'logical source bytes, not network throughput'
             self.notify()
             self.save()

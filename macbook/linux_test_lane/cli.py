@@ -144,6 +144,7 @@ def run_tests(pins, args, timings):
         # the active venv (restic via symlink), which the runner fingerprints.
         return lima.run_in_vm('env', f'OFFSITE_RESTIC={venv}/bin/offsite-restic',
                               f'OFFSITE_REST_SERVER={venv}/bin/offsite-rest-server',
+                              'OFFSITE_RCLONE=/usr/local/bin/rclone',
                               f'{venv}/bin/python', 'run_tests.py', *runner_arguments(args),
                               workdir=checkout, check=False).returncode
 

@@ -118,7 +118,7 @@ def restore_test(repo, receipt_id, include, target):
                                  '--include', include, '--verify', timeout=None)
             if not any(path.is_file() and not path.is_symlink() for path in target.rglob('*')):
                 raise RuntimeError('Restore test produced no regular file; check the include path')
-            return result
+            return repo.redact(result)  # printed by the CLI, never parsed
         finally:
             if label:
                 repo.commands.locks.close(LockClass.DISK, label)
