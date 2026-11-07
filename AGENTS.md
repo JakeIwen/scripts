@@ -604,6 +604,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   Resume commands start as `codexp`/`claudep` would: Codex under the
   `codex_autocontinue` wrapper when installed, and `env -u DISPLAY` on the Pi.
   State and the generated restore script live in `~/.local/state/llm-restore/`.
+  `--save [NAME]` writes the sessions open now as a named self-contained script
+  in `saved/` (`write_restore_script` with `--apply -`, so no boot snapshot is
+  consumed; kept indefinitely); `llmrestore NAME|PATH` runs it through `/bin/sh`
+  with the usual flags and `--saved [--json]` lists the sets.
 - `shared/sh/uncommitted_owners.py` implements `+id`: it attributes dirty Git
   paths to recent Claude Code and Codex tool calls, rolls subagents up to their
   resumable parent, names open sessions' terminal location (and, for Claude,

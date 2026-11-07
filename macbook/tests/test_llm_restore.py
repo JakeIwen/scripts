@@ -286,7 +286,7 @@ class State(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         for name, value in (("STATE", self.root), ("LOCK", self.root / "lock"),
-                            ("RESTORE_SCRIPT", self.root / "restore")):
+                            ("RESTORE_SCRIPT", self.root / "restore"), ("SAVED", self.root / "saved")):
             patcher = patch.object(lr, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -387,7 +387,7 @@ class State(unittest.TestCase):
             run()
             snap.assert_called_with(quiet=False)
 
-    def apply(self, items, opts, emit=True):
+    def apply(self, items, opts, emit=True, sources="prev"):
         stdin = "\n".join(json.dumps(lr.asdict(i)) for i in items) + "\n"
         out, err = io.StringIO(), io.StringIO()
         with patch.object(lr, "live_sessions", return_value=([session("claude", A)], [])), \
@@ -400,7 +400,7 @@ class State(unittest.TestCase):
                 patch.object(lr, "boot_id", return_value="now"), \
                 patch.object(lr, "open_terminals") as opened, \
                 patch("sys.stdin", io.StringIO(stdin)), patch("sys.stdout", out), patch("sys.stderr", err):
-            lr.apply("prev", opts, emit)
+            lr.apply(sources, opts, emit)
         return out.getvalue(), err.getvalue(), opened
 
     def test_the_report_names_each_session_and_its_claudepr_command(self):
@@ -464,6 +464,137 @@ class State(unittest.TestCase):
         out = subprocess.run(["/bin/sh", str(fake)], capture_output=True, text=True, check=True).stdout
         self.assertEqual([lr.PlanItem.from_json(json.loads(line)) for line in out.splitlines()], plan)
         self.assertIn("--apply prev,now", script.read_text())
+
+
+    def run_main(self, *argv, live=None):
+        out, err = io.StringIO(), io.StringIO()
+        live = [session("claude", A)] if live is None else live
+        with patch.object(lr, "live_sessions", return_value=(live, ["codex pid 1: unknown"])), \
+                patch.object(sys, "argv", ["llm_restore.py", *argv]), patch("sys.stdout", out), \
+                patch("sys.stderr", err), patch.object(lr.os, "execv") as execv:
+            try:
+                code = lr.main()
+            except SystemExit as exit_:
+                code = exit_.code
+        return code, out.getvalue(), err.getvalue(), execv
+
+    def saved_items(self, name):
+        text = (self.root / f"saved/{name}.sh").read_text()
+        return [lr.PlanItem.from_json(json.loads(line)) for line in text.splitlines() if line.startswith("{")]
+
+    def test_save_writes_a_script_of_the_open_sessions_that_takes_nothing_from_boots(self):
+        code, out, _, _ = self.run_main("--save", "focus.sh")
+        script = self.root / "saved/focus.sh"
+        self.assertEqual(code, 0)
+        self.assertIn(f"Saved 1 open session(s) to {script}", out)
+        self.assertIn("warning: codex pid 1: unknown", out)
+        self.assertEqual((script.stat().st_mode & 0o777, script.parent.stat().st_mode & 0o777), (0o700, 0o700))
+        text = script.read_text()
+        self.assertRegex(text, r"exec /usr/bin/python3 -I -B \S+ --apply - \"\$@\" <<'SESSIONS'")
+        self.assertIn("`llmrestore --save focus`", text)
+        self.assertIn("`llmrestore focus`", text)
+        fake = self.root / "fake"
+        fake.write_text(re.sub(r"^exec .*<<'SESSIONS'$", "exec /bin/cat <<'SESSIONS'", text, flags=re.M))
+        out = subprocess.run(["/bin/sh", str(fake)], capture_output=True, text=True, check=True).stdout
+        items = [lr.PlanItem.from_json(json.loads(line)) for line in out.splitlines()]
+        self.assertEqual([(i.session.key, i.closed_for) for i in items], [("claude:" + A, 0.0)])
+        self.assertGreater(items[0].session.last_seen, 0)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name != "fake"), ["lock", "saved"])
+
+    def test_save_without_a_name_uses_a_timestamp(self):
+        with patch.object(lr.time, "strftime", side_effect=lambda f, *_: "2026-11-06-2037" if f == "%Y-%m-%d-%H%M" else "now"):
+            self.assertEqual(self.run_main("--save")[0], 0)
+        self.assertTrue((self.root / "saved/2026-11-06-2037.sh").exists())
+
+    def test_save_rejects_names_that_are_not_plain_file_names(self):
+        for bad in ("a/b", "..", ".", ".sh", "x\nrm -rf", "/etc/x"):
+            with self.subTest(name=bad):
+                code, _, err, _ = self.run_main("--save", bad)
+                self.assertEqual(code, 2)
+                self.assertIn("plain file name", err)
+        self.assertFalse((self.root / "saved").exists())
+
+    def test_save_refuses_to_overwrite_without_force(self):
+        self.run_main("--save", "one")
+        code, _, _, _ = self.run_main("--save", "one", live=[session("claude", B)])
+        self.assertEqual(code, f"saved set 'one' already exists ({self.root / 'saved/one.sh'}); --force overwrites it")
+        self.assertEqual([i.session.id for i in self.saved_items("one")], [A])
+        self.assertEqual(self.run_main("--save", "one", "--force", live=[session("claude", B)])[0], 0)
+        self.assertEqual([i.session.id for i in self.saved_items("one")], [B])
+
+    def test_save_does_not_mix_with_other_modes(self):
+        for extra in (["--dry-run"], ["--snapshot"], ["--pi"], ["--saved"], ["--list"], ["--cron"], ["one"]):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.run_main("--save", "x", *extra)[0], 2)
+        self.assertFalse((self.root / "saved").exists())
+
+    def test_a_set_name_or_path_restores_through_sh_with_the_restore_flags(self):
+        self.run_main("--save", "one")
+        elsewhere = self.root / "elsewhere.sh"
+        elsewhere.write_text("#!/bin/sh\n")
+        # A bare name never resolves to a same-named file in the current directory
+        # (that would run checkout content through sh); a path needs a `/`.
+        (self.root / "one").write_text("#!/bin/sh\necho LOCAL\n")
+        here = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, here)
+        for arg, path in (("one", self.root / "saved/one.sh"), ("one.sh", self.root / "saved/one.sh"),
+                          (str(elsewhere), elsewhere), ("./one", Path("./one"))):
+            with self.subTest(arg=arg):
+                execv = self.run_main(arg, "--dry-run", "--force")[3]
+                execv.assert_called_once_with("/bin/sh", ["/bin/sh", str(path), "--dry-run", "--force", "--minutes", "30"])
+
+    def test_a_missing_set_is_a_usage_error_that_lists_the_saved_names(self):
+        code, _, err, execv = self.run_main("nope")
+        self.assertEqual(code, 2)
+        self.assertIn("no saved set 'nope'; saved: none", err)
+        self.run_main("--save", "one")
+        self.run_main("--save", "two")
+        code, _, err, execv = self.run_main("nope")
+        self.assertRegex(err, r"saved: (one, two|two, one)\n")
+        execv.assert_not_called()
+
+    def test_a_set_does_not_mix_with_other_modes(self):
+        self.run_main("--save", "one")
+        for extra in (["--pi"], ["--snapshot"], ["--cron"], ["--list"], ["--saved"], ["--save", "y"]):
+            with self.subTest(extra=extra):
+                code, _, _, execv = self.run_main("one", *extra)
+                self.assertEqual(code, 2)
+                execv.assert_not_called()
+
+    def test_saved_lists_sets_newest_first_as_text_and_json(self):
+        self.assertIn("No saved sets", self.run_main("--saved")[1])
+        self.assertEqual(json.loads(self.run_main("--saved", "--json")[1]), [])
+        self.run_main("--save", "old", live=[session("claude", A), session("claude", B)])
+        self.run_main("--save", "new", live=[])
+        os.utime(self.root / "saved/old.sh", (1000.0, 1000.0))
+        lines = self.run_main("--saved")[1].splitlines()
+        self.assertEqual([line.split()[0] for line in lines], ["new", "old"])
+        self.assertIn(f"{lr._clock(1000.0)}  2 session(s)", lines[1])
+        sets = json.loads(self.run_main("--saved", "--json")[1])
+        self.assertEqual([(s["name"], s["sessions"]) for s in sets], [("new", 0), ("old", 2)])
+        self.assertEqual((sets[1]["path"], sets[1]["saved_at"]), (str(self.root / "saved/old.sh"), 1000.0))
+        self.assertEqual(self.run_main("--json")[0], 2)
+
+    def test_the_saved_script_skips_open_sessions_and_would_open_the_rest(self):
+        self.run_main("--save", "pair", live=[session("claude", A), session("claude", B)])
+        # The heredoc on stdin, as the script's exec line feeds it; A is live in self.apply.
+        out, err, opened = self.apply(self.saved_items("pair"), lr.RestoreOptions(dry_run=True), emit=False)
+        self.assertRegex(out, rf"skip  claude {A}: already open")
+        self.assertRegex(out, rf"would open  claude {B}")
+        self.assertNotIn(A + "  (", out.replace("skip", ""))
+        opened.assert_not_called()
+
+    def test_the_saved_script_opens_through_apply_dash_without_consuming_a_boot(self):
+        self.run_main("--save", "pair", live=[session("claude", A), session("claude", B)])
+        (self.root / "consumed.json").write_text('["older"]')
+        script = (self.root / "saved/pair.sh").read_text()
+        self.assertIn("--apply - ", script)
+        out, _, opened = self.apply(self.saved_items("pair"), lr.RestoreOptions(), emit=False, sources="-")
+        self.assertRegex(out, rf"open  claude {B}")
+        opened.assert_called_once()
+        self.assertEqual([s.id for s in opened.call_args.args[0]], [B])
+        self.assertEqual(json.loads((self.root / "consumed.json").read_text()), ["older"])
 
 
 if __name__ == "__main__":

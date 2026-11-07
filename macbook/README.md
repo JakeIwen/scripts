@@ -159,6 +159,10 @@ stdout and stderr to the ignored `log/` directory.
   open Claude Code and Codex sessions for `llmrestore`, logging errors to
   `~/.local/state/llm-restore/cron.log`. `llmrestore --cron off` pauses it with
   a flag file, so reinstalling this crontab never turns it back on or off.
+  `llmrestore --save [NAME]` instead saves the sessions open now as a named,
+  never-pruned script in `~/.local/state/llm-restore/saved/` (close most of
+  them to focus on one); `llmrestore NAME` reopens that set and `llmrestore
+  --saved` lists them.
 
 ## Deferred one-off jobs
 
