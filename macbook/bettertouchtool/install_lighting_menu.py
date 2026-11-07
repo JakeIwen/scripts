@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Preview or install Media > Lighting: a 💡 submenu with Solder SW and a 🎨 colour panel.
+"""Preview or install Media > Lighting: a 💡 submenu with Solder SW and a 🎨 colour panel
+for the WiZ bulbs and the LED floods.
 
 The submenu holds a blind Solder SW toggle and a 🎨 button that opens the
 "Lighting Colour" dropdown, a top-level floating menu whose web view is the
@@ -39,14 +40,18 @@ def uid(name: str) -> str:
 SUBMENU, BACK, SOLDER, COLOUR, PANEL, PANEL_VIEW = (uid(name) for name in (
     "submenu", "back", "solder", "colour", "colour-menu", "colour-view"))
 PANEL_IDENTIFIER = "media-lighting-colour-dropdown"
-PANEL_WIDTH, PANEL_HEIGHT = 300, 380
-# The WiZ bulbs the colour panel controls, grouped by the dashboard's rooms.
+PANEL_WIDTH, PANEL_HEIGHT = 300, 430  # tall enough for every room's chip row
+# The lights the colour panel controls: the WiZ bulbs by the dashboard's rooms, and the
+# LED floods as one group, which the dashboard drives through the same hue, white and
+# brightness endpoints. A flood reads as unavailable while its power switch is off.
 PANEL_LIGHTS = (
     {"entity_id": "light.wiz_front_driver", "label": "Driver", "group_label": "Cab"},
     {"entity_id": "light.wiz_front_passenger", "label": "Passenger", "group_label": "Cab"},
     {"entity_id": "light.wiz_dresser", "label": "Dresser", "group_label": "Rear"},
     {"entity_id": "light.wiz_werkbench", "label": "Werkbench", "group_label": "Rear"},
     {"entity_id": "light.wiz_kitchen", "label": "Kitchen", "group_label": "Kitchen"},
+    {"entity_id": "light.solder_led", "label": "Solder LED", "group_label": "Floods"},
+    {"entity_id": "light.ext_led", "label": "Exterior LED", "group_label": "Floods"},
 )
 
 

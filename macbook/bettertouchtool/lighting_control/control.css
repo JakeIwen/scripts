@@ -15,7 +15,7 @@ button { border: 1px solid transparent; border-radius: 7px; padding: 4px 9px; ba
 button:disabled { opacity: .38; cursor: default; }
 button[aria-pressed="true"] { border-color: var(--selected); background: #3a465d; }
 :focus-visible { outline: 2px solid var(--selected); outline-offset: 2px; }
-.light-control { height: 100vh; min-height: 350px; padding: 8px; display: grid; grid-template-rows: minmax(36px, 76px) 28px minmax(194px, 1fr) 39px 27px; gap: 4px; background: var(--surface); overflow: hidden; }
+.light-control { height: 100vh; min-height: 350px; padding: 8px; display: grid; grid-template-rows: minmax(36px, 110px) 28px minmax(194px, 1fr) 39px 27px; gap: 4px; background: var(--surface); overflow: hidden; }
 .light-groups { overflow-y: auto; scrollbar-width: thin; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; padding: 2px; }
 .light-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .group-label { color: var(--muted); font-size: 10px; margin-right: 1px; }

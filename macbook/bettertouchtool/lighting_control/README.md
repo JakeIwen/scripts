@@ -40,7 +40,7 @@ From the repository root:
 ```
 
 Preview uses only an in-page fake with 450 ms latency; it never runs a shell or
-contacts the dashboard. The controls fit a 300 × 380 Web View. Room chips scroll
+contacts the dashboard. The controls fit a 300 × 430 Web View. Room chips scroll
 when more lights are configured. Arrow keys adjust a focused colour/white picker;
 left/right changes hue, up/down changes saturation, and Home/End selects range
 endpoints. Keyboard writes happen on key release. Brightness uses a native slider.
