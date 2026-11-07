@@ -12,12 +12,14 @@ import time
 import uuid
 
 from btt_common import ROOT, MEDIA, active_triggers, connect, current_database, records, backup_configuration
+from install_lighting_menu import PANEL as LIGHTING_PANEL, PANEL_IDENTIFIER as LIGHTING_PANEL_IDENTIFIER
 
 SHORTCUT = str(uuid.uuid5(uuid.UUID('bd9b2717-342e-482e-b7a4-9abdc4177937'), 'media-dropdown-escape')).upper()
 MENUS = [
     ('DAFF4296-EE87-5CCC-A682-50B2865D6C5A', 'media-notes-recent-dropdown'),
     ('1DF07B14-A4BB-5533-8679-BE46692E70AD', 'media-notes-pinned-dropdown'),
     ('C697E709-678E-56B9-9C17-4464F8E92145', 'performance-audio-tools-dropdown'),
+    (LIGHTING_PANEL, LIGHTING_PANEL_IDENTIFIER),  # Media > Lighting > 🎨, the colour panel
 ]
 WORKER = Path(__file__).with_suffix('.js')
 PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
@@ -135,7 +137,8 @@ def install(inspect=False):
         except (RuntimeError, subprocess.SubprocessError) as disable_error:
             disabled = 'Could not confirm Escape is disabled: '+str(disable_error)
         raise RuntimeError(str(error)+'\n'+disabled+'\nEscape activation failed; backup: '+str(path.parent)) from error
-    print('Verified saved Escape dismissal for Recent Notes, Pinned Notes and Performance Audio. No sync executed.')
+    print('Verified saved Escape dismissal for Recent Notes, Pinned Notes, Performance Audio and Lighting Colour. '
+          'No sync executed.')
 
 
 if __name__ == '__main__':
