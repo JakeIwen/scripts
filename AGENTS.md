@@ -711,6 +711,23 @@ compare it with this checkout. Deployed files may differ from the repository.
   skips one Stop while background work continues, retaining the armed flag.
   Mac hooks run from the checkout; deploy the standalone script flat to `/home/pi/scripts/`
   before installing Pi hooks. CLI tests: `shared/tests/test_notify_on_finish.py`.
+- `shared/sh/branch_check.py --hook` is the Claude/Codex SessionStart hook
+  (Mac and Pi) behind the globals' "Branch hygiene" rule: when the session's
+  main checkout is off its default branch (`origin/HEAD`, else `main`, else
+  `master`) it adds one line of context naming the branch, its ahead/behind
+  counts and last commit, and what to do (find the owner with `+id`, merge
+  and delete when its sessions are closed, ask an open one, never add
+  commits); `--codex` words the open-session step for Codex, which has no
+  inbox. It also lists linked worktrees whose branches hold unmerged
+  commits. A repo whose origin (else every remote) is outside
+  `github.com/JakeIwen` gets the fact only, with "leave the branch to its
+  owner"; no remote counts as Jacob's. Branch names, subjects and paths are
+  sanitized to one bounded, JSON-quoted printable line and labelled as data.
+  Every git call shares one 3 s deadline (the hook's timeout is 5 s) and a
+  timed-out call's process group is killed. Quiet outside a repo, on an
+  unborn HEAD, inside a linked worktree, and on any unexpected git failure
+  or spent budget. Stdlib, Python 3.9+; the Pi copy sits flat in
+  `/home/pi/scripts/`. Tests: `shared/tests/test_branch_check.py`.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
