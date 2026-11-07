@@ -14,8 +14,11 @@ import time
 
 from backup_locks import LockClass
 from offsite_config import GUARD_SECONDS, LABEL_PATTERN, MARKER, REPO_ID_PATTERN
-from offsite_config import REPO_PATH, SCHEMA, STOP_SECONDS, RepositoryRecords, validate_marker
+from offsite_config import REPO_PATH, SCHEMA, STOP_SECONDS, MarkerRecord, RepositoryRecords, validate_marker
 from time_machine_store import atomic_json
+
+# The Pi's registry of known repositories (label -> MarkerRecord), root-only.
+REPOSITORIES = 'repos.json'
 
 
 class Interrupted(RuntimeError):
@@ -212,7 +215,7 @@ def password(cfg, create=False):
 
 
 def records(cfg, optional=False) -> RepositoryRecords:
-    path = cfg.state / 'repos.json'
+    path = cfg.state / REPOSITORIES
     if optional and not path.exists() and not path.is_symlink():
         return {'schema': SCHEMA, 'repos': {}}
     info = path.lstat()
@@ -225,6 +228,19 @@ def records(cfg, optional=False) -> RepositoryRecords:
     for label, marker in value['repos'].items():
         validate_marker(marker, label)
     return value
+
+
+def register(cfg, known: RepositoryRecords, marker: MarkerRecord):
+    """Add a new label's marker to the records read as `known`, keeping every other entry.
+
+    Callers hold job-offsite (prepare-disk also the exclusive legacy lock), so no
+    other writer can change repos.json between their read and this write.
+    """
+    validate_marker(marker, marker.get('label'))
+    if marker['label'] in known['repos']:
+        raise RuntimeError(f"{marker['label']} is already a known repository; nothing registered")
+    known['repos'][marker['label']] = marker
+    durable_json(cfg.state / REPOSITORIES, known)
 
 
 class LocalRepository:

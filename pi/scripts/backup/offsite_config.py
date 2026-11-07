@@ -30,9 +30,14 @@ def validate_marker(marker, label):
             not isinstance(label, str) or marker.get('label') != label or not re.fullmatch(LABEL_PATTERN, label) or
             marker.get('repo_path') != REPO_PATH or not isinstance(marker.get('repo_id'), str) or
             not re.fullmatch(REPO_ID_PATTERN, marker['repo_id']) or
-            type(marker.get('priority')) is not int or not 0 <= marker['priority'] <= 2147483647 or
+            not valid_priority(marker.get('priority')) or
             not isinstance(marker.get('created'), str) or not marker['created']):
         raise RuntimeError('Invalid offsite marker')
+
+
+def valid_priority(value):
+    """A repository's priority: a plain int (never a bool) from 0 to 2147483647."""
+    return type(value) is int and 0 <= value <= 2147483647
 
 
 MARKER = '.vanpi-offsite'
