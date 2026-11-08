@@ -14,10 +14,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import resource
 import shutil
 import subprocess
 import sys
 import tempfile
+import unittest
 
 from backup_admission import HeldDescriptor
 import backup_locks
@@ -29,6 +31,8 @@ REPO_SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
 # Command doubles skip site (-S): none needs it, and a test starts dozens of them.
 FAKE_SHEBANG = '#!' + sys.executable + ' -S\n'
 READ_ONLY = ('status', 'dashboard', 'rates')
+# offsite_backup.sh's remote_command: these, and backup/check with --remote, snapshot with --remote.
+REMOTE_COMMANDS = ('init-remote', 'receipts', 'restore-test', 'resume-run')
 PROLOGUE = '''
 import os, sys
 from contextlib import nullcontext
@@ -43,8 +47,14 @@ for pair in filter(None, os.environ.pop('OFFSITE_FIXTURE_FDS', '').split(',')):
 context = patch('backup_locks.require_held') if sys.platform != 'linux' else nullcontext()
 '''
 SNAPSHOT_BOOTSTRAP = PROLOGUE + '''
+import json
+from pathlib import Path
 import offsite_snapshot
-with context:
+fixture = Path(os.environ.get('OFFSITE_FIXTURE', '/nonexistent'))
+installed = json.loads(fixture.read_text()).get('installed_rclone') if fixture.is_file() else None
+# Shared-folder fixtures freeze the rclone double instead of /usr/local/bin/rclone.
+rclone = patch('offsite_snapshot.INSTALLED_RCLONE', installed) if installed else nullcontext()
+with context, rclone:
     raise SystemExit(offsite_snapshot.main(sys.argv[1:]))
 '''
 BOOTSTRAP = PROLOGUE + '''
@@ -74,10 +84,61 @@ history_write=(patch('offsite_dashboard.durable_json', side_effect=OSError('fixt
 # The OOM fallback policy is a constant; tests flip it here rather than in the source.
 excluded=(patch('offsite_locks.EXCLUDED_LOCAL_JOBS', tuple(fixture['excluded_local_jobs']))
           if 'excluded_local_jobs' in fixture else nullcontext())
+# configure-smb-run checks the installed rclone that later runs freeze; here, the double.
+installed=(patch('offsite_remote_init.INSTALLED_RCLONE', fixture['installed_rclone'])
+           if fixture.get('installed_rclone') else nullcontext())
+# Device commands model mounts with real directories on the fixture filesystem.
+# Substitute only the /dev-node probe; the pinned mount's fstat remains real.
+block_device=patch('offsite_repository.block_device_number', return_value=cfg.mount_root.stat().st_dev)
 with context:
-    with clock, history_write, excluded:
+    with clock, history_write, excluded, installed, block_device:
         raise SystemExit(main(sys.argv[1:], config=cfg))
 '''
+
+
+# The code under test lowers RLIMIT_CORE for good (hard limit too) before it reads a credential, which
+# would also lower the test process's own and leave later probes nothing to start from. In-process
+# calls are therefore no-ops here; forked children (the preexec_fn path) and fresh interpreters still
+# get the real call, and tests that patch resource.setrlimit replace this wrapper while they run.
+_TEST_PID = os.getpid()
+_real_setrlimit = resource.setrlimit
+
+
+def _setrlimit_sparing_the_test_process(which, limits):
+    if which != resource.RLIMIT_CORE or os.getpid() != _TEST_PID:
+        _real_setrlimit(which, limits)
+
+
+resource.setrlimit = _setrlimit_sparing_the_test_process
+# A fresh process whose RLIMIT_CORE starts nonzero runs `body` (with `cfg` in scope) and reports
+# [before, after]. Patching setrlimit in-process would not show a credential reader that never calls it.
+CORE_PROBE = '''
+import json, os, resource
+from pathlib import Path
+from offsite_config import Config
+v = json.loads(Path(os.environ['OFFSITE_CONFIG']).read_text())
+for k in ('state', 'password', 'mount_root', 'by_id', 'drain', 'ignition', 'borg'):
+    v[k] = Path(v[k])
+v['code_root'] = None
+cfg = Config(**v)
+hard = resource.getrlimit(resource.RLIMIT_CORE)[1]
+resource.setrlimit(resource.RLIMIT_CORE, (hard, hard))
+before = resource.getrlimit(resource.RLIMIT_CORE)
+'''
+CORE_REPORT = "\nprint(json.dumps([before, resource.getrlimit(resource.RLIMIT_CORE)]))\n"
+
+
+def core_limits_after(config_file, body, env=None):
+    """(before, after) RLIMIT_CORE of a fresh process around `body`; skips where core dumps cannot be enabled."""
+    result = subprocess.run([sys.executable, '-B', '-c', CORE_PROBE + body + CORE_REPORT],
+                            env={**os.environ, 'OFFSITE_CONFIG': str(config_file), **(env or {})},
+                            text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        raise AssertionError('core probe failed: ' + result.stderr)
+    before, after = (tuple(value) for value in json.loads(result.stdout.splitlines()[-1]))
+    if before[0] == 0:
+        raise unittest.SkipTest('RLIMIT_CORE hard limit is already 0 here, so the probe cannot start nonzero')
+    return before, after
 
 
 @functools.cache
@@ -188,19 +249,20 @@ class OffsiteFixture:
     def reload(self):
         self.state = json.loads(self.fixture.read_text())
 
-    def snapshot(self, live=None):
+    def snapshot(self, live=None, remote=False):
         """Run the real snapshot CLI from a live tree while holding job-offsite, as the launcher does."""
         live = self.live if live is None else live
         environment = {**self.env, 'PYTHONPATH': str(live / 'backup'), 'OFFSITE_STATE_ROOT': str(self.cfg.state),
                        'VANPI_BACKUP_JOB_LOCK_FD': str(self.job_fd)}
-        result = subprocess.run([sys.executable, '-B', '-c', SNAPSHOT_BOOTSTRAP, 'create'], cwd=self.root,
+        request = ['create', '--remote'] if remote else ['create']
+        result = subprocess.run([sys.executable, '-B', '-c', SNAPSHOT_BOOTSTRAP, *request], cwd=self.root,
                                 env=environment, pass_fds=(self.job_fd,), text=True, capture_output=True,
                                 timeout=self.command_timeout)
         if result.returncode:
             raise AssertionError('snapshot create failed: ' + result.stderr)
         return Path(result.stdout.strip())
 
-    def start(self, *args, code=BOOTSTRAP, env=None, extra_fds=()):
+    def start(self, *args, code=BOOTSTRAP, env=None, extra_fds=(), stdin=None):
         """Start one CLI command; env entries override the production-like metadata."""
         environment = dict(self.env)
         if args[0] in (*READ_ONLY, 'pause', 'resume'):
@@ -209,7 +271,8 @@ class OffsiteFixture:
             descriptors = (self.fd,)
             environment['OFFSITE_FIXTURE_FDS'] = f'{self.fd}:9'
         else:
-            snapshot = self.snapshot()
+            snapshot = self.snapshot(remote=args[0] in REMOTE_COMMANDS
+                                     or (args[0] in ('backup', 'check') and '--remote' in args[1:]))
             descriptors = (self.job_fd,)
             # Only the snapshot is importable, so a closure miss fails the run.
             environment.update(OFFSITE_CODE_ROOT=str(snapshot), PYTHONPATH=str(snapshot / 'backup'),
@@ -218,12 +281,13 @@ class OffsiteFixture:
         environment.update(env or {})
         return subprocess.Popen([sys.executable, '-B', '-c', code, *args], cwd=self.root,
                                 env=environment, pass_fds=(*descriptors, *extra_fds), text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    def run(self, *args, **kwargs):
-        process = self.start(*args, **kwargs)
+    def run(self, *args, input_text=None, **kwargs):
+        """Run one CLI command to completion; input_text, when given, is its whole stdin."""
+        process = self.start(*args, stdin=subprocess.PIPE if input_text is not None else None, **kwargs)
         try:
-            out, err = process.communicate(timeout=self.command_timeout)
+            out, err = process.communicate(input_text, timeout=self.command_timeout)
         except BaseException:
             process.terminate()
             try:

@@ -5,7 +5,8 @@ offsite_backup.sh runs `create` while it holds job-offsite exclusively and the
 legacy lock shared, so no targeted installer publishes during the copy. The run
 then executes only from the copy, which lets installers ship new code during a
 days-long seed. Deletion walks by descriptor, never follows a symlink and never
-crosses a mount.
+crosses a mount. `create --remote` marks a command that reaches a remote target;
+only such a run of a kind smb transport also freezes rclone.
 """
 import hashlib
 import os
@@ -18,9 +19,12 @@ import time
 
 import backup_admission
 import backup_locks as locks
-from offsite_config import (CODE_DIRECTORY, FROZEN_IMPLEMENTATION, JOB_KIND, MANIFEST, RESTIC_INSTALLER,
-                            RUN_ID_PATTERN, SCHEMA, SNAPSHOT_RESTIC, state_root)
+from offsite_config import (CODE_DIRECTORY, FROZEN_IMPLEMENTATION, INSTALLED_RCLONE, JOB_KIND, MANIFEST,
+                            RCLONE_VERSION, REMOTE_CONFIG, RESTIC_INSTALLER, RUN_ID_PATTERN, SCHEMA,
+                            SNAPSHOT_RCLONE, SNAPSHOT_RESTIC, TransportKind, state_root)
+from offsite_remote import transport_config
 from offsite_repository import durable_json, private_directory, sync_directory
+from offsite_smb import check_rclone_version
 
 CHUNK = 1024 * 1024
 PIN_FIELDS = {'version': r'[0-9]+\.[0-9]+\.[0-9]+', 'binary_sha': r'[0-9a-f]{64}', 'target': r'/[A-Za-z0-9._/-]+'}
@@ -167,7 +171,33 @@ def remove(state, root):
     remove_children(root.parent, [root.name])
 
 
-def copy_closure(source, run_root):
+def needs_rclone(state, remote):
+    """True only for a remote command (the launcher's --remote) while remote.json is kind smb.
+
+    Local commands, seeds above all, never run rclone even when the record is smb,
+    nor do REST runs; a missing or unusable record needs none either, since an smb
+    run then fails at configure (its frozen rclone is absent).
+    """
+    if not remote:
+        return False
+    try:
+        return transport_config(state / REMOTE_CONFIG).get('kind') == TransportKind.SMB
+    except (OSError, ValueError):
+        return False
+
+
+def copy_rclone(run_root):
+    """Freeze the installed rclone for a shared-folder run, as restic is frozen for every run."""
+    source, target = Path(INSTALLED_RCLONE), run_root / SNAPSHOT_RCLONE
+    private_subdirectory(target.parent)
+    digest = copy_file(source, target)
+    if file_hash(target) != digest:
+        raise RuntimeError('The code snapshot\'s rclone differs from the bytes copied')
+    check_rclone_version(str(target))
+    return {'path': str(source), 'sha256': digest, 'version': RCLONE_VERSION}
+
+
+def copy_closure(source, run_root, rclone=False):
     files = {}
     for relative in FROZEN_IMPLEMENTATION:
         parent = run_root
@@ -186,11 +216,17 @@ def copy_closure(source, run_root):
             raise RuntimeError(f'{relative} changed while the code snapshot was taken; retry after the sync')
     if file_hash(Path(pin['target'])) != restic:
         raise RuntimeError('Installed restic changed while the code snapshot was taken')
-    return files, {'path': pin['target'], 'sha256': restic, 'version': pin['version']}
+    frozen = copy_rclone(run_root) if rclone else None
+    if frozen and file_hash(Path(frozen['path'])) != frozen['sha256']:
+        raise RuntimeError('Installed rclone changed while the code snapshot was taken')
+    return files, {'path': pin['target'], 'sha256': restic, 'version': pin['version']}, frozen
 
 
-def create(job_fd, state=None, source=None):
-    """Garbage-collect stale snapshots, copy and verify the closure; returns the run root."""
+def create(job_fd, state=None, source=None, remote=False):
+    """Garbage-collect stale snapshots, copy and verify the closure; returns the run root.
+
+    remote: the run reaches a remote target, so a kind smb transport freezes rclone too.
+    """
     backup_admission.validated_descriptor(job_fd, locks.lock_path(locks.LockClass.JOB, JOB_KIND), exclusive=True)
     state = state_root() if state is None else state
     source = source_root() if source is None else source
@@ -203,11 +239,11 @@ def create(job_fd, state=None, source=None):
     run_root.mkdir(mode=0o700)
     try:
         run_root.chmod(0o700)
-        files, restic = copy_closure(source, run_root)
+        files, restic, rclone = copy_closure(source, run_root, rclone=needs_rclone(state, remote))
         # The backup cohort records no deployed revision on the Pi yet.
         durable_json(run_root / MANIFEST, {'schema': SCHEMA, 'run_id': run_id, 'created': time.time(),
                                            'source_root': str(source), 'files': files, 'restic': restic,
-                                           'deployed_revision': None})
+                                           'rclone': rclone, 'deployed_revision': None})
         for directory in sorted({(run_root / name).parent for name in (*files, SNAPSHOT_RESTIC)}, reverse=True):
             sync_directory(directory)
         sync_directory(code)
@@ -222,14 +258,14 @@ def create(job_fd, state=None, source=None):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
-    if args != ['create']:
-        print('usage: offsite_snapshot.py create', file=sys.stderr)
+    if args not in (['create'], ['create', '--remote']):
+        print('usage: offsite_snapshot.py create [--remote]', file=sys.stderr)
         return 2
     try:
         environment = dict(os.environ)
         job_fd = backup_admission.descriptor_number(
             backup_admission.required_value(environment, 'VANPI_BACKUP_JOB_LOCK_FD'))
-        print(create(job_fd), flush=True)
+        print(create(job_fd, remote=args[1:] == ['--remote']), flush=True)
         return 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(f'offsite snapshot: {exc}', file=sys.stderr, flush=True)

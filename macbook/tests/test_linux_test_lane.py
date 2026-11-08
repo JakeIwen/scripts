@@ -323,6 +323,7 @@ class CliTests(unittest.TestCase):
         run.assert_called_once_with(
             'env', f'OFFSITE_RESTIC={venv}/bin/offsite-restic',
             f'OFFSITE_REST_SERVER={venv}/bin/offsite-rest-server',
+            'OFFSITE_RCLONE=/usr/local/bin/rclone',
             f'{venv}/bin/python', 'run_tests.py', '--path', 'pi/tests/backup',
             workdir=checkout, check=False)
 

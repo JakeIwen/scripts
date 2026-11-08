@@ -30,6 +30,19 @@ IGNITION = 'IGNITION_FLAG=/home/pi/hooks/ignition_is_on'
 UNSHARE = '/usr/bin/unshare'
 LEGACY_BUSY = 'A restore, hotspare initialization, prepare-disk or backup deployment is active.'
 RUN_BUSY = 'Another offsite run is active.'
+SMB_FIELDS = ('--address=100.64.0.10', '--share=Jake_Share', '--path=vanpi-restic', '--user=jake', '--port=445')
+# Every frozen route: (command, its arguments, what the launcher asks the snapshot for).
+FROZEN_ROUTES = (
+    ('backup', ('--label', 'FORT-MPLS-5TB'), ['create']),
+    ('backup', ('--remote', '--label', 'FORT-MPLS-5TB'), ['create', '--remote']),
+    ('check', ('--label', 'FORT-MPLS-5TB'), ['create']),
+    ('check', ('--label', 'FORT-MPLS-5TB', '--remote'), ['create', '--remote']),
+    ('receipts', ('--label', 'nas'), ['create', '--remote']),
+    ('restore-test', ('--label', 'nas', '--receipt', 'r'), ['create', '--remote']),
+    ('resume-run', ('--remote', '--label', 'nas', '--revision', 'r'), ['create', '--remote']),
+    ('init-remote', ('--label', 'nas', '--priority', '30'), ['create', '--remote']),
+    ('configure-smb-run', SMB_FIELDS, ['create']),
+)
 RECORDED_ENVIRONMENT = ('OFFSITE_CODE_ROOT', 'VANPI_BACKUP_JOB_KIND', 'VANPI_BACKUP_JOB_LOCK_FD',
                         'VANPI_BACKUP_JOB_LOCK_PATH', 'VANPI_BACKUP_LOCK_DIR', 'OFFSITE_IGNITION_FLAG',
                         'BORG_REPO', 'VANPI_BACKUP_DISK_LOCK_FDS', 'VANPI_BACKUP_LEGACY_LOCK_FD',
@@ -245,16 +258,15 @@ class OffsiteLauncherTests(unittest.TestCase):
                               env=self.outside, capture_output=True, text=True, timeout=20)
 
     def test_mutating_commands_snapshot_under_shared_legacy_then_run_frozen_code_on_fd_10(self):
-        arguments = {'backup': ('--label', 'FORT-MPLS-5TB'), 'check': ('--label', 'FORT-MPLS-5TB', '--remote'),
-                     'receipts': ('--label', 'nas'), 'restore-test': ('--label', 'nas', '--receipt', 'r')}
-        for command, extra in arguments.items():
-            with self.subTest(command=command):
+        # Only a command reaching a remote target asks for --remote, the snapshot's cue to freeze rclone.
+        for command, extra, request in FROZEN_ROUTES:
+            with self.subTest(command=command, extra=extra):
                 for path in self.records.iterdir():
                     path.unlink()
                 result = self.run_launcher(command, *extra, STUB_EXIT='7')
                 self.assertEqual(result.returncode, 7, result.stderr)
                 snapshot = self.record('snapshot')
-                self.assertEqual(snapshot, {'argv': ['create'], 'job_fd': '10', 'lock_dir': str(self.registry),
+                self.assertEqual(snapshot, {'argv': request, 'job_fd': '10', 'lock_dir': str(self.registry),
                                             'fence_blocked': True, 'job_exclusive': True, 'legacy_shared': True})
                 frozen = self.record('frozen')
                 code_root = Path(frozen['environment']['OFFSITE_CODE_ROOT'])
@@ -301,6 +313,7 @@ class OffsiteLauncherTests(unittest.TestCase):
         (self.deploy_state / 'pending').write_text('version=1\nid=20261104T000000Z-42\n')
         arguments = {'backup': ('--label', 'FORT-MPLS-5TB'), 'check': ('--label', 'FORT-MPLS-5TB', '--remote'),
                      'receipts': ('--label', 'nas'), 'restore-test': ('--label', 'nas', '--receipt', 'r'),
+                     'init-remote': ('--label', 'nas', '--priority', '30'), 'configure-smb-run': SMB_FIELDS,
                      'prepare-disk': ('--device', '/dev/null', '--label', 'FORT-MPLS-5TB')}
         for command, extra in arguments.items():
             with self.subTest(command=command):
@@ -334,11 +347,15 @@ class OffsiteLauncherTests(unittest.TestCase):
     def test_busy_identity_refuses_before_legacy_or_pid_record(self):
         self.job_lock.write_text('sentinel\n')
         self.hold(self.job_lock)
-        result = self.run_launcher('check', '--label', 'FORT-MPLS-5TB')
-        self.assertEqual((result.returncode, result.stderr), (1, RUN_BUSY + '\n'))
-        self.assertEqual(self.job_lock.read_text(), 'sentinel\n')
-        self.assertFalse((self.records / 'snapshot.json').exists())
-        self.assertTrue(self.free(self.legacy))
+        for command, extra in (('check', ('--label', 'FORT-MPLS-5TB')),
+                               ('init-remote', ('--label', 'nas', '--priority', '3')),
+                               ('configure-smb-run', SMB_FIELDS)):
+            with self.subTest(command=command):
+                result = self.run_launcher(command, *extra)
+                self.assertEqual((result.returncode, result.stderr), (1, RUN_BUSY + '\n'))
+                self.assertEqual(self.job_lock.read_text(), 'sentinel\n')
+                self.assertFalse((self.records / 'snapshot.json').exists())
+                self.assertTrue(self.free(self.legacy))
 
     def test_ignition_and_snapshot_failure_stop_before_any_run(self):
         self.ignition.touch()
@@ -372,6 +389,25 @@ class OffsiteLauncherTests(unittest.TestCase):
         self.assertTrue(self.free(self.job_lock) and self.free(self.legacy))
         self.assertEqual(self.job_lock.read_text(), 'sentinel\n', 'prepare-disk wrote a run PID record')
 
+    def test_configure_smb_holds_no_lock_and_runs_live_code(self):
+        # A running offsite job and the deployment fence leave it free to read the password;
+        # its configure-smb-run worker is what takes job-offsite (refused above while busy).
+        self.hold(self.legacy)
+        self.hold(self.job_lock)
+        self.job_lock.write_text('sentinel\n')
+        result = self.run_launcher('configure-smb', '--address', '100.64.0.10', '--share', 'Jake_Share',
+                                   '--path', 'vanpi-restic', '--user', 'jake')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        live = self.record('live')
+        self.assertEqual(live['argv'][:3], ['configure-smb', '--address', '100.64.0.10'])
+        self.assertEqual(live['path0'], str(self.tree / 'backup'))
+        self.assertEqual((live['fd9_open'], live['offsite_holders']), (False, []))
+        self.assertIsNone(live['environment']['OFFSITE_CODE_ROOT'])
+        self.assertFalse((self.records / 'snapshot.json').exists())
+        self.assertEqual(self.job_lock.read_text(), 'sentinel\n')
+        unprivileged = self.run_launcher('configure-smb', root=False)
+        self.assertEqual((unprivileged.returncode, unprivileged.stderr), (1, 'Run offsite_backup.sh with sudo.\n'))
+
     def test_read_only_and_unprivileged_commands_take_no_locks(self):
         self.hold(self.legacy)
         self.hold(self.job_lock)
@@ -379,7 +415,7 @@ class OffsiteLauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.record('live')['argv'], ['status'])
         self.job_lock.write_text('sentinel\n')
-        for command in ('backup', 'prepare-disk', 'dashboard'):
+        for command in ('backup', 'prepare-disk', 'dashboard', 'init-remote', 'configure-smb-run'):
             result = self.run_launcher(command, root=False)
             self.assertEqual((result.returncode, result.stderr), (1, 'Run offsite_backup.sh with sudo.\n'))
         self.assertEqual(self.job_lock.read_text(), 'sentinel\n')

@@ -90,6 +90,26 @@ the verified mount available for the seed run.
 For the 14 TB drive, use its own unique by-id and serial, label `offsite-14tb`
 and `--priority 20`. Do not reformat an existing registered drive to refresh it.
 
+### Local repository permissions
+
+Local preparation, backups (including ordinary failed attempts) and successful checks add
+cross-uid SMB access while the target remains locked (preparation's exclusive
+legacy hold, otherwise the shared target disk lock): directories have at
+least **0777**, regular files at least **0666**. Existing permission bits are never
+removed. DSM's non-root SMB user has a different uid from Pi root, so restic's
+root-owned private modes would otherwise prevent access after moving the drive.
+Only `vanpi-restic/` is changed; the mount root and DSM directories are untouched,
+and `.vanpi-offsite` stays 0644. Symlinks, filesystem boundaries and unexpected
+file types/hard links are refused and reported, not followed. A sharing error
+fails the operation (backup status records `cleanup_errors`).
+
+While mounted on the Pi the repository is world-writable to local Pi users. Its
+contents are encrypted and authenticated, but this does not prevent deletion;
+the SMB transport is not append-only anyway. Remote operations do not change
+local modes. A stop/ignition drain skips or interrupts sharing rather than
+holding up disk release; the next local backup or check retries the whole walk.
+Run a successful local check before handing the drive over.
+
 ## Save the password independently
 
 The first preparation generates the shared password with Python `secrets` at
@@ -261,6 +281,139 @@ Do not downgrade the provider while remote holds are relied on: older workers ca
 read the additive status but do not enforce these holds. No NAS setup is performed
 by this feature.
 
+## Shared-folder target (no NAS admin)
+
+### What it is and when to use it
+
+Remote `kind: "smb"` sends the same restic repository to a plain DSM shared folder
+(`Jake_Share`, user `jake`, non-admin, 3 TB quota) over Tailscale, with no software
+on the NAS. restic's `rclone` backend runs the Pi's own `rclone` using its SMB backend.
+The receiver in [OFFSITE_NAS.md](OFFSITE_NAS.md) remains the preferred design; use this
+only because the NAS owner grants no admin access. Backup, check, receipts,
+restore-test, pause and resume behave as for the receiver: `backup` and `check`
+select the remote target with `--remote`; `receipts` and `restore-test` always use it.
+
+### What it gives up
+
+- Not append-only on the server. The Pi's rclone runs `serve restic --stdio
+  --append-only`, which stops the Pi's own tooling from deleting or replacing
+  objects, but a compromised Pi can bypass it and delete the copy.
+- Credentials are not bound to a repository id. A replaced folder is detected only
+  by the fresh `cat config` check before each operation; a replacement after that
+  check is not detected.
+- `jake`'s DSM password lives in `remote.json`, root-only on the Pi, readable by Pi
+  root exactly like the restic key.
+- The share's 3 TB quota caps the repository; the 14 TB drive swap does not apply.
+- `remote.json` is global: once its kind is `smb`, every `--remote` run for every
+  label goes to the share.
+
+### remote.json for kind smb
+
+Keys are exactly `schema` (1), `kind` (`"smb"`), `address` (the NAS's Tailscale
+IPv4), `port` (445), `share`, `path` (a relative directory inside the share;
+recommended `vanpi-restic`), `user` and `password` (16 to 127 printable
+characters). The file is root-owned 0600. Do not write it by hand: that puts the
+password in a shell history. First set `jake`'s DSM password to a long random one
+(DSM, Personal, Account). Then:
+
+```sh
+sudo /home/pi/scripts/backup/offsite_backup.sh configure-smb \
+  --address NAS_TAILSCALE_IPV4 --share Jake_Share --path vanpi-restic --user jake
+```
+
+It reads the password from the terminal (or one line on stdin, for scripts), never
+argv, before taking any lock, and validates every field. Its `configure-smb-run`
+worker then takes `job-offsite`, refusing while a run holds it, checks that the
+installed rclone is the pinned version and can obscure the password, and writes the
+file. `--port N` overrides 445. configure-smb replaces the file atomically and can be
+rerun to change a field; its JSON summary lists the labels registered in `repos.json`.
+
+### Setup order
+
+1. Trent shares the NAS node in Tailscale (admin console, machine, Share) and
+   confirms SMB is on (DSM Control Panel, File Services, SMB).
+2. Jacob accepts the share and finds the NAS's Tailscale IPv4:
+   `tailscale status`, then `tailscale ip -4 NODE`.
+3. Run `configure-smb` as above.
+4. Create the repository, either:
+   ```sh
+   sudo /home/pi/scripts/backup/offsite_backup.sh init-remote \
+     --label LABEL --priority 20
+   ```
+   which creates an empty repository on the share, registers it in `repos.json`
+   and then checks the new registration as every remote run does. `20` is only an
+   example (0 to 2147483647; the NAS watcher's drive choice does not apply to a
+   share). It refuses a label already registered or named in `disk_policy.sh`, and
+   a repository id another label already has. If the path already holds a
+   repository, it prints that repository's id and registers nothing; if it is
+   yours (for example init succeeded but registration did not),
+   `init-remote --label LABEL --priority 20 --adopt REPO_ID` skips init and
+   registers it only when its decrypted id equals `REPO_ID`. Or use the mirrored
+   seed below.
+5. Run the live acceptance checklist.
+
+### Mirrored seed
+
+This copies a drive's repository file for file, keeping its repo id, so it is used
+under the drive's existing label (for example `FORT-MPLS-5TB`). The share is trusted
+only after every gate below passes, in this order:
+
+1. Mount the source drive read-only and keep it unwritable by any job: hold the
+   cloud and offsite jobs as in [Locks](#locks), use the exact-label mount helper
+   and do not start `backup`, `check` or a clone for that label. Leave no writer
+   on either side for the whole copy. The destination `path` in the share must be
+   empty.
+2. The drive's repository passes the local structural check and data sample in
+   [Check and hand over](#check-and-hand-over), before it leaves the van.
+3. Copy on a fast link, never over a metered uplink, with `rclone copy` (never
+   `sync`), excluding `locks/`, from the drive's `vanpi-restic` directory to the
+   share path. Prove it byte-identical on that same link, with zero differences:
+   `rclone check --download DRIVE/vanpi-restic :smb:SHARE/PATH --exclude 'locks/**'`.
+   That one-off needs `RCLONE_SMB_HOST`, `RCLONE_SMB_USER` and `RCLONE_SMB_PASS` in
+   the environment (or an `rclone config` entry) on the copying machine; on the Mac
+   `RCLONE_SMB_PASS` takes the obscured form from `rclone obscure -`, fed on stdin.
+   Never put the password in argv.
+4. From the Pi, over the transport, run `configure-smb`, then
+   `check --remote --label LABEL` (structure and metadata, which also compares the
+   decrypted id with the registration), then
+   `check --remote --label LABEL --read-data-subset FRACTION`. The subset downloads
+   that share of the repository's data, so size it to the uplink: 2% of a 500 GB
+   repository is 10 GB.
+5. Run `backup --remote --label LABEL --only SMALL_SOURCE`, then `receipts --label
+   LABEL` and `restore-test --label LABEL --receipt RECEIPT --path PATH --target
+   EMPTY_DIR` on that receipt. That restore through the transport is the proof the
+   share restores.
+6. Only then begin routine `backup --remote` runs.
+
+A locally seeded snapshot has no completion receipt (only a `backup --remote` run
+writes one), so no `restore-test` of the drive's own snapshots exists today; steps 3
+and 4 are what vouch for them. A `restore-test --snapshot ID` mode is a follow-up.
+
+### Live acceptance checklist
+
+This is the only proof of the SMB path. Run it with Jacob watching and record each
+result in the handoff note:
+
+1. `configure-smb`, then `init-remote --label L --priority N`.
+2. `backup --remote --label L --only SMALL_SOURCE`.
+3. `receipts --label L`.
+4. `check --remote --label L`, then `restore-test --label L --receipt RECEIPT
+   --path PATH --target EMPTY_DIR` with a receipt from step 3.
+5. Start a backup and interrupt it (Ctrl-C, or `pause --remote --label L --revision R`
+   with the revision from `dashboard`, as in
+   [Manual remote pause and resume](#manual-remote-pause-and-resume)); confirm no
+   restic or rclone process remains (`pgrep -a 'restic|rclone'`) and the next run
+   resumes.
+6. Run a command with a wrong label and confirm it is refused.
+
+### Updates
+
+Updates are Pi-side only; there is nothing on the NAS to patch. `RCLONE_VERSION` in
+`offsite_config.py` pins the rclone version (`1.75.1`, without a `v`). The frozen code
+snapshot copies rclone into `bin/` beside restic only for commands that reach the
+remote target (`init-remote`, `receipts`, `restore-test`, `resume-run`, and `backup`
+or `check` with `--remote`) while `remote.json` is kind `smb`; local seeds never copy it.
+
 ## Sources and consistency
 
 | Tag | Paths | Treatment |
@@ -385,7 +538,9 @@ create`, which:
    `/home/pi/scripts/`, root-owned, directories 0700, files 0700 or 0600;
 3. copies `/usr/local/bin/restic` to `bin/restic` after matching the binary
    SHA-256 pinned in `install_restic.sh` (the pin's one declaration), since each
-   source starts a new restic;
+   source starts a new restic. Only a run that reaches a kind smb remote
+   (`create --remote`) also copies rclone to `bin/rclone`, verified by SHA-256 and
+   pinned version; local runs never copy it;
 4. re-hashes every live source and refuses if any changed during the copy;
 5. writes `manifest.json` (file and restic hashes, run id, time; the deployed
    revision is null, since the cohort records none yet) and prints the root.
@@ -405,6 +560,12 @@ one writes. So `status.json`, `history.json`, `rates/*.bin`, `repos.json` and th
 evidence files are additive-only: new fields are optional and readers ignore
 unknown ones. `test_offsite_state_compat.py` checks both directions against v2
 (`5ed7311`).
+
+`remote.json` is the exception: once `configure-smb` writes `kind: smb`, code
+from before the smb transport rejects it, so after a rollback remote runs refuse
+and the dashboard shows the target as unknown. That fails safe; rerun the
+targeted installer from the newer revision (or restore the REST record) to
+return to remote runs.
 
 ### Deploying during a run
 

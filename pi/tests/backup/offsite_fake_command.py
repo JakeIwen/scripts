@@ -17,17 +17,23 @@ import time
 # Snapshot helper paths installed over a fixture live tree by the isolation test.
 ALIASES = {'offsite_mounts.sh': 'mounts', 'samba_share_control.sh': 'samba', 'ntfy_send.sh': 'notify'}
 LOGGED_ENVIRONMENT = ('OFFSITE_ADMISSION', 'VANPI_BACKUP_JOB_LOCK_FD', 'VANPI_BACKUP_DISK_LOCK_FDS',
-                      'VANPI_BACKUP_CLOUD_SLOT_FD')
+                      'VANPI_BACKUP_CLOUD_SLOT_FD', 'RCLONE_CONFIG', 'RCLONE_SMB_HOST', 'RCLONE_SMB_PORT',
+                      'RCLONE_SMB_USER', 'RCLONE_SMB_PASS')
+# What the rclone double reports; offsite_config.RCLONE_VERSION must match it (the
+# double runs with rclone's minimal environment, so it cannot import that module).
+RCLONE_VERSION_LINE = 'rclone v1.75.1'
 # Upper bounds only, so a failed test never leaves a fixture process behind for long.
 HOLD_SECONDS = 300
 ORPHAN_SECONDS = 120
 
 
 def main():
-    fixture = Path(os.environ['OFFSITE_FIXTURE'])
-    state = json.loads(fixture.read_text())
     executable = Path(sys.argv[0]).name
     name, args = ALIASES.get(executable, executable.removeprefix('fake-')), sys.argv[1:]
+    if name == 'rclone':
+        return rclone(args)
+    fixture = Path(os.environ['OFFSITE_FIXTURE'])
+    state = json.loads(fixture.read_text())
     with (fixture.parent / 'commands.jsonl').open('a') as stream:
         stream.write(json.dumps([name, *args]) + '\n')
     with (fixture.parent / 'executions.jsonl').open('a') as stream:
@@ -179,12 +185,50 @@ def features(state, args):
     print('Filesystem features: has_journal extent metadata_csum 64bit')
 
 
+def rclone(args):
+    """`version` and `obscure -` only. offsite_smb runs it with a minimal environment
+    (no fixture variables), and the restic double never starts an rclone server."""
+    if args == ['version']:
+        print(RCLONE_VERSION_LINE + '\n- os/version: fixture')
+        return 0
+    if args == ['obscure', '-']:
+        import base64
+        secret = sys.stdin.readline().removesuffix('\n')
+        # Reversible like rclone's own form: an IV-sized prefix, then the secret's bytes.
+        print(base64.urlsafe_b64encode(bytes(16) + secret.encode()).decode().rstrip('='))
+        return 0
+    print('fixture rclone: unsupported command', file=sys.stderr)
+    return 2
+
+
+def rclone_backend_ready(args):
+    """An rclone: repository needs one absolute executable rclone.program and an env-only remote."""
+    repository = args[args.index('--repo') + 1] if '--repo' in args else ''
+    if not repository.startswith('rclone:'):
+        return True
+    programs = [value.removeprefix('rclone.program=') for option, value in zip(args, args[1:])
+                if option == '-o' and value.startswith('rclone.program=')]
+    return (len(programs) == 1 and os.path.isabs(programs[0]) and os.access(programs[0], os.X_OK)
+            and os.environ.get('RCLONE_CONFIG') == ''
+            and all(os.environ.get('RCLONE_SMB_' + key) for key in ('HOST', 'PORT', 'USER', 'PASS')))
+
+
 def restic(state, args):
+    if not rclone_backend_ready(args):
+        print('Fatal: fixture restic cannot start its rclone backend')
+        return 1
     if args == ['version']:
         print('restic 0.19.1')
     elif 'init' in args:
+        if state.get('init_exists'):
+            # restic 0.19.1's words; test_offsite_rclone_integration.py checks them against the real binary.
+            print(f"Fatal: create repository at {args[args.index('--repo') + 1]} failed: config file already exists")
+            return 1
         print('created restic repository')
     elif 'cat' in args:
+        if state.get('cat_config_fails'):
+            print('Fatal: wrong password or no key found')
+            return 1
         print(json.dumps({'id': state.get('repo_id', 'a' * 64)}))
     elif 'backup' in args and '--stdin' in args:
         receipt = Path(state['mount_root']).parent / 'receipt.json'

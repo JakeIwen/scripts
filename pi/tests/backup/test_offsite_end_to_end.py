@@ -29,7 +29,7 @@ import time
 import unittest
 
 from pi.tests.backup.offsite_fixtures import REPO_SCRIPTS
-from pi.tests.backup.offsite_remote_fixtures import RemoteFixture
+from pi.tests.backup.offsite_remote_fixtures import SMB_PASSWORD, SMB_TRANSPORT, RemoteFixture
 from pi.tests.backup.test_local_backup_deploy import REGISTRY_SOURCE, DeploymentFixture
 from pi.tests.backup.test_offsite_launcher import UNSHARE, userns_available
 
@@ -53,11 +53,21 @@ if __name__ == '__main__':
     values['code_root'] = Path(code) if code else None
     if code:
         frozen = {**command_paths(code), **remote_commands(code)}
-        values['commands'].update({name: frozen[name] for name in ('restic', 'mounts', 'samba', 'notify', 'uplink')})
-    raise SystemExit(main(config=Config(**values)))
+        values['commands'].update({name: frozen[name] for name in ('restic', 'rclone', 'mounts', 'samba', 'notify',
+                                                                   'uplink')})
+    if os.environ.get('OFFSITE_E2E_RCLONE'):
+        # The rclone double stands in for /usr/local/bin/rclone, which configure-smb checks.
+        import offsite_remote_init
+        offsite_remote_init.INSTALLED_RCLONE = os.environ['OFFSITE_E2E_RCLONE']
+    # Mounts are disposable directories, not kernel mounts; only the /dev probe is synthetic.
+    from unittest.mock import patch
+    with patch('offsite_repository.block_device_number', return_value=values['mount_root'].stat().st_dev):
+        raise SystemExit(main(config=Config(**values)))
 '''
 SNAPSHOT_ENTRY = '''
 if __name__ == '__main__':
+    # The rclone double stands in for /usr/local/bin/rclone, which remote smb runs freeze.
+    INSTALLED_RCLONE = os.environ.get('OFFSITE_E2E_RCLONE') or INSTALLED_RCLONE
     # Fixture gate: hold the launcher inside its snapshot window when asked.
     gate = os.environ.get('OFFSITE_E2E_SNAPSHOT_GATE')
     if gate:
@@ -130,14 +140,26 @@ class LauncherFixture(RemoteFixture):
     def lock(self, name):
         return self.registry.registry / f'{name}.lock'
 
-    def launch(self, *arguments, **extra):
+    def launch(self, *arguments, stdin=None, **extra):
         environment = {'PATH': f'{self.bin}:/usr/bin:/bin', 'LANG': 'C.UTF-8', 'PYTHONDONTWRITEBYTECODE': '1',
                        'OFFSITE_FIXTURE': str(self.fixture), 'OFFSITE_CONFIG': str(self.config_file),
                        'OFFSITE_STATE_ROOT': str(self.cfg.state), **self.registry.environment,
                        # Fixture files owned by the test user appear root-owned in the namespace.
                        'VANPI_BACKUP_JOB_LOCK_OWNER': 'root', 'VANPI_BACKUP_JOB_LOCK_GROUP': 'root', **extra}
         return subprocess.Popen([UNSHARE, '-r', '/bin/bash', str(self.live / 'backup/offsite_backup.sh'), *arguments],
-                                env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                env=environment, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+
+    def use_shared_folder(self):
+        """remote.json of kind smb; returns the launch environment that makes the rclone double the installed one."""
+        self.remote_config.write_text(json.dumps(SMB_TRANSPORT))
+        self.remote_config.chmod(0o600)
+        return {'OFFSITE_E2E_RCLONE': str(self.bin / 'fake-rclone')}
+
+    def frozen_rclone(self):
+        """(manifest rclone entry, frozen copy present) of the one live snapshot."""
+        [root] = self.snapshots()
+        return json.loads((root / 'manifest.json').read_text())['rclone'], (root / 'bin/rclone').exists()
 
     def drain(self, *arguments, **extra):
         environment = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'PYTHONDONTWRITEBYTECODE': '1',
@@ -195,8 +217,8 @@ class OffsiteEndToEndTests(DeploymentFixture):
         self.processes = []
         self.addCleanup(self.stop_processes)
 
-    def launch(self, *arguments, **extra):
-        process = self.f.launch(*arguments, **extra)
+    def launch(self, *arguments, stdin=None, **extra):
+        process = self.f.launch(*arguments, stdin=stdin, **extra)
         self.processes.append(process)
         return process
 
@@ -226,7 +248,10 @@ class OffsiteEndToEndTests(DeploymentFixture):
     def deployment(self):
         """A staged cohort whose fence and registry guard use the run's registry and legacy lock."""
         deployment = self.fixture()
-        self.env.update(self.f.registry.environment)
+        # The launcher's registry names its own (empty) deploy-state dir; the deployment's bootstrap
+        # readiness and journal live in the one fixture() seeded, so keep that one.
+        state = self.env['VANPI_BACKUP_DEPLOY_STATE_DIR']
+        self.env.update(self.f.registry.environment, VANPI_BACKUP_DEPLOY_STATE_DIR=state)
         return deployment
 
     def backup(self, *sources, remote=False, **extra):
@@ -330,6 +355,76 @@ class OffsiteEndToEndTests(DeploymentFixture):
             time.sleep(0.1)
         for name in ('job-offsite', f'disk-{LABEL}', 'disk-movingparts', 'cloud-upload'):
             self.assertTrue(self.f.free(self.f.lock(name)), name)
+
+    def configure_smb(self, environment):
+        return self.launch('configure-smb', '--address', '100.64.0.11', '--share', 'Jake_Share', '--path',
+                           'vanpi-restic', '--user', 'jake', stdin=subprocess.PIPE, **environment)
+
+    def test_configure_smb_waits_for_its_password_holding_no_lock_then_writes_through_its_worker(self):
+        environment = self.f.use_shared_folder()
+        before = self.f.remote_config.read_bytes()
+        run = self.configure_smb(environment)
+        # The launcher execs the live worker in place; once it runs, it can only be waiting for the password.
+        self.wait_for(lambda: b'offsite_backup.py' in Path(f'/proc/{run.pid}/cmdline').read_bytes(), run,
+                      'configure-smb never started its worker')
+        time.sleep(1)
+        self.assertIsNone(run.poll())
+        for name in ('job-offsite', 'cloud-upload'):
+            self.assertTrue(self.f.free(self.f.lock(name)), name)
+        self.assertTrue(self.f.free(self.f.registry.legacy), 'the deployment fence was held during the prompt')
+        self.assertEqual(self.f.remote_config.read_bytes(), before)
+        out, err = run.communicate(SMB_PASSWORD + '\n', timeout=self.f.command_timeout)
+        self.assertEqual(run.returncode, 0, out + err)
+        self.assertEqual(json.loads(out)['labels'], [LABEL])
+        self.assertEqual(json.loads(self.f.remote_config.read_text()), {**SMB_TRANSPORT, 'address': '100.64.0.11'})
+        self.assertNotIn(SMB_PASSWORD, out + err)
+        self.assertEqual(self.f.snapshots(), [])  # its worker ran from a snapshot, removed afterwards
+        self.assertTrue(self.f.free(self.f.lock('job-offsite')))
+
+    def test_a_running_seed_refuses_shared_folder_setup_and_freezes_no_rclone(self):
+        environment = self.f.use_shared_folder()
+        before = self.f.remote_config.read_bytes()
+        self.f.update(hold_until=str(self.release))
+        run = self.backup('movingparts', **environment)
+        self.wait_for(self.f.started.exists, run, 'restic never started')
+        self.assertEqual(self.f.frozen_rclone(), (None, False))  # a local seed, though remote.json is smb
+        configure = self.configure_smb(environment)
+        out, err = configure.communicate(SMB_PASSWORD + '\n', timeout=self.f.command_timeout)
+        self.assertEqual((configure.returncode, err), (1, 'Another offsite run is active.\n'), out)
+        initialize = self.launch('init-remote', '--label', 'NAS-SHARE', '--priority', '30', **environment)
+        output = self.finish(initialize)
+        self.assertEqual(initialize.returncode, 1, output)
+        self.assertIn('Another offsite run is active.', output)
+        self.assertEqual(self.f.remote_config.read_bytes(), before)
+        self.release.touch()
+        output = self.finish(run)
+        self.assertEqual(run.returncode, 0, output)
+
+    def test_init_remote_and_a_remote_backup_run_with_their_frozen_rclone(self):
+        environment = self.f.use_shared_folder()
+        self.f.update(repo_id='b' * 64)  # what the restic double's new repository decrypts to
+        initialize = self.launch('init-remote', '--label', 'NAS-SHARE', '--priority', '30', **environment)
+        output = self.finish(initialize)
+        self.assertEqual(initialize.returncode, 0, output)
+        registered = json.loads((self.f.cfg.state / 'repos.json').read_text())['repos']
+        self.assertEqual(sorted(registered), sorted([LABEL, 'NAS-SHARE']))
+        self.assertEqual(registered['NAS-SHARE']['repo_id'], 'b' * 64)
+        restic = [row for row in self.f.executions() if row['name'] == 'restic']
+        self.assertEqual([row['args'][-1] for row in restic][-3:], ['init', 'config', 'config'])
+        for row in restic[-3:]:
+            program = Path(row['args'][row['args'].index('-o') + 1].removeprefix('rclone.program='))
+            self.assertEqual(program.relative_to(self.f.cfg.state / 'code').parts[1:], ('bin', 'rclone'))
+        self.f.update(hold_until=str(self.release))
+        run = self.launch('backup', '--remote', '--label', 'NAS-SHARE', '--only', 'movingparts', **environment)
+        self.wait_for(self.f.started.exists, run, 'restic never started')
+        frozen, present = self.f.frozen_rclone()
+        self.assertTrue(present)
+        self.assertEqual(frozen['path'], environment['OFFSITE_E2E_RCLONE'])
+        self.release.touch()
+        output = self.finish(run)
+        self.assertEqual(run.returncode, 0, output)
+        self.assertEqual((self.f.status()['result'], self.f.status()['transport_kind']), ('ok', 'smb'))
+        self.assertNotIn(SMB_PASSWORD, output)
 
     def test_draining_a_disk_the_run_does_not_hold_leaves_it_alone(self):
         self.f.update(hold_until=str(self.release))

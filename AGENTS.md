@@ -1470,8 +1470,10 @@ The active design is represented by:
   (`test_offsite_snapshot_closure.py` rescans them) and canonical
   marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+). Persisted
   state is additive-only (`test_offsite_state_compat.py` checks v2 both ways).
-  `offsite_repository.py` verifies local mounts/IDs; `offsite_prepare.py` guards
-  erasure; `offsite_samba.py` owns the Time Machine capture gate; `offsite_run.py`
+  `offsite_repository.py` verifies local mounts/IDs and adds cross-uid SMB access
+  (directories at least 0777, files 0666) after non-interrupted local writes;
+  `offsite_prepare.py` guards erasure; `offsite_samba.py` owns the Time Machine
+  capture gate; `offsite_run.py`
   writes status/processed-versus-packed byte metrics; `offsite_mounts.sh` reuses
   label helpers. `offsite_remote.py` owns known-ID REST auth and fresh
   `pi.offsite_backup` metered/Tailscale admission for uploads and readback.
@@ -1489,6 +1491,12 @@ The active design is represented by:
   it never contacts the receiver and never claims an online peer proves a mounted target.
   Both modules ship in the targeted cohort and frozen closure; provider deploy precedes dashboard.
   `install_restic.sh` pins restic 0.19.1. No schedule or automatic retry is installed.
+  `remote.json` has a `kind` (`rest` default, `smb`). `offsite_smb.py` owns the smb
+  runtime (repository string, rclone options and environment, obscure, version check,
+  reaper); `offsite_remote_init.py` owns `configure-smb` (it reads the password
+  holding no lock, then starts its frozen `configure-smb-run` worker) and `init-remote`.
+  `offsite_config.validate_transport` stays self-contained because the NAS installs it
+  alone, and defaults to REST only.
   Runbooks: `pi/docs/backup/OFFSITE.md` and `OFFSITE_NAS.md` beside it.
 - `synology/offsite/`: native DSM receiver and explicit installer. `mounts.py`
   selects exact mounted, marked USB filesystems; `runtime.py` pins the repository
