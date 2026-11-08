@@ -31,6 +31,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
 | `macbook/scripts/van_lighting.py` | BTT Media > Lighting: Solder SW (`toggle switch.solder_flood`) and the Lighting Colour web view (`lights`, `set`, JSON) | the script; `macbook/bettertouchtool/install_lighting_menu.py` installs both callers |
 | `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
+| `macbook/scripts/czrc.zsh` | `~/.zshrc`'s `czrc` function (`czrc [message words]`) | the script; it finds `~/mac-config` through the `~/.zshrc` symlink, `CZRC_REPO` overrides it; `macbook/tests/test_czrc.zsh` |
 | `pi/configs/labwc/` | labwc/swayidle at `/home/pi/.config/labwc/`; castit's mpv lifetime contract | copied by `pi/sync_scripts.sh` |
 | `pi.apps.metered`, `shared.metered`, `pi.package_runtime`, `pi.apps.media_organizer.{config,records}` in the package release, and the `-m pi.apps.media_organizer` / `-m pi.apps.iptorrents_watch` CLIs | `van-dashboard.service`, deployed from `~/dev/van-dashboard` | `pi/deploy_python.py` `MODULE_DIRS`; `pi/tests/test_python_deployment_consumers.py` pins them (see [Van dashboard](#van-dashboard-separate-repo)) |
 | `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
