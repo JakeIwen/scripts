@@ -382,6 +382,14 @@ with context:''')
         self.assertIn('no errors were found', result.stdout)
         self.assertEqual(stat.S_IMODE(self.pack.stat().st_mode), 0o400)
 
+    def test_refused_sharing_after_passing_check_keeps_check_output(self):
+        self.ready()
+        (self.path / 'stray-link').symlink_to(self.pack)
+        result = self.f.run('check', '--label', self.f.label)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('no errors were found', result.stdout)
+        self.assertIn('1 symlinks', result.stdout + result.stderr)
+
     def test_stop_during_failed_backup_cleanup_keeps_failure_and_cause(self):
         self.ready()
         code = BOOTSTRAP.replace('with context:', '''

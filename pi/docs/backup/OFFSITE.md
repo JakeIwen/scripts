@@ -561,6 +561,12 @@ evidence files are additive-only: new fields are optional and readers ignore
 unknown ones. `test_offsite_state_compat.py` checks both directions against v2
 (`5ed7311`).
 
+`remote.json` is the exception: once `configure-smb` writes `kind: smb`, code
+from before the smb transport rejects it, so after a rollback remote runs refuse
+and the dashboard shows the target as unknown. That fails safe; rerun the
+targeted installer from the newer revision (or restore the REST record) to
+return to remote runs.
+
 ### Deploying during a run
 
 - Broad sync (`pi/sync_scripts.sh`) stays unfenced. The snapshot narrows its

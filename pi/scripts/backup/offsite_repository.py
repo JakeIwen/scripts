@@ -465,8 +465,8 @@ class LocalRepository:
             output = self.restic('check', *options, timeout=None, guard=self.exact_mount)
             try:
                 self.share_for_smb()
-            except Interrupted:
-                # Passing restic evidence survives a stop during the permission walk.
+            except Exception:
+                # Passing restic evidence survives a stop or refusal during the permission walk.
                 print(output, end='', flush=True)
                 raise
             return output
