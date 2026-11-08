@@ -59,7 +59,10 @@ if __name__ == '__main__':
         # The rclone double stands in for /usr/local/bin/rclone, which configure-smb checks.
         import offsite_remote_init
         offsite_remote_init.INSTALLED_RCLONE = os.environ['OFFSITE_E2E_RCLONE']
-    raise SystemExit(main(config=Config(**values)))
+    # Mounts are disposable directories, not kernel mounts; only the /dev probe is synthetic.
+    from unittest.mock import patch
+    with patch('offsite_repository.block_device_number', return_value=values['mount_root'].stat().st_dev):
+        raise SystemExit(main(config=Config(**values)))
 '''
 SNAPSHOT_ENTRY = '''
 if __name__ == '__main__':

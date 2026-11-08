@@ -1469,8 +1469,10 @@ The active design is represented by:
   (`test_offsite_snapshot_closure.py` rescans them) and canonical
   marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+). Persisted
   state is additive-only (`test_offsite_state_compat.py` checks v2 both ways).
-  `offsite_repository.py` verifies local mounts/IDs; `offsite_prepare.py` guards
-  erasure; `offsite_samba.py` owns the Time Machine capture gate; `offsite_run.py`
+  `offsite_repository.py` verifies local mounts/IDs and adds cross-uid SMB access
+  (directories at least 0777, files 0666) after non-interrupted local writes;
+  `offsite_prepare.py` guards erasure; `offsite_samba.py` owns the Time Machine
+  capture gate; `offsite_run.py`
   writes status/processed-versus-packed byte metrics; `offsite_mounts.sh` reuses
   label helpers. `offsite_remote.py` owns known-ID REST auth and fresh
   `pi.offsite_backup` metered/Tailscale admission for uploads and readback.

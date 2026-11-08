@@ -90,6 +90,26 @@ the verified mount available for the seed run.
 For the 14 TB drive, use its own unique by-id and serial, label `offsite-14tb`
 and `--priority 20`. Do not reformat an existing registered drive to refresh it.
 
+### Local repository permissions
+
+Local preparation, backups (including ordinary failed attempts) and successful checks add
+cross-uid SMB access while the target remains locked (preparation's exclusive
+legacy hold, otherwise the shared target disk lock): directories have at
+least **0777**, regular files at least **0666**. Existing permission bits are never
+removed. DSM's non-root SMB user has a different uid from Pi root, so restic's
+root-owned private modes would otherwise prevent access after moving the drive.
+Only `vanpi-restic/` is changed; the mount root and DSM directories are untouched,
+and `.vanpi-offsite` stays 0644. Symlinks, filesystem boundaries and unexpected
+file types/hard links are refused and reported, not followed. A sharing error
+fails the operation (backup status records `cleanup_errors`).
+
+While mounted on the Pi the repository is world-writable to local Pi users. Its
+contents are encrypted and authenticated, but this does not prevent deletion;
+the SMB transport is not append-only anyway. Remote operations do not change
+local modes. A stop/ignition drain skips or interrupts sharing rather than
+holding up disk release; the next local backup or check retries the whole walk.
+Run a successful local check before handing the drive over.
+
 ## Save the password independently
 
 The first preparation generates the shared password with Python `secrets` at

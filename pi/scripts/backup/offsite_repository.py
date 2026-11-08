@@ -30,6 +30,8 @@ class Interrupted(RuntimeError):
 # offsite_mounts.sh release exit codes (OFFSITE.md "Locks").
 RELEASED, RELEASE_BUSY, ALREADY_UNMOUNTED = 0, 3, 4
 REDACTED = '[redacted]'
+# Bound cooperative stop latency without a filesystem probe for each repository object.
+SHARE_GUARD_ENTRIES = 128
 
 
 def no_core_dumps():
@@ -298,6 +300,14 @@ def register(cfg, known: RepositoryRecords, marker: MarkerRecord):
     durable_json(cfg.state / REPOSITORIES, known)
 
 
+def block_device_number(path):
+    """The kernel device number, not the filesystem holding its /dev node."""
+    info = os.stat(path)
+    if not stat.S_ISBLK(info.st_mode):
+        raise RuntimeError('Verified offsite source is not a block device')
+    return info.st_rdev
+
+
 class LocalRepository:
     transport_kind = None  # a local disk has no network transport
 
@@ -370,6 +380,79 @@ class LocalRepository:
         """Text fit to print or record; a local repository passes no secret to restic."""
         return text
 
+    def share_for_smb(self):
+        """Add cross-uid access inside the verified repository, never to its marker/mount.
+
+        DSM's non-root SMB uid differs from Pi root. Descriptor-relative, no-follow
+        opens keep a replaced entry from redirecting chmod outside the repository;
+        fchmod also avoids Linux's unsupported chmod(follow_symlinks=False).
+        """
+        if getattr(self, 'remote', False):
+            raise RuntimeError('Only local repositories can be shared for SMB')
+        self.commands.allowed()
+        expected_device = self.exact_mount()
+        if self.path.resolve() != self.path:
+            raise RuntimeError('Unsafe repository directory for SMB sharing')
+        rejected = {'symlinks': 0, 'filesystem boundaries': 0, 'special files': 0, 'hard links': 0}
+        visited = 0
+
+        def share(parent, name):
+            nonlocal visited
+            if visited % SHARE_GUARD_ENTRIES == 0 or self.commands.cancelled:
+                self.commands.allowed()
+            visited += 1
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                rejected['symlinks'] += 1
+                return
+            if info.st_dev != device:
+                rejected['filesystem boundaries'] += 1
+                return
+            directory = stat.S_ISDIR(info.st_mode)
+            if not directory and not stat.S_ISREG(info.st_mode):
+                rejected['special files'] += 1
+                return
+            # A file hard-linked elsewhere would change permissions outside this tree.
+            if not directory and info.st_nlink != 1:
+                rejected['hard links'] += 1
+                return
+            wanted = 0o777 if directory else 0o666
+            if not directory and stat.S_IMODE(info.st_mode) & wanted == wanted:
+                return
+            flags = os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if directory else os.O_NONBLOCK)
+            fd = os.open(name, flags, dir_fd=parent)
+            try:
+                current = os.fstat(fd)
+                if (current.st_dev, current.st_ino, current.st_mode, current.st_nlink) != (
+                        info.st_dev, info.st_ino, info.st_mode, info.st_nlink):
+                    raise RuntimeError('Repository entry changed during SMB sharing')
+                if directory:
+                    with os.scandir(fd) as entries:
+                        for entry in entries:
+                            share(fd, entry.name)
+                mode = stat.S_IMODE(os.fstat(fd).st_mode)
+                if mode | wanted != mode:
+                    os.fchmod(fd, mode | wanted)
+            finally:
+                os.close(fd)
+
+        # Pin the verified mount too, so opening the root cannot follow a replaced parent.
+        mount_fd = os.open(self.mount, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            device = os.fstat(mount_fd).st_dev
+            if block_device_number(expected_device) != device:
+                raise RuntimeError('Offsite mount changed before SMB sharing')
+            root = os.stat(REPO_PATH, dir_fd=mount_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(root.st_mode) or root.st_dev != device:
+                raise RuntimeError('Unsafe repository directory for SMB sharing')
+            share(mount_fd, REPO_PATH)
+        finally:
+            os.close(mount_fd)
+        self.commands.allowed()
+        if any(rejected.values()):
+            detail = ', '.join(f'{count} {kind}' for kind, count in rejected.items() if count)
+            raise RuntimeError(f'Repository SMB sharing refused {detail}')
+
     def check(self, subset=None):
         owned, verified = [], False
         self.hold_target()
@@ -379,13 +462,22 @@ class LocalRepository:
             self.verify()
             verified = True
             options = ['--read-data-subset', subset] if subset else []
-            return self.restic('check', *options, timeout=None, guard=self.exact_mount)
+            output = self.restic('check', *options, timeout=None, guard=self.exact_mount)
+            try:
+                self.share_for_smb()
+            except Interrupted:
+                # Passing restic evidence survives a stop during the permission walk.
+                print(output, end='', flush=True)
+                raise
+            return output
         finally:
-            if owned or (verified and self.commands.cancelled):
-                note = self.unmount()
-                if note:
-                    print(note, file=sys.stderr, flush=True)
-            self.commands.locks.close(LockClass.DISK, self.label)
+            try:
+                if owned or (verified and self.commands.cancelled):
+                    note = self.unmount()
+                    if note:
+                        print(note, file=sys.stderr, flush=True)
+            finally:
+                self.commands.locks.close(LockClass.DISK, self.label)
 
     def verify(self):
         self.exact_mount()

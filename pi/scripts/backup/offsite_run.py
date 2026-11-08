@@ -211,13 +211,29 @@ class Backup:
                                 and not self.state.get('cleanup_errors') else Result.FAILED)
 
     def cleanup(self):
+        # Failed restic runs can leave packs too. Share while the verified target's
+        # disk is still held, but never delay a stop/drain for a repository walk.
+        if not self.remote and self.target_verified:
+            try:
+                self.commands.allowed()
+                if self.state['result'] != Result.INTERRUPTED:
+                    self.repo.share_for_smb()
+            except Interrupted as exc:
+                if self.state['result'] == Result.OK:
+                    self.state.update(result=Result.INTERRUPTED, cause=str(exc))
+                else:
+                    self.state.setdefault('cleanup_notes', []).append(f'Repository SMB sharing skipped: {exc}')
+            except Exception as exc:
+                # Even an unexpected walk failure must release descriptors and publish status.
+                self.state.setdefault('cleanup_errors', []).append(f'Repository SMB sharing: {exc}')
         # Every disk, data and slot descriptor closes before any release helper,
         # ntfy or other network call: the ordinary drain waits only briefly for
         # disk locks, and an unmount or a notification without uplink can stall.
         self.locks.close_resources()
         for label in self.deferred_releases:
             self.release(label)
-        if self.target_owned or (self.target_verified and self.state['result'] == Result.INTERRUPTED):
+        if self.target_owned or (self.target_verified and (
+                self.state['result'] == Result.INTERRUPTED or self.commands.stop_cause())):
             self.release(self.repo.label, self.repo.unmount)
         if self.state.get('cleanup_errors') and self.state['result'] == Result.OK:
             self.state['result'] = Result.FAILED

@@ -87,8 +87,11 @@ excluded=(patch('offsite_locks.EXCLUDED_LOCAL_JOBS', tuple(fixture['excluded_loc
 # configure-smb-run checks the installed rclone that later runs freeze; here, the double.
 installed=(patch('offsite_remote_init.INSTALLED_RCLONE', fixture['installed_rclone'])
            if fixture.get('installed_rclone') else nullcontext())
+# Device commands model mounts with real directories on the fixture filesystem.
+# Substitute only the /dev-node probe; the pinned mount's fstat remains real.
+block_device=patch('offsite_repository.block_device_number', return_value=cfg.mount_root.stat().st_dev)
 with context:
-    with clock, history_write, excluded, installed:
+    with clock, history_write, excluded, installed, block_device:
         raise SystemExit(main(sys.argv[1:], config=cfg))
 '''
 

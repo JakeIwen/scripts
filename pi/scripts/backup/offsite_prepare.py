@@ -144,6 +144,7 @@ def prepare(repo, device, serial, priority):
     if len(feature_lines) != 1 or {'orphan_file', 'metadata_csum_seed'} & set(feature_lines[0].split()):
         raise RuntimeError('Cannot verify NAS-compatible ext4 features')
     commands.run('udevadm', 'settle', '--timeout=20')
+    # Preparation keeps its exclusive legacy hold through init and sharing.
     commands.run('mounts', 'mount', repo.label)
     repo.exact_mount()
     if repo.path.exists() or repo.path.is_symlink():
@@ -151,13 +152,14 @@ def prepare(repo, device, serial, priority):
     repo.path.mkdir(mode=0o700)
     repo.restic('init', timeout=120)
     repo_id = json.loads(repo.restic('cat', 'config')).get('id')
+    repo.share_for_smb()
     marker: MarkerRecord = {'schema': SCHEMA, 'label': repo.label, 'repo_id': repo_id,
               'repo_path': REPO_PATH, 'priority': priority,
               'created': dt.datetime.now(dt.timezone.utc).isoformat()}
     validate_marker(marker, repo.label)
     repo.exact_mount()
     durable_json(repo.mount / MARKER, marker)
-    # The watcher needs only this nonsecret marker; repository contents stay private.
+    # Only the nonsecret marker is 0644; encrypted repository objects need cross-uid SMB writes.
     (repo.mount / MARKER).chmod(0o644)
     commands.run('sync', '-f', repo.mount)
     register(cfg, known, marker)
