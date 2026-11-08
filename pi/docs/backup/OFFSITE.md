@@ -142,26 +142,24 @@ refuses the command with its cause; retry after that job finishes and never dele
 lock files. Ignition-on refuses new work and interrupts a running job through the
 existing disk-abort path, which also unmounts and spins down the offsite drive.
 
-For Time Machine, on the Mac first disable new scheduled backups:
+For a Time Machine-only refresh, run from the repository root on the Mac:
 
 ```sh
-sudo tmutil disable
-tmutil status
-hdiutil info
+zsh macbook/scripts/offsite_tm_refresh.zsh --label FORT-MPLS-5TB
 ```
 
-Let an active backup finish. If the image remains attached, identify the exact
-Time Machine image device in `hdiutil info` and cleanly detach it with
-`hdiutil detach /dev/diskN` (replace `diskN` with that verified device; never
-force it). `tmutil disable` alone does not stop an in-progress backup or detach
-an image. The Pi refuses any open image handles, rather than forcing them closed.
+It pauses the hourly LaunchAgent, waits for any backup, cleanly unmounts the
+snapshots, image and SMB share, and waits for zero Pi-side image handles before
+starting the detached run. It reloads the agent when the Pi gate is up or the
+run ends, including on exit. `sudo tmutil disable` does not pause this agent.
+The Pi refuses open image handles rather than forcing them closed.
 
-On the Pi:
+For the other sources, on the Pi, select `exfat512`, `movingparts` or `borg`:
 
 ```sh
 sudo systemd-run --unit=vanpi-offsite --collect --service-type=exec \
   --property=KillMode=mixed --property=TimeoutStopSec=120 \
-  /home/pi/scripts/backup/offsite_backup.sh backup --label FORT-MPLS-5TB
+  /home/pi/scripts/backup/offsite_backup.sh backup --label FORT-MPLS-5TB --only exfat512
 ```
 
 `KillMode=mixed` sends TERM to the Python owner first, allowing it to stop/reap
@@ -170,8 +168,8 @@ outcome. The systemd cgroup remains the final bound on shutdown. SSH disconnects
 do not stop the unit. Use the same command to resume after an interruption; restic
 reuses uploaded chunks. No source is marked successful on partial-copy exit 3.
 
-To select sources, append `--only time-machine`, `--only exfat512`,
-`--only movingparts` or `--only borg`; repeat `--only` for several.
+Repeat `--only` for several non-Time Machine sources. Run `time-machine` separately
+with the Mac script above; omitting `--only` selects all sources, including it.
 
 ```sh
 journalctl -u vanpi-offsite -f
@@ -185,13 +183,6 @@ bytes, not physical disk throughput. Percent stays below 100 until successful
 snapshot confirmation. A stopped/killed process does not make old progress live:
 check `updated`, `finished` and the unit state. One final ntfy reports each source
 and real errors; notification failures also appear in status/journal.
-
-After the Time Machine source has completed or the run stopped, re-enable its
-normal Mac schedule:
-
-```sh
-sudo tmutil enable
-```
 
 ### Dashboard data
 

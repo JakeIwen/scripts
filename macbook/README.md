@@ -66,6 +66,10 @@ current decision manually:
 ~/Library/Application\ Support/vanpi-time-machine/start_vanpi_time_machine_backup.zsh --check
 ```
 
+For an offsite Time Machine refresh, run `zsh macbook/scripts/offsite_tm_refresh.zsh`
+from the repo root (optional `--label LABEL`). It pauses and restores the hourly
+agent while detaching the image and share and starting the Pi copy.
+
 To return to Apple's scheduler, unload
 `com.jacobr.vanpi-time-machine`, remove its plist from
 `~/Library/LaunchAgents`, and run `sudo tmutil enable`.

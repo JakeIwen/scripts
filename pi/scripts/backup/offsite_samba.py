@@ -10,8 +10,11 @@ import tempfile
 from time_machine_store import atomic_json, inventory
 
 
-PAUSE_MESSAGE = ('Time Machine has open image handles. On the Mac run sudo tmutil disable, '
-                 'let any active backup finish and cleanly detach its Time Machine image; then retry.')
+PAUSE_MESSAGE = ('Time Machine has open image handles. Run the Time Machine source from the Mac with '
+                 'zsh macbook/scripts/offsite_tm_refresh.zsh --label LABEL: it pauses the hourly '
+                 'com.jacobr.vanpi-time-machine agent (sudo tmutil disable does nothing here), '
+                 'waits for the running backup, detaches the image and the share, waits for zero '
+                 'open handles, then starts the run.')
 
 
 def handle_state(commands, source):

@@ -125,7 +125,7 @@ class OffsiteTests(unittest.TestCase):
         self.f.save()
         result = self.f.run('backup', '--label', self.f.label, '--only', 'time-machine')
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn('sudo tmutil disable', result.stdout)
+        self.assertIn('offsite_tm_refresh.zsh', result.stdout)
         self.assertFalse(self.f.cfg.drain.exists())
         self.assertFalse(any(row[0] == 'samba' for row in self.f.calls()))
         self.assertFalse(any(row[0] == 'restic' and 'backup' in row for row in self.f.calls()))
