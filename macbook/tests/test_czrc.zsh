@@ -16,6 +16,8 @@ fail() {
 
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+# An inherited CZRC_REPO would point the default-path case below at a real repo.
+unset CZRC_REPO
 
 czrc_run() { # repo [words]
   local repo=$1; shift
