@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 from contextlib import contextmanager, nullcontext
 import hashlib
@@ -726,6 +728,405 @@ class PiPauseTests(unittest.TestCase):
                 backup.weekly(cfg, state)
             snapshot.assert_not_called()
         self.assertEqual(state['pending'], name)
+
+
+class RetentionResumeTests(unittest.TestCase):
+    """Retention interrupted after a generation was recorded verified must finish on the next not-due run."""
+    OLD, PRIOR, LAST = ('vanpi-20260901T010203Z-aaaaaaa1', 'vanpi-20260908T010203Z-aaaaaaa2',
+                        'vanpi-20260915T010203Z-aaaaaaa3')
+    PARTIAL = 'vanpi-20260801T010203Z-aaaaaaa0'
+    NEWER = 'vanpi-20260922T010203Z-aaaaaaa4'
+
+    def setUp(self):
+        self.enterContext(mock.patch.object(backup.admission, 'admitted_run', return_value=nullcontext()))
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.state_dir = self.root / 'state'; self.state_dir.mkdir(mode=0o700)
+        (self.state_dir / 'authenticated.json').write_text('{}')
+        self.stage = self.root / 'icloud-weekly'; self.stage.mkdir(mode=0o700)
+        original_stat = Path.stat
+        def root_owner(path, *args, **kwargs):
+            result = original_stat(path, *args, **kwargs)
+            if path in (self.state_dir, self.stage):
+                fields = list(result); fields[4] = 0
+                return os.stat_result(fields)
+            return result
+        self.cfg = {**test_config(), 'keep_generations': 2}
+        self.remote = {}
+        self.calls = []
+        self.purge_failures = []
+        for name in (self.OLD, self.PRIOR, self.LAST):
+            self.remote[name] = {'_COMPLETE.json': self.marker(name)}
+            self.local_generation(name, complete=True)
+        self.remote[self.PARTIAL] = {'payload': 'x'}  # an unverified partial: no completion marker
+        self.local_generation(self.PARTIAL, complete=False)
+        self.notify = mock.Mock()
+        mount = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '/dev/test'))
+        env = {'VANPI_ICLOUD_BACKUP_MNT': str(self.root), 'VANPI_ICLOUD_BACKUP_LABEL': 'backup'}
+        self.enterContext(mock.patch.dict(os.environ, env))
+        for patcher in (mock.patch.object(backup, 'STATE_DIR', self.state_dir),
+                        mock.patch.object(backup.priority, 'DIRECTORY', self.root / 'priority'),
+                        mock.patch.object(Path, 'stat', root_owner),
+                        mock.patch.object(backup, 'load_config', return_value=self.cfg),
+                        mock.patch.object(backup.signal, 'signal'),
+                        mock.patch.object(sys, 'argv', ['worker', '--run']),
+                        mock.patch.object(backup, 'credentials_ready', return_value=True),
+                        mock.patch.object(backup, 'check_work_allowed'), mock.patch.object(backup, 'guard'),
+                        mock.patch.object(backup, 'exact_mount'), mock.patch.object(backup, 'notify', self.notify),
+                        mock.patch.object(backup.subprocess, 'run', mount),
+                        mock.patch.object(backup, 'run', side_effect=self.rclone)):
+            patcher.start(); self.addCleanup(patcher.stop)
+        self.mount = mount
+        self.addCleanup(os.umask, os.umask(0o022))
+
+    def marker(self, name, **values):
+        return json.dumps({'owner': backup.OWNER, 'generation': name, 'verification': 'download-compared', **values})
+
+    def local_generation(self, name, complete):
+        path = self.stage / name; (path / 'payload').mkdir(parents=True)
+        (path / 'payload' / 'manifest.json').write_text('{}')
+        if complete:
+            (path / '_COMPLETE.json').write_text(self.marker(name))
+
+    def rclone(self, args, cfg, *rest, **kwargs):
+        operation, target = args[1], args[2] if len(args) > 2 else ''
+        prefix = self.cfg['remote'] + '/'
+        self.calls.append((operation, target))
+        if args[0].endswith('mount_disks.sh'):
+            return ''
+        if operation == 'lsjson' and target == self.cfg['remote']:
+            return json.dumps([{'Name': name, 'IsDir': True} for name in self.remote])
+        if operation == 'lsjson':
+            return json.dumps([{'Name': key} for key in self.remote[target.removeprefix(prefix)]])
+        if operation == 'cat':
+            name, filename = target.removeprefix(prefix).split('/')
+            if name not in self.remote:
+                raise RuntimeError('rclone cat failed (exit 3)')
+            return self.remote[name][filename]
+        if operation == 'purge':
+            if self.purge_failures:
+                raise self.purge_failures.pop(0)
+            del self.remote[target.removeprefix(prefix)]
+            return ''
+        if operation in ('mkdir', 'copy'):
+            return ''
+        self.fail('unexpected command: ' + ' '.join(args))
+
+    def write_state(self, **values):
+        backup.atomic_json(self.state_dir / 'state.json', {
+            'last_success_at': time.time() - 3600, 'last_generation': self.LAST, **values})
+
+    def run_worker(self, code=0):
+        self.assertEqual(backup.main(), code)
+        return backup.read_json(self.state_dir / 'state.json')
+
+    def purges(self):
+        return [target.rsplit('/', 1)[1] for operation, target in self.calls if operation == 'purge']
+
+    def local_names(self):
+        return {path.name for path in self.stage.iterdir()}
+
+    def assert_nothing_deleted(self):
+        self.assertEqual(self.purges(), [])
+        self.assertEqual(set(self.remote), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+        self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+
+    def test_interrupted_retention_finishes_on_next_run_even_when_no_copy_is_due(self):
+        self.write_state()
+        before = backup.read_json(self.state_dir / 'state.json')
+        self.purge_failures = [backup.Deferred('Waiting for a verified, permitted internet route.')]
+        newer = self.stage / self.NEWER; (newer / 'payload').mkdir(parents=True)  # unfinished staging
+        state = self.run_worker()
+        self.assertNotIn('retention_done_for', state)
+        self.assertEqual(state['phase'], 'deferred')
+        self.assertIn(self.OLD, self.remote)
+        state = self.run_worker()
+        self.assertEqual(state['retention_done_for'], self.LAST)
+        self.assertEqual(state['phase'], 'not due')
+        self.assertEqual(set(self.remote), {self.PRIOR, self.LAST, self.PARTIAL})
+        self.assertEqual(self.local_names(), {self.PRIOR, self.LAST, self.PARTIAL, self.NEWER})
+        for key in ('last_success_at', 'last_generation'):
+            self.assertEqual(state[key], before[key])
+        self.assertFalse(backup.cloud_backup_requests.due(self.cfg, state, self.state_dir))
+        self.notify.assert_not_called()
+
+    def test_deferred_resume_stays_retryable_and_leaves_success_history_alone(self):
+        self.write_state(retention_done_for=self.PRIOR)
+        before = backup.read_json(self.state_dir / 'state.json')
+        self.purge_failures = [backup.Deferred('Waiting for a verified, permitted internet route.')] * 2
+        for _ in range(2):
+            state = self.run_worker()
+            self.assertEqual(state['phase'], 'deferred')
+            self.assertEqual(state['last_error'], 'Waiting for a verified, permitted internet route.')
+            self.assertEqual(state['retention_done_for'], self.PRIOR)
+            self.assertNotIn('retry_at', state)
+            for key in ('last_success_at', 'last_generation'):
+                self.assertEqual(state[key], before[key])
+            self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+        self.assertFalse((self.state_dir / 'history.json').exists())
+        self.assertEqual(self.run_worker()['retention_done_for'], self.LAST)
+        self.assertNotIn(self.OLD, self.remote)
+        self.notify.assert_not_called()
+
+    def test_deferral_before_any_remote_call_touches_nothing(self):
+        self.write_state()
+        with mock.patch.object(backup, 'check_work_allowed', side_effect=backup.Deferred('ignition is on')):
+            state = self.run_worker()
+        self.assertEqual((state['phase'], state['last_error']), ('deferred', 'ignition is on'))
+        self.assertNotIn('retention_done_for', state)
+        self.assertEqual(self.calls, [])
+        self.mount.assert_not_called()
+        self.assert_nothing_deleted()
+
+    def test_no_resume_while_a_copy_is_pending(self):
+        newer = self.NEWER
+        self.local_generation(newer, complete=False)
+        self.write_state(pending=newer)
+        repo = self.root / 'borg'; repo.mkdir()
+        (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
+        env = {'BORG_REPO': str(repo)}
+        def stop_at_copy(args, *rest, **kwargs):
+            if args[1] == 'copy':
+                raise backup.Deferred('test stops before network transfer')
+            return self.rclone(args, *rest, **kwargs)
+        with mock.patch.dict(os.environ, env), mock.patch.object(backup, 'run', side_effect=stop_at_copy), \
+                mock.patch.object(backup, 'retention') as retention, \
+                mock.patch.object(backup, 'verification_plan', return_value=({}, 'hash')), \
+                mock.patch.object(backup, 'remote_inventory', return_value={}), \
+                mock.patch.object(backup, 'record_progress'):
+            state = self.run_worker()
+        retention.assert_not_called()
+        self.assertEqual((state['phase'], state['pending']), ('deferred', newer))
+        self.assertNotIn('retention_done_for', state)
+        self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL, newer})
+
+    def start_due_copy(self):
+        """A copy is due and nothing is pending; the copy stops once its staging is claimed."""
+        self.write_state(last_success_at=time.time() - 8 * 86400)
+        repo = self.root / 'borg'; repo.mkdir(exist_ok=True)
+        (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
+        self.enterContext(mock.patch.dict(os.environ, {'BORG_REPO': str(repo)}))
+        self.enterContext(mock.patch.object(backup, 'require_fresh_borg'))
+        # The overdue generation holds the space: headroom exists only once it is gone.
+        self.enterContext(mock.patch.object(backup.shutil, 'disk_usage', side_effect=lambda path: mock.Mock(
+            free=1 if (self.stage / self.OLD).exists() else 10**15)))
+        self.snapshot = self.enterContext(mock.patch.object(
+            backup, 'make_snapshot', side_effect=backup.Deferred('test stops once staging is claimed')))
+
+    def test_overdue_cleanup_runs_before_a_due_copy_so_it_cannot_starve_for_headroom(self):
+        self.start_due_copy()
+        state = self.run_worker()
+        self.assertEqual(self.purges(), [self.OLD])
+        self.assertEqual(state['retention_done_for'], self.LAST)
+        self.snapshot.assert_called_once()
+        self.assertTrue(backup.GENERATION.fullmatch(state['pending']))
+        self.assertNotIn(self.OLD, self.local_names())
+
+    def test_copy_that_cannot_start_claims_no_pending_name_and_retries_the_cleanup(self):
+        self.start_due_copy()
+        self.purge_failures = [RuntimeError('rclone purge failed (exit 5)')] * 2
+        for _ in range(2):
+            state = self.run_worker()
+            self.assertEqual((state['phase'], state['last_error']), ('deferred', 'insufficient staging disk headroom'))
+            self.assertIsNone(state.get('pending'))
+            self.assertNotIn('retention_done_for', state)
+        self.snapshot.assert_not_called()
+        self.assertEqual(len(self.purge_failures), 0)  # the cleanup was attempted on both due runs
+        state = self.run_worker()
+        self.assertEqual(self.purges(), [self.OLD] * 3)  # two failed attempts, then the purge that worked
+        self.assertNotIn(self.OLD, self.remote)
+        self.snapshot.assert_called_once()
+        self.assertEqual(state['retention_done_for'], self.LAST)
+
+    def test_ordinary_cleanup_failure_on_a_due_run_does_not_block_the_copy(self):
+        self.start_due_copy()
+        self.purge_failures = [RuntimeError('rclone purge failed (exit 5)')]
+        with mock.patch.object(backup.shutil, 'disk_usage', return_value=mock.Mock(free=10**15)), \
+                contextlib.redirect_stderr(io.StringIO()) as log:
+            state = self.run_worker()
+        self.assertIn('continuing with the due copy: rclone purge failed (exit 5)', log.getvalue())
+        self.snapshot.assert_called_once()
+        self.assertNotIn('retention_done_for', state)
+        self.assertTrue(backup.GENERATION.fullmatch(state['pending']))
+        self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+
+    def test_disk_identity_failure_during_a_due_run_cleanup_stops_before_any_staging(self):
+        calls = []
+        def verify(mount, label):
+            calls.append(label)
+            if len(calls) == 1:
+                return  # weekly()'s own check passes
+            raise failure(len(calls))
+        for label, failure in (
+                ('mismatch', lambda n: backup.MountIdentityError('backup filesystem label does not match its mount')),
+                # findmnt failing is not an identity verdict: the disk stays unverified, so it is checked again
+                ('unverifiable', lambda n: subprocess.CalledProcessError(1, ['findmnt']))):
+            with self.subTest(label):
+                calls.clear()
+                self.start_due_copy()
+                with mock.patch.object(backup, 'exact_mount', side_effect=verify), \
+                        mock.patch.object(backup.shutil, 'disk_usage', return_value=mock.Mock(free=10**15)), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    state = self.run_worker(1)
+                self.assertGreaterEqual(len(calls), 2)
+                self.assertEqual(state['phase'], 'error')
+                self.assertEqual(state['last_error'], 'backup filesystem label does not match its mount'
+                                 if label == 'mismatch' else 'CalledProcessError')
+                self.assertIsNone(state.get('pending'))
+                self.assertNotIn('retention_done_for', state)
+                self.snapshot.assert_not_called()
+                # no staging directory was created; the old local copy stays because its removal never ran
+                self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+                self.snapshot.reset_mock()
+                self.remote[self.OLD] = {'_COMPLETE.json': self.marker(self.OLD)}  # purged remotely; restore for the next case
+
+    def test_malformed_older_remote_marker_is_left_alone_and_does_not_block_a_due_copy(self):
+        for raw in ('null', '[]', '7', '"text"'):
+            with self.subTest(raw):
+                self.remote[self.OLD] = {'_COMPLETE.json': raw}
+                self.start_due_copy()
+                with mock.patch.object(backup.shutil, 'disk_usage', return_value=mock.Mock(free=10**15)), \
+                        contextlib.redirect_stderr(io.StringIO()) as log:
+                    state = self.run_worker()
+                self.assertIn('Ignoring malformed completion marker in ' + self.OLD, log.getvalue())
+                self.assertEqual(self.purges(), [])  # the odd generation counts as incomplete, so nothing is pruned
+                self.assertEqual(state['retention_done_for'], self.LAST)
+                self.snapshot.assert_called_once()
+                self.assertTrue(backup.GENERATION.fullmatch(state['pending']))
+                self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+                self.snapshot.reset_mock(); self.calls.clear()
+
+    def test_malformed_local_marker_is_an_ordinary_failure_that_is_recorded(self):
+        for raw in ('null', '[]', '7'):
+            with self.subTest(raw):
+                (self.stage / self.OLD / '_COMPLETE.json').write_text(raw)
+                self.remote[self.OLD] = {'_COMPLETE.json': self.marker(self.OLD)}
+                with self.subTest('due'):
+                    self.start_due_copy()
+                    with mock.patch.object(backup.shutil, 'disk_usage', return_value=mock.Mock(free=10**15)), \
+                            contextlib.redirect_stderr(io.StringIO()) as log:
+                        state = self.run_worker()
+                    self.assertIn('continuing with the due copy: local retention marker mismatch', log.getvalue())
+                    self.snapshot.assert_called_once()
+                    self.assertNotIn('retention_done_for', state)
+                    self.assertTrue((self.stage / self.OLD).exists())  # never removed on an unproven marker
+                    self.snapshot.reset_mock()
+                with self.subTest('not due'):
+                    self.remote[self.OLD] = {'_COMPLETE.json': self.marker(self.OLD)}
+                    self.write_state()
+                    state = self.run_worker(1)
+                    self.assertEqual((state['phase'], state['last_error']), ('error', 'local retention marker mismatch'))
+                    self.assertNotIn('retention_done_for', state)
+                    self.assertTrue((self.stage / self.OLD).exists())
+
+    def test_invalid_last_generation_on_a_due_run_does_not_block_the_copy(self):
+        self.start_due_copy()
+        self.write_state(last_success_at=time.time() - 8 * 86400, last_generation='junk')
+        with mock.patch.object(backup.shutil, 'disk_usage', return_value=mock.Mock(free=10**15)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.run_worker()
+        self.snapshot.assert_called_once()
+        self.assertEqual(self.purges(), [])
+
+    def test_stop_now_conditions_during_a_due_run_cleanup_still_end_the_run(self):
+        for failure, code, phase in ((backup.Deferred('ignition is on'), 0, 'deferred'),
+                                     (backup.Deferred('yielding to selected Time Machine priority'), 0, 'deferred'),
+                                     (backup.Deferred('stopped for disk lifecycle or service shutdown'), 0, 'deferred'),
+                                     (backup.AuthenticationRequired('iCloud rejected the saved web session'), 1,
+                                      'authentication_required')):
+            with self.subTest(str(failure)):
+                self.purge_failures = [failure]
+                self.start_due_copy()
+                state = self.run_worker(code)
+                self.assertEqual(state['phase'], phase)
+                self.assertNotIn('retention_done_for', state)
+                self.assertIsNone(state.get('pending'))
+                self.snapshot.assert_not_called()
+                self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+                self.snapshot.reset_mock()
+
+    def test_resume_needs_this_jobs_own_completion_marker_for_the_last_generation(self):
+        bad_markers = {
+            'foreign owner': json.dumps({'owner': 'someone-else', 'generation': self.LAST,
+                                         'verification': 'download-compared'}),
+            'wrong generation': self.marker(self.PRIOR),
+            'not download-compared': json.dumps({'owner': backup.OWNER, 'generation': self.LAST,
+                                                 'verification': 'size-only'}),
+            'not an object': json.dumps(['x']), 'null': 'null'}
+        for label, marker in bad_markers.items():
+            with self.subTest(label):
+                self.remote[self.LAST]['_COMPLETE.json'] = marker
+                self.write_state()
+                state = self.run_worker(1)
+                self.assertEqual(state['phase'], 'error')
+                self.assertNotIn('retention_done_for', state)
+                self.assert_nothing_deleted()
+        with self.subTest('missing'):
+            del self.remote[self.LAST]
+            self.write_state()
+            self.assertEqual(self.run_worker(1)['phase'], 'error')
+            self.assertEqual(self.purges(), [])
+            self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+
+    def test_invalid_last_generation_is_a_handled_failure_without_deletion(self):
+        for value in ('other-person', '../oops', 'vanpi-20269999T010203Z-xyz', ['x'], 7, True):
+            with self.subTest(value=value):
+                self.write_state(last_generation=value)
+                state = self.run_worker(1)
+                self.assertEqual(state['phase'], 'error')
+                self.assertNotIn('retention_done_for', state)
+                self.assert_nothing_deleted()
+
+    def test_resume_mounts_bigboi_only_for_the_cleanup_and_releases_it_after_a_failure(self):
+        self.write_state()
+        self.mount.return_value = subprocess.CompletedProcess([], 1, '', '')
+        self.purge_failures = [backup.Deferred('Waiting for a verified, permitted internet route.')]
+        with mock.patch.object(backup, 'unmount_if_unused') as unmount:
+            self.assertEqual(self.run_worker()['phase'], 'deferred')
+        self.assertIn(['/home/pi/scripts/mount_disks.sh', 'backup'], [c.args[0] for c in backup.run.call_args_list])
+        unmount.assert_called_once_with(self.root, 'backup')
+
+    def test_normal_path_records_completion_and_is_not_repeated(self):
+        self.write_state(pending=self.NEWER, last_success_at=0, last_generation=self.LAST)
+        self.local_generation(self.NEWER, complete=False)
+        repo = self.root / 'borg'; repo.mkdir()
+        (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
+        def publish(args, *rest, **kwargs):
+            if args[1] == 'copyto':
+                self.remote[self.NEWER] = {'_COMPLETE.json': Path(args[2]).read_text()}
+                return ''
+            return self.rclone(args, *rest, **kwargs)
+        with mock.patch.dict(os.environ, {'BORG_REPO': str(repo)}), \
+                mock.patch.object(backup, 'run', side_effect=publish), \
+                mock.patch.object(backup, 'verification_plan', return_value=({}, 'hash')), \
+                mock.patch.object(backup, 'remote_inventory', return_value={}), \
+                mock.patch.object(backup, 'verify_generation', return_value={'manifest_sha256': 'hash', 'verified_files': 0}):
+            state = self.run_worker()
+        self.assertEqual((state['phase'], state['last_generation'], state['retention_done_for']),
+                         ('complete', self.NEWER, self.NEWER))
+        self.assertEqual(self.purges(), [self.OLD, self.PRIOR])
+        self.assertEqual(set(self.remote), {self.LAST, self.NEWER, self.PARTIAL})
+        self.notify.assert_called_once()
+        self.assertIn('verified', self.notify.call_args.args[1])
+        with mock.patch.object(backup, 'retention') as retention:
+            self.assertEqual(self.run_worker()['phase'], 'not due')
+        retention.assert_not_called()
+
+    def test_state_without_the_key_triggers_exactly_one_cleanup(self):
+        self.write_state()
+        with mock.patch.object(backup, 'retention', wraps=backup.retention) as retention:
+            for _ in range(3):
+                self.run_worker()
+        retention.assert_called_once()
+        self.assertEqual(self.purges(), [self.OLD])
+        self.assertEqual(self.local_names(), {self.PRIOR, self.LAST, self.PARTIAL})
+
+    def test_retention_is_idempotent_for_the_current_generation(self):
+        for _ in range(2):
+            backup.retention(self.cfg, self.stage, self.LAST)
+        self.assertEqual(self.purges(), [self.OLD])
+        self.assertEqual(set(self.remote), {self.PRIOR, self.LAST, self.PARTIAL})
 
 
 if __name__ == '__main__': unittest.main()

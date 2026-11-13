@@ -58,6 +58,21 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   are removed only after the corresponding remote retention operation succeeds.
   Unverified remote partials and stale abandoned staging generations are retained
   for inspection, not silently deleted. Repeated stale partials may need cleanup.
+  Success is recorded before retention runs, so the worker also records
+  `retention_done_for` once retention finishes. A pass that never started, or
+  stopped before purging (a dropped route, a reboot), is finished by the next run
+  that has nothing pending, instead of waiting for a later copy to verify. A due
+  copy runs it first, before claiming staging space, because the leftover
+  generation may be what leaves too little headroom; an ordinary failure there is
+  logged and the copy continues, while a stop-now condition (pause, ignition,
+  priority yield, uplink change, shutdown, rejected login) still ends the run.
+  A copy that cannot start claims no pending name. The resume first reads the
+  newest generation's `_COMPLETE.json` and refuses, deleting nothing, unless it is
+  this job's; this store has no `OWNER.json`. A deferred or refused resume leaves
+  success history, the weekly cadence and any Back up now request untouched and
+  sends no "verified" alert. It does not recover a local directory left after its
+  remote purge finished, or a generation whose `_COMPLETE.json` was removed
+  mid-purge: retention no longer lists either one.
 - Copied repositories retain the original encryption key/identity. Treat them
   as restore sources; do not independently create/prune/recreate Borg archives
   in a copy while the original repository is in use.

@@ -6,7 +6,7 @@ The worker validates its inherited admission before --run and takes the Borg
 repository data lock only while copying a consistent repository snapshot.
 """
 import configparser
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 import datetime as dt
 import hashlib
 import json
@@ -48,6 +48,10 @@ UPLOAD_SPEED = upload_speed_log.UploadSpeedSampler()
 
 class Deferred(Exception):
     pass
+
+
+class MountIdentityError(RuntimeError):
+    """The backup disk or its staging root is not what was verified: never continue past it."""
 
 
 class AuthenticationRequired(RuntimeError):
@@ -304,17 +308,19 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
 def exact_mount(mount, label):
     out = capture(['/usr/bin/findmnt', '-rn', '-M', str(mount), '-o', 'SOURCE']).strip()
     if not out or '\n' in out or mount.is_symlink():
-        raise RuntimeError('ambiguous or unsafe backup mount')
+        raise MountIdentityError('ambiguous or unsafe backup mount')
     device = Path('/dev/disk/by-label') / label
     if Path(out).resolve(strict=True) != device.resolve(strict=True) or not device.is_block_device():
-        raise RuntimeError('backup filesystem label does not match its mount')
+        raise MountIdentityError('backup filesystem label does not match its mount')
 
 
 def safe_generation(root, name):
     if not GENERATION.fullmatch(name):
         raise ValueError('unsafe generation name')
     path = root / name
-    if root.is_symlink() or path.is_symlink() or path.parent.resolve() != root.resolve():
+    if root.is_symlink() or path.parent.resolve() != root.resolve():
+        raise MountIdentityError('unsafe generation path')
+    if path.is_symlink():
         raise ValueError('unsafe generation path')
     return path
 
@@ -508,6 +514,18 @@ def choose_prunable(names, current, keep):
     return good[:-keep] if len(good) > keep else []
 
 
+def own_marker(marker, name):
+    """Decoded _COMPLETE.json (local or remote) is a record of this job for generation name.
+
+    Takes the raw decoded value: valid JSON that is not an object is simply not ours.
+    """
+    return isinstance(marker, dict) and marker.get('owner') == OWNER and marker.get('generation') == name
+
+
+def complete_marker(marker, name):
+    return own_marker(marker, name) and marker.get('verification') == 'download-compared'
+
+
 def retention(cfg, root, current):
     rows = json.loads(run([RCLONE, 'lsjson', cfg['remote'], '--dirs-only'], cfg, network=True))
     complete = []
@@ -520,15 +538,19 @@ def retention(cfg, root, current):
         if not any(e.get('Name') == '_COMPLETE.json' for e in entries):
             continue
         marker = json.loads(run([RCLONE, 'cat', cfg['remote'] + '/' + name + '/_COMPLETE.json'], cfg, network=True))
-        if marker.get('owner') == OWNER and marker.get('generation') == name and marker.get('verification') == 'download-compared':
+        if complete_marker(marker, name):
             complete.append(name)
+        elif not isinstance(marker, dict):
+            # One odd generation is left alone (kept for inspection), never a reason to
+            # stop retiring the others or to fail the run.
+            print('Ignoring malformed completion marker in ' + name, file=sys.stderr, flush=True)
     for name in choose_prunable(complete, current, cfg['keep_generations']):
         run([RCLONE, 'purge', cfg['remote'] + '/' + name], cfg, network=True)
         local = safe_generation(root, name)
         if local.exists():
             exact_mount(Path(os.environ['VANPI_ICLOUD_BACKUP_MNT']), os.environ['VANPI_ICLOUD_BACKUP_LABEL'])
             marker = read_json(local / '_COMPLETE.json')
-            if marker.get('owner') != OWNER or marker.get('generation') != name:
+            if not own_marker(marker, name):
                 raise RuntimeError('local retention marker mismatch')
             shutil.rmtree(local)
         print('Retired verified weekly generation ' + name, flush=True)
@@ -566,15 +588,18 @@ def unmount_if_unused(mount, label):
         print('leaving bigboi mounted for another backup job', flush=True)
 
 
-def weekly(cfg, state):
-    if not cloud_backup_requests.due(cfg, state, STATE_DIR):
-        return 'not due'
+def require_cloud_ready(cfg):
     if not credentials_ready(cfg) or not (STATE_DIR / 'authenticated.json').is_file():
         raise Deferred('iCloud login is required; run icloud_backup.sh --login')
     if (STATE_DIR / 'authentication-error.json').is_file():
         raise Deferred('iCloud authentication needs attention; inspect icloud_backup.sh --status before retrying')
     check_work_allowed(cfg)
     guard(cfg)
+
+
+@contextmanager
+def backup_disk_mounted(cfg):
+    """Yield the verified backup mount, mounting bigboi for the duration when it was not."""
     mount = Path(os.environ['VANPI_ICLOUD_BACKUP_MNT'])
     label = os.environ['VANPI_ICLOUD_BACKUP_LABEL']
     probe = subprocess.run(['/usr/bin/findmnt', '-rn', '-M', str(mount), '-o', 'SOURCE'], capture_output=True, text=True)
@@ -586,12 +611,112 @@ def weekly(cfg, state):
         elif probe.returncode:
             raise RuntimeError('cannot determine backup mount state')
         exact_mount(mount, label)
-        root = mount / 'icloud-weekly'
-        if root.is_symlink():
-            raise RuntimeError('unsafe staging root')
-        root.mkdir(mode=0o700, exist_ok=True)
-        if root.stat().st_uid != 0 or root.stat().st_mode & 0o077:
-            raise RuntimeError('staging must be root-owned and private')
+        yield mount
+    finally:
+        if mounted_here:
+            unmount_if_unused(mount, label)
+
+
+def staging_root(mount):
+    root = mount / 'icloud-weekly'
+    if root.is_symlink():
+        raise RuntimeError('unsafe staging root')
+    root.mkdir(mode=0o700, exist_ok=True)
+    if root.stat().st_uid != 0 or root.stat().st_mode & 0o077:
+        raise RuntimeError('staging must be root-owned and private')
+    return root
+
+
+def run_retention(cfg, state, root, name):
+    record_progress(state, 'retention')
+    retention(cfg, root, name)
+    # Completion, not intent: success is recorded before retention runs, so only
+    # this key tells a later run that the cleanup was interrupted.
+    state['retention_done_for'] = name
+    atomic_json(STATE_DIR / 'state.json', state)
+
+
+def check_published_generation(cfg, name):
+    """Read-only proof that the store holds this job's own completed copy of name.
+
+    This worker has no OWNER.json: a store is ours only through its generations'
+    _COMPLETE.json markers, which retention() also demands before it purges one.
+    """
+    marker = json.loads(run([RCLONE, 'cat', cfg['remote'] + '/' + name + '/_COMPLETE.json'], cfg, network=True))
+    if not complete_marker(marker, name):
+        raise RuntimeError('last verified generation has no matching completion marker; cleanup refused')
+
+
+def outstanding_retention(state):
+    """The generation whose retention pass never finished, or None when it is settled.
+
+    Never while a copy is pending, so cleanup cannot touch what an in-progress
+    copy needs; success is saved before retention runs and retention is stateless,
+    so without this a dropped connection leaves one retired full generation in
+    iCloud and on bigboi until a later copy verifies.
+    """
+    last = state.get('last_generation')
+    if not last or state.get('pending') or state.get('retention_done_for') == last:
+        return None
+    if not isinstance(last, str) or not GENERATION.fullmatch(last):
+        raise ValueError('invalid last generation; cleanup refused')
+    return last
+
+
+def resume_retention(cfg, state):
+    """Not-due path: finish the outstanding retention pass; any failure surfaces as the run's result.
+
+    Retention can only remove a completed generation older than the one just
+    verified (its remote marker and the local one both match), never an
+    unfinished staging directory or a newer generation.
+    """
+    last = outstanding_retention(state)
+    if last is None:
+        return
+    require_cloud_ready(cfg)
+    check_published_generation(cfg, last)
+    with backup_disk_mounted(cfg) as mount:
+        run_retention(cfg, state, staging_root(mount), last)
+
+
+def resume_retention_before_copy(cfg, state, root, mount):
+    """Due path: the same cleanup, ahead of allocating a new copy, and never blocking it.
+
+    The leftover generation may be what leaves too little staging headroom, so
+    it must go first. An ordinary failure is logged and the copy continues.
+    Deferred is deliberately not caught: every stop-now condition (pause, ignition,
+    HDD policy, priority yield, uplink change, SIGTERM through abort) is a Deferred
+    raised by run()/check_work_allowed()/guard(), and must end the run as before.
+    A rejected login (AuthenticationRequired, a RuntimeError) also stays fatal.
+
+    So does anything saying the backup disk is not what weekly() verified
+    (MountIdentityError from exact_mount() or the staging root check), because
+    the copy stages onto that disk next. Failures about one generation (its
+    local marker, a symlinked name, an rclone error, a failed rmtree) are
+    ordinary. A failure that left the disk unverified (findmnt or device lookup
+    failing) is caught, so the disk is checked again before the copy goes on.
+    """
+    try:
+        last = outstanding_retention(state)
+        if last is not None:
+            check_published_generation(cfg, last)
+            run_retention(cfg, state, root, last)
+    except (AuthenticationRequired, MountIdentityError):
+        raise
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
+        print('Cleanup of retired generations failed; continuing with the due copy: '
+              + message + failure_detail(exc), file=sys.stderr, flush=True)
+        exact_mount(mount, os.environ['VANPI_ICLOUD_BACKUP_LABEL'])
+
+
+def weekly(cfg, state):
+    if not cloud_backup_requests.due(cfg, state, STATE_DIR):
+        resume_retention(cfg, state)
+        return 'not due'
+    require_cloud_ready(cfg)
+    with backup_disk_mounted(cfg) as mount:
+        root = staging_root(mount)
         repo = Path(os.environ['BORG_REPO'])
         if repo.is_symlink() or mount.resolve() not in repo.resolve().parents:
             raise RuntimeError('repository is outside the backup disk')
@@ -599,18 +724,23 @@ def weekly(cfg, state):
         meta.read(repo / 'config')
         if not meta.has_option('repository', 'key'):
             raise RuntimeError('expected a repokey-encrypted Borg repository')
+        resume_retention_before_copy(cfg, state, root, mount)
         pending = state.get('pending')
-        if not pending:
+        fresh = not pending
+        if fresh:
             pending = 'vanpi-' + dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
-            state['pending'] = pending
-            state['progress'] = {}
-            atomic_json(STATE_DIR / 'state.json', state)
         generation = safe_generation(root, pending)
-        if not (generation / 'payload' / 'manifest.json').is_file():
+        if fresh or not (generation / 'payload' / 'manifest.json').is_file():
             require_fresh_borg(cfg)
             size = sum((Path(directory)/name).stat().st_size for directory, dirs, files in os.walk(repo) for name in files)
             if shutil.disk_usage(root).free < size + cfg['minimum_free_gib'] * 1024**3:
                 raise Deferred('insufficient staging disk headroom')
+            if fresh:
+                # Only now: a pending name makes later runs skip the retention resume, so a
+                # copy that cannot start (stale Borg, no headroom) must not claim one.
+                state['pending'] = pending
+                state['progress'] = {}
+                atomic_json(STATE_DIR / 'state.json', state)
             record_progress(state, 'preparing')
             make_snapshot(cfg, root, repo, pending, state)
         payload = generation / 'payload'
@@ -637,13 +767,9 @@ def weekly(cfg, state):
         state['attempt_verified_at'] = state['last_success_at']
         atomic_json(STATE_DIR / 'state.json', state)
         save_attempt(STATE_DIR, state)
-        record_progress(state, 'retention')
-        retention(cfg, root, pending)
+        run_retention(cfg, state, root, pending)
         notify(state, 'vanpi iCloud backup verified', 'Weekly encrypted recovery copy uploaded and download-compared: ' + pending)
         return 'complete'
-    finally:
-        if mounted_here:
-            unmount_if_unused(mount, label)
 
 
 def require_fresh_borg(cfg):
