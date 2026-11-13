@@ -387,6 +387,16 @@ class GuardDatabaseTests(unittest.TestCase):
             'kind': FindingKind.CONFIG_CHANGED.value, 'uuid': 'cpu-menu',
             'detail': 'fields: config.BTTTouchBarScriptUpdateInterval'}])
 
+    def test_menu_bar_script_item_watches_its_shell_launch_config(self):
+        self.insert_menu_bar_script()
+        self.assertNotIn('gesture_config', read_snapshot(self.path, ['root'])['records']['cpu-menu']['payload'])
+        launch = '/bin/bash:::-c:::-:::'
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute('UPDATE ZBTTBASEENTITY SET ZGESTURECONFIG=? WHERE ZUNIQUEIDENTIFIER=?',
+                               (launch, 'cpu-menu'))
+        self.assertEqual(read_snapshot(self.path, ['root'])['records']['cpu-menu']['payload']['gesture_config'],
+                         launch)
+
     def test_menu_bar_script_item_without_readable_settings_fails_closed(self):
         self.insert_menu_bar_script(trait=False)
         with self.assertRaisesRegex(ValueError, 'script settings are missing'):

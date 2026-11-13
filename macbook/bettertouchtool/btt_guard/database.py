@@ -109,7 +109,11 @@ def _payload(row: sqlite3.Row) -> dict[str, Any]:
         ('ZSHORTCUT', 'shortcut'),
         ('ZGESTURECONFIG', 'gesture_config'),
     ):
-        if column == 'ZGESTURECONFIG' and row['ZGESTURETYPE'] != 643:
+        if column == 'ZGESTURECONFIG' and row['ZGESTURETYPE'] not in (NAMED_TRIGGER, MENU_BAR_SCRIPT_TYPE):
+            continue
+        # A 681 item's ZGESTURECONFIG is BTT's shell launch config; without it BTT never runs
+        # the script, so an empty one is "absent", not a value to compare.
+        if column == 'ZGESTURECONFIG' and row['ZGESTURETYPE'] == MENU_BAR_SCRIPT_TYPE and not row[column]:
             continue
         if row[column] is not None:
             payload[key] = row[column]

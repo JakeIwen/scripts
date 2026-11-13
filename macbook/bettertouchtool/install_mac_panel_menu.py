@@ -37,6 +37,9 @@ LEGACY_MENU_TYPE = 674
 # The main checkout path on purpose: BTT runs this long after any worktree is gone.
 CPU_SCRIPT = "/usr/bin/python3 -I -B /Users/jacobr/dev/scripts/macbook/scripts/cpu_percent.py"
 REFRESH_SECONDS = 3
+# BTT runs a menu-bar item's script only when the trigger carries a shell launch config
+# (the same key every type-642 shell widget has); saved as the row's ZGESTURECONFIG.
+SHELL_LAUNCH_CONFIG = "/bin/bash:::-c:::-:::"
 MODIFIERS = 1835008  # Control | Option | Command, from BTT's modifier-key table.
 ADVANCED_MODIFIERS = "1835049"  # Same combination in the live BTT keyboard exports.
 SHORTCUTS = (("P", 35), ("M", 46), ("K", 40))
@@ -49,6 +52,7 @@ def definitions(preset, key_code):
     menu = dict(common, BTTUUID=MENU_ID, BTTTriggerType=MENU_TYPE,
                 BTTTriggerClass="BTTTriggerTypeOtherTriggers",
                 BTTGestureNotes=MARKERS[MENU_ID],
+                BTTShellScriptWidgetGestureConfig=SHELL_LAUNCH_CONFIG,
                 # BTT's documented script-driven menu-bar form: the icon plus the script's
                 # stdout (the CPU percentage) as text; it ignores BTTTouchBarButtonName here.
                 BTTTriggerConfig={"BTTTouchBarItemIconType": 1,
@@ -212,7 +216,7 @@ def installation_plan(saved, runtime):
                         "menu_bar": {"uuid": MENU_ID, "trigger_type": MENU_TYPE,
                                      "trigger_class": desired[0]["BTTTriggerClass"],
                                      "icon": MENU_ICON, "existing": MENU_ID in saved,
-                                     "script": CPU_SCRIPT, "refresh_seconds": REFRESH_SECONDS,
+                                     "script": CPU_SCRIPT, "shell_launch_config": SHELL_LAUNCH_CONFIG, "refresh_seconds": REFRESH_SECONDS,
                                      "legacy_uuid": LEGACY_MENU_ID,
                                      "retires_legacy_type": LEGACY_MENU_TYPE if legacy else None},
                         "keyboard": {"uuid": KEY_ID, **shortcut, "modifier_flags": MODIFIERS,
@@ -251,6 +255,8 @@ def verify_saved(database, plan, before, retired=False):
                     "ZLAUNCHPATH": URL, "ZDESC": node["BTTGestureNotes"],
                     "ZORDER": node["BTTOrder"], "ZISENABLED": 1, "ZENABLEDNEW": 1,
                     "app_scope": ["BT.G"]}
+        if uid == MENU_ID:
+            expected.update(ZGESTURECONFIG=SHELL_LAUNCH_CONFIG)
         if uid == KEY_ID:
             expected.update(ZKEYCODE=node["BTTShortcutKeyCode"], ZMODIFIERKEYS=MODIFIERS,
                             ZTRIGGERONDOWN=1, ZGESTURECONFIG=ADVANCED_MODIFIERS)

@@ -396,6 +396,27 @@ class GuardDefinitionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "BTTTouchBarShellScriptString"):
             build_definitions(*menu({}), {PRESET: "Master"})
 
+    def test_menu_bar_script_item_runtime_must_keep_its_shell_launch_config(self):
+        launch = "/bin/bash:::-c:::-:::"
+        snapshot, exports = fixture()
+        snapshot["records"]["cpu-menu"] = record(
+            "cpu-menu", trigger_type=681, action_type=59, config={
+                "BTTTouchBarShellScriptString": "x", "BTTTouchBarScriptUpdateInterval": 3,
+                "BTTTouchBarAppleScriptStringRunOnInit": 1, "BTTTouchBarOnlyShowIcon": 0},
+            payload={"launch_path": "http://127.0.0.1:8769/", "additional_action_string": "Default",
+                     "gesture_config": launch})
+        node = {"BTTUUID": "cpu-menu", "BTTTriggerType": 681, "BTTTriggerClass": "BTTTriggerTypeOtherTriggers",
+                "BTTPredefinedActionType": 59, "BTTOpenURL": "http://127.0.0.1:8769/",
+                "BTTOpenURLBrowser": "Default",
+                "BTTTriggerConfig": {"BTTTouchBarShellScriptString": "x", "BTTTouchBarScriptUpdateInterval": 3,
+                                     "BTTTouchBarAppleScriptStringRunOnInit": 1}}
+        for runtime in (dict(node, BTTShellScriptWidgetGestureConfig=launch),):
+            result = build_definitions(exports + [runtime], snapshot, {PRESET: "Master"})
+            self.assertEqual(result["cpu-menu"]["BTTShellScriptWidgetGestureConfig"], launch)
+        for runtime in (node, dict(node, BTTShellScriptWidgetGestureConfig="/bin/zsh:::-c:::-:::")):
+            with self.assertRaisesRegex(ValueError, "BTTShellScriptWidgetGestureConfig"):
+                build_definitions(exports + [runtime], snapshot, {PRESET: "Master"})
+
     def test_unknown_payload_mapping_or_missing_class_derivation_fails(self):
         snapshot, exports = fixture()
         snapshot["records"]["named"]["action_type"] = 386

@@ -39,7 +39,7 @@ def installed_rows():
                                     ZDESC=node["BTTGestureNotes"], ZNOTES=None, ZACTION=59, ZLAUNCHPATH=panel.URL,
                                     ZPARENT=None, app_scope=["BT.G"])
         if node["BTTUUID"] == panel.MENU_ID:
-            rows[panel.MENU_ID].update(ZTRAIT=100)
+            rows[panel.MENU_ID].update(ZTRAIT=100, ZGESTURECONFIG=panel.SHELL_LAUNCH_CONFIG)
             rows["menu-trait"] = dict(rows["global"], Z_PK=100, ZUNIQUEIDENTIFIER="menu-trait", ZONLYICON=0,
                                       ZBEZIERPATH=json.dumps(node["BTTTriggerConfig"]).encode())
         if node["BTTUUID"] == panel.KEY_ID:
@@ -360,6 +360,18 @@ class InstallerTests(unittest.TestCase):
                 self.assertFalse(panel.verify_saved("fixture", plan, before))
             saved["menu-trait"]["ZBEZIERPATH"] = json.dumps(dict(wanted, BTTTouchBarOnlyShowIcon=False)).encode()
             self.assertTrue(panel.verify_saved("fixture", plan, before))  # False == 0, as BTT stores flags
+
+    def test_menu_item_carries_the_shell_launch_config_that_makes_btt_run_its_script(self):
+        saved, plan = installed_rows()
+        menu = plan["desired"][0]
+        self.assertEqual(menu["BTTShellScriptWidgetGestureConfig"], "/bin/bash:::-c:::-:::")
+        self.assertNotIn("BTTShellScriptWidgetGestureConfig", menu["BTTTriggerConfig"])
+        with patch.object(panel, "saved_state", return_value=saved):
+            before = fixture_rows()
+            self.assertTrue(panel.verify_saved("fixture", plan, before))
+            for bad in (None, "", "/bin/zsh:::-c:::-:::"):
+                saved[panel.MENU_ID]["ZGESTURECONFIG"] = bad
+                self.assertFalse(panel.verify_saved("fixture", plan, before), bad)
 
     def test_saved_verification_tracks_the_legacy_item(self):
         saved, plan = installed_rows()

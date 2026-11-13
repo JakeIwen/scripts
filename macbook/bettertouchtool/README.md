@@ -762,7 +762,7 @@ and report identities. Recreate venvs rather than moving them.
   menu-bar item (type 681, shell-script title: SF Symbol `slider.horizontal.3` plus the
   whole-machine CPU busy % from `macbook/scripts/cpu_percent.py`, refreshed every 3 s;
   the 681 item has its own UUID, added and verified (runtime and saved, including
-  its script settings in the trait's `ZBEZIERPATH`) before the old icon-only 674
+  its script settings in the trait's `ZBEZIERPATH` and the shell launch config `/bin/bash:::-c:::-:::` in the row's `ZGESTURECONFIG`, without which BTT never runs the script) before the old icon-only 674
   item (`AF69261A-...`) is deleted, so a failure never leaves the menu bar empty and
   a rerun finishes the job; `--no-checkpoint` skips the Guard checkpoint) and All Apps keyboard
   shortcut (installed as `ctrl+opt+cmd+P`), both using BTT's built-in Open URL

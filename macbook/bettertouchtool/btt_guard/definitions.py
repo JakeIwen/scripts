@@ -275,6 +275,8 @@ def _payload_field(key: str, expected: dict[str, Any], uuid: str) -> str:
         return "BTTShortcutToSend"
     if key == "gesture_config" and int(expected["trigger_type"]) == 643:
         return "BTTTriggerName"
+    if key == "gesture_config" and int(expected["trigger_type"]) == MENU_BAR_SCRIPT_TYPE:
+        return "BTTShellScriptWidgetGestureConfig"
     if key == "additional_action_string" and action_type in ADDITIONAL_STRING_FIELDS:
         return ADDITIONAL_STRING_FIELDS[action_type]
     raise ValueError(f"Unsupported payload mapping {key} for BTT record {uuid}.")
