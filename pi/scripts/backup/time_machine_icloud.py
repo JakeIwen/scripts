@@ -307,6 +307,11 @@ def network(cfg, *args, **kwargs):
     return cloud.run([cloud.RCLONE, *args], cfg, network=True, **kwargs)
 
 
+def check_remote_owner(cfg):
+    if json.loads(network(cfg, 'cat', cfg['remote'] + '/OWNER.json')) != {'owner': store.OWNER}:
+        raise RuntimeError('cloud store owner mismatch')
+
+
 def ensure_remote(cfg):
     remote = cfg['remote']
     network(cfg, 'mkdir', remote)
@@ -315,8 +320,7 @@ def ensure_remote(cfg):
         if entries:
             raise RuntimeError('refusing to claim a nonempty cloud store')
         network(cfg, 'copyto', str(ROOT / 'OWNER.json'), remote + '/OWNER.json', '--immutable')
-    if json.loads(network(cfg, 'cat', remote + '/OWNER.json')) != {'owner': store.OWNER}:
-        raise RuntimeError('cloud store owner mismatch')
+    check_remote_owner(cfg)
     network(cfg, 'mkdir', remote + '/objects')
     network(cfg, 'mkdir', remote + '/generations')
 
@@ -470,14 +474,55 @@ def retention(cfg, current):
             entry.unlink()
 
 
-def weekly(cfg, state):
-    if not cloud_backup_requests.due(cfg, state, STATE):
-        return 'not due'
+def require_network_ready(cfg):
     if not cloud.credentials_ready(cfg) or not (AUTH / 'authenticated.json').is_file() or (AUTH / 'authentication-error.json').exists():
         raise cloud.Deferred('iCloud login is required; use the existing Pi login command')
     cloud.check_work_allowed(cfg)
     cloud.guard(cfg)
     storage_root()
+
+
+def run_retention(cfg, state, name):
+    cloud.record_progress(state, 'retention')
+    retention(cfg, name)
+    # Completion, not intent: success is recorded before retention runs, so only
+    # this key tells a later run that the object cleanup was interrupted.
+    state['retention_done_for'] = name
+    store.atomic_json(STATE / 'state.json', state)
+
+
+def resume_retention(cfg, state):
+    """Finish an object cleanup interrupted after its generation verified.
+
+    Leftover objects count against the store budget, so waiting for the next
+    verified generation to retry could defer every upload forever. Never runs
+    with a capture pending: retention unlinks local objects no kept manifest
+    references, which would destroy that capture's staged files.
+    """
+    last = state.get('last_generation')
+    if not last or state.get('pending') or state.get('retention_done_for') == last:
+        return
+    require_network_ready(cfg)
+    absent = object()  # read_json's own None can't tell a missing file from JSON null
+    staged = store.read_json(ROOT / 'pending.json', absent)
+    if staged is not absent:
+        if not isinstance(staged, dict) or not store.GENERATION.fullmatch(str(staged.get('generation'))):
+            raise ValueError('invalid pending capture manifest; cleanup refused')
+        if staged['generation'] != last:
+            return
+    # Read-only: a cleanup must never claim a store, which ensure_remote can.
+    entries = json.loads(network(cfg, 'lsjson', cfg['remote'], '--max-depth', '1'))
+    if not any(e.get('Name') == 'OWNER.json' for e in entries):
+        raise RuntimeError('cloud store owner marker missing; cleanup refused')
+    check_remote_owner(cfg)
+    run_retention(cfg, state, last)
+
+
+def weekly(cfg, state):
+    resume_retention(cfg, state)
+    if not cloud_backup_requests.due(cfg, state, STATE):
+        return 'not due'
+    require_network_ready(cfg)
     manifest = store.read_json(ROOT / 'pending.json')
     if not state.get('pending'):
         state['pending'] = 'tm-' + dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
@@ -502,8 +547,7 @@ def weekly(cfg, state):
         print('Frozen encrypted image captured; normal Mac backups are allowed again.', flush=True)
         cloud.record_progress(state, 'preparing', capture_complete=True)
     name = transfer(cfg, manifest, state)
-    cloud.record_progress(state, 'retention')
-    retention(cfg, name)
+    run_retention(cfg, state, name)
     cloud.notify(state, 'Mac Time Machine iCloud copy verified',
                  'Encrypted Time Machine recovery copy uploaded and download-verified: ' + name)
     return 'complete'
@@ -573,7 +617,10 @@ def _main(args):
     if due:
         history.begin_attempt(STATE, state)
     else:
+        # No attempt row is written, so nothing else clears the last failure a
+        # maintenance-only run would otherwise keep showing.
         state.pop('attempt_id', None)
+        state['failure_code'] = None
     try:
         state.update(worker_pid=os.getpid(), phase='checking', last_attempt_at=time.time(), last_error=None, retry_at=None)
         cloud.record_progress(state, 'checking')

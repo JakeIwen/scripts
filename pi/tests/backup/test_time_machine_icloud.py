@@ -718,6 +718,208 @@ class VerificationTests(unittest.TestCase):
             self.assertNotIn(digest, store.read_json(Path(tmp) / 'verified-objects.json'))
 
 
+class RetentionResumeTests(unittest.TestCase):
+    """Object cleanup interrupted after a generation verified must finish on the next admitted run."""
+    PRIOR = 'tm-20260908T010203Z-12345678'
+    UNFINISHED = 'tm-20261101T010203Z-abcdef12'
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        self.state_dir = root / 'state'; self.state_dir.mkdir()
+        (self.state_dir / 'authenticated.json').write_text('{}')
+        self.local = root / 'store'; self.local.mkdir()
+        self.manifest = store.freeze(source_fixture(root), self.local, GEN, 72, 0, lambda: None, lambda *a: None)
+        self.kept = set(store.validate_manifest(self.manifest))
+        self.orphans = {hashlib.sha256(bytes([n])).hexdigest() for n in range(3)}
+        for digest in self.orphans:
+            (self.local / 'objects' / digest).write_bytes(b'stale')
+        self.remote_objects = self.kept | self.orphans
+        self.deleted = []
+        self.inventory_failures = []
+        self.owner = {'owner': store.OWNER}
+        self.fail_deletes_after = None
+        self.documents = {}
+        for name in (self.PRIOR, GEN):
+            data = json.dumps({**self.manifest, 'generation': name})
+            self.documents[name] = {'manifest.json': data, '_COMPLETE.json': json.dumps({
+                'owner': store.OWNER, 'generation': name, 'verification': 'sha256-download-compared',
+                'manifest_sha256': hashlib.sha256(data.encode()).hexdigest()})}
+        self.cfg = {'remote': 'icloud:test', 'keep_generations': 2, 'interval_days': 7}
+        self.notify = mock.Mock()
+        for target, replacement in ((job, {'STATE': self.state_dir, 'ROOT': self.local, 'AUTH': self.state_dir,
+                                            'private_directory': mock.Mock(), 'storage_root': mock.Mock(),
+                                            'network': self.network, 'config': mock.Mock(return_value=self.cfg)}),
+                                    (cloud, {'STATE_DIR': self.state_dir, 'credentials_ready': mock.Mock(return_value=True),
+                                             'check_work_allowed': mock.Mock(), 'guard': mock.Mock(),
+                                             'exact_mount': mock.Mock(), 'notify': self.notify,
+                                             'remote_inventory': self.inventory}),
+                                    (job.priority, {'DIRECTORY': root / 'priority'}),
+                                    (job.signal, {'signal': mock.Mock()}),
+                                    (job.admission, {'admitted_run': mock.Mock(return_value=nullcontext())}),
+                                    (job.backup_settings, {'overrides': mock.Mock(return_value={})})):
+            for attribute, value in replacement.items():
+                self.enterContext(mock.patch.object(target, attribute, value))
+        self.enterContext(mock.patch.object(sys, 'argv', ['worker', '--run']))
+
+    def network(self, cfg, op, path, *args, **kwargs):
+        if op == 'lsjson' and path == self.cfg['remote']:
+            return json.dumps([] if self.owner is None else [{'Name': 'OWNER.json'}])
+        if op == 'cat' and path == self.cfg['remote'] + '/OWNER.json':
+            return json.dumps(self.owner)
+        if op == 'lsjson' and path.endswith('/generations'):
+            return json.dumps([{'Name': name, 'IsDir': True} for name in self.documents])
+        if op == 'lsjson':
+            return json.dumps([{'Name': key} for key in self.documents[path.rsplit('/', 1)[1]]])
+        if op == 'cat':
+            name, filename = path.rsplit('/', 2)[-2:]
+            return self.documents[name][filename]
+        if op == 'deletefile':
+            if self.fail_deletes_after is not None and len(self.deleted) >= self.fail_deletes_after:
+                self.fail_deletes_after = None
+                raise cloud.Deferred('Waiting for a verified, permitted internet route.')
+            self.deleted.append(path.rsplit('/', 1)[1])
+            self.remote_objects.discard(self.deleted[-1])
+            return ''
+        self.fail('unexpected cloud operation: ' + op + ' ' + path)
+
+    def inventory(self, cfg, path):
+        if self.inventory_failures:
+            raise self.inventory_failures.pop(0)
+        return {k: {'IsDir': False, 'Size': 1, 'ModTime': 'now'} for k in self.remote_objects}
+
+    def write_state(self, **values):
+        store.atomic_json(self.state_dir / 'state.json', {'last_success_at': time.time() - 3600,
+                                                          'last_generation': GEN, **values})
+
+    def run_worker(self):
+        self.assertEqual(job.main(), 0)
+        return store.read_json(self.state_dir / 'state.json')
+
+    def local_objects(self):
+        return {p.name for p in (self.local / 'objects').iterdir()}
+
+    def test_interrupted_cleanup_finishes_on_next_run_even_when_copy_not_due(self):
+        self.write_state()
+        self.inventory_failures = [cloud.Deferred('Waiting for a verified, permitted internet route.')]
+        state = self.run_worker()
+        self.assertNotIn('retention_done_for', state)
+        self.assertEqual(self.orphans, self.remote_objects - self.kept)
+        state = self.run_worker()
+        self.assertEqual(state['retention_done_for'], GEN)
+        self.assertEqual(state['phase'], 'not due')
+        self.assertEqual(set(self.deleted), self.orphans)
+        self.assertEqual(self.remote_objects, self.kept)
+        self.assertEqual(self.local_objects(), self.kept)
+
+    def test_deferred_cleanup_stays_retryable_and_leaves_success_history_alone(self):
+        self.write_state(retention_done_for=self.PRIOR)
+        before = store.read_json(self.state_dir / 'state.json')
+        self.inventory_failures = [cloud.Deferred('Waiting for a verified, permitted internet route.')] * 2
+        for _ in range(2):
+            state = self.run_worker()
+            self.assertEqual(state['phase'], 'deferred')
+            self.assertEqual(state['last_error'], 'Waiting for a verified, permitted internet route.')
+            self.assertEqual(state['retention_done_for'], self.PRIOR)
+            for key in ('last_success_at', 'last_generation'):
+                self.assertEqual(state[key], before[key])
+        self.assertFalse((self.state_dir / 'history.json').exists())
+        self.notify.assert_not_called()
+        self.assertEqual(self.run_worker()['retention_done_for'], GEN)
+        self.assertEqual(set(self.deleted), self.orphans)
+        self.notify.assert_not_called()
+
+    def assert_nothing_deleted(self):
+        self.assertEqual(self.deleted, [])
+        self.assertEqual(self.local_objects(), self.kept | self.orphans)
+
+    def test_cleanup_never_runs_against_a_missing_or_foreign_owner_marker(self):
+        for owner in (None, {'owner': 'someone-else'}):
+            with self.subTest(owner=owner):
+                self.owner = owner
+                self.write_state()
+                self.assertEqual(job.main(), 1)
+                state = store.read_json(self.state_dir / 'state.json')
+                self.assertEqual(state['phase'], 'error')
+                self.assertNotIn('retention_done_for', state)
+                self.assert_nothing_deleted()
+
+    def test_cleanup_with_unusable_pending_manifest_is_a_handled_failure_without_deletion(self):
+        for content in (['x'], [], 'tm', 7, None):
+            with self.subTest(content=content):
+                self.write_state()
+                store.atomic_json(self.local / 'pending.json', content)
+                self.assertEqual(job.main(), 1)
+                state = store.read_json(self.state_dir / 'state.json')
+                self.assertEqual(state['phase'], 'error')
+                self.assertNotIn('retention_done_for', state)
+                self.assert_nothing_deleted()
+
+    def test_cleanup_failing_partway_through_deletes_is_finished_by_the_next_run(self):
+        self.write_state()
+        self.fail_deletes_after = 1
+        state = self.run_worker()
+        self.assertEqual(state['phase'], 'deferred')
+        self.assertNotIn('retention_done_for', state)
+        self.assertEqual(len(self.deleted), 1)
+        state = self.run_worker()
+        self.assertEqual(state['retention_done_for'], GEN)
+        self.assertEqual(set(self.deleted), self.orphans)
+        self.assertEqual(self.remote_objects, self.kept)
+        self.assertEqual(self.local_objects(), self.kept)
+
+    def test_cleanup_outcome_replaces_a_stale_failure_cause(self):
+        self.write_state(phase='error', failure_code=job.history.BackupFailure.DISK_IO, last_error='boom')
+        self.inventory_failures = [cloud.Deferred('ignition is on')]
+        state = self.run_worker()
+        self.assertEqual(state['phase'], 'deferred')
+        self.assertIsNone(state['failure_code'])
+        self.assertNotEqual(job.history.reason(state), job.history.FAILURE_MESSAGES[job.history.BackupFailure.DISK_IO])
+        state = self.run_worker()
+        self.assertIsNone(state['failure_code'])
+        self.assertIsNone(state['last_error'])
+
+    def test_no_resume_while_a_capture_is_pending(self):
+        self.write_state(pending=self.UNFINISHED)
+        with mock.patch.object(job, 'transfer', side_effect=cloud.Deferred('stop after retention check')), \
+                mock.patch.object(job, 'cleanup_staging'), \
+                mock.patch.object(job, 'quiesced'), \
+                mock.patch.object(job.store, 'freeze', side_effect=cloud.Deferred('capture needs Mac')):
+            self.assertEqual(self.run_worker()['phase'], 'deferred')
+        self.assertEqual(self.deleted, [])
+        self.assertEqual(self.local_objects(), self.kept | self.orphans)
+
+    def test_no_resume_while_an_unfinished_capture_manifest_exists(self):
+        self.write_state()
+        store.atomic_json(self.local / 'pending.json', {**self.manifest, 'generation': self.UNFINISHED})
+        self.assertEqual(self.run_worker()['phase'], 'not due')
+        self.assertEqual(self.deleted, [])
+        self.assertEqual(self.local_objects(), self.kept | self.orphans)
+
+    def test_normal_path_records_completion_and_is_not_repeated(self):
+        self.write_state(pending=GEN, last_success_at=0, last_generation=None)
+        def verified(cfg, manifest, state):
+            state.update(last_success_at=time.time(), last_generation=GEN, pending=None)
+            return GEN
+        with mock.patch.object(job, 'transfer', side_effect=verified):
+            state = self.run_worker()
+        self.assertEqual(state['retention_done_for'], GEN)
+        self.assertEqual(state['phase'], 'complete')
+        self.notify.assert_called_once()
+        self.assertEqual(set(self.deleted), self.orphans)
+        with mock.patch.object(job, 'retention') as retention:
+            self.assertEqual(self.run_worker()['phase'], 'not due')
+        retention.assert_not_called()
+
+    def test_state_without_the_key_triggers_exactly_one_cleanup(self):
+        self.write_state()
+        with mock.patch.object(job, 'retention', wraps=job.retention) as retention:
+            self.run_worker(); self.run_worker(); self.run_worker()
+        retention.assert_called_once()
+        self.assertEqual(set(self.deleted), self.orphans)
+
+
 class CoordinatorTests(unittest.TestCase):
     def test_dashboard_permission_stops_only_the_configured_active_destination(self):
         destination = '00000000-0000-0000-0000-000000000001'

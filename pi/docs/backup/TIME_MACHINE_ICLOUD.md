@@ -171,6 +171,13 @@ Retain **two verified recovery points** by default. Remove old manifests and
 unreferenced objects only AFTER a new point passes verification. A private
 retirement journal makes metadata deletion resumable. Unknown paths/proofs
 stop retention. Partial generations are preserved/referenced, not purged.
+Success is recorded before retention runs, so the worker also records
+`retention_done_for` once cleanup finishes. Object cleanup interrupted after
+verification (for example a dropped route) resumes on the next admitted run,
+even when no new copy is due and never while a capture is pending; until then
+the leftover objects count against the store budget. The resumed cleanup first
+reads the cloud store's owner marker and refuses, deleting nothing, when it is
+missing or foreign; it never claims a store.
 
 The existing rclone iCloud backend reports `About=false`: account-wide free
 space cannot be queried through it. A configurable **900 GiB dedicated-store
