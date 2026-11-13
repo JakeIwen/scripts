@@ -368,6 +368,34 @@ class GuardDefinitionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "enabled state differs"):
             build_definitions(*watched({"BTTEnabled2": 0}), {PRESET: "Master"})
 
+    def test_menu_bar_script_item_runtime_must_keep_its_script_settings(self):
+        wanted = {"BTTTouchBarShellScriptString": "/usr/bin/python3 -I -B cpu_percent.py",
+                  "BTTTouchBarScriptUpdateInterval": 3, "BTTTouchBarAppleScriptStringRunOnInit": 1,
+                  "BTTTouchBarOnlyShowIcon": 0}
+
+        def menu(runtime_config):
+            snapshot, exports = fixture()
+            snapshot["records"]["cpu-menu"] = record(
+                "cpu-menu", trigger_type=681, action_type=59, config=wanted,
+                payload={"launch_path": "http://127.0.0.1:8769/", "additional_action_string": "Default"})
+            exports.append({"BTTUUID": "cpu-menu", "BTTTriggerType": 681,
+                            "BTTTriggerClass": "BTTTriggerTypeOtherTriggers", "BTTPredefinedActionType": 59,
+                            "BTTOpenURL": "http://127.0.0.1:8769/", "BTTOpenURLBrowser": "Default",
+                            "BTTTriggerConfig": runtime_config})
+            return exports, snapshot
+
+        result = build_definitions(*menu(dict(wanted, BTTTouchBarOnlyShowIcon=False)), {PRESET: "Master"})
+        self.assertEqual(result["cpu-menu"]["BTTTriggerConfig"]["BTTTouchBarShellScriptString"],
+                         wanted["BTTTouchBarShellScriptString"])  # recovery keeps the script
+        omitted_zero = {k: v for k, v in wanted.items() if k != "BTTTouchBarOnlyShowIcon"}
+        build_definitions(*menu(omitted_zero), {PRESET: "Master"})  # BTT omits a zero flag
+        for key, value in [("BTTTouchBarShellScriptString", "echo 1"), ("BTTTouchBarScriptUpdateInterval", 60),
+                           ("BTTTouchBarAppleScriptStringRunOnInit", 0), ("BTTTouchBarOnlyShowIcon", 1)]:
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, key):
+                build_definitions(*menu(dict(wanted, **{key: value})), {PRESET: "Master"})
+        with self.assertRaisesRegex(ValueError, "BTTTouchBarShellScriptString"):
+            build_definitions(*menu({}), {PRESET: "Master"})
+
     def test_unknown_payload_mapping_or_missing_class_derivation_fails(self):
         snapshot, exports = fixture()
         snapshot["records"]["named"]["action_type"] = 386

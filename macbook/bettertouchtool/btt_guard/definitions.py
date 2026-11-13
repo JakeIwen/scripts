@@ -7,7 +7,7 @@ import json
 import math
 from typing import Any
 
-from .database import OPERATIONAL_CONFIG_KEYS
+from .database import MENU_BAR_SCRIPT_TYPE, OPERATIONAL_CONFIG_KEYS, TRIGGER_SCRIPT_CONFIG_KEYS
 from .model import ConfigSnapshot, SCHEMA_VERSION
 
 
@@ -193,6 +193,22 @@ def _validate_config(expected: dict[str, Any], node: dict[str, Any], uuid: str) 
             raise ValueError(f"Runtime operational configuration differs at {key}: {uuid}")
 
 
+def _validate_script_config(expected: dict[str, Any], node: dict[str, Any], uuid: str) -> None:
+    """A 681 item's script settings live in the export's BTTTriggerConfig; numeric flags
+    that BTT omits when zero count as 0, and True equals 1."""
+    actual = node.get("BTTTriggerConfig", {})
+    if not isinstance(actual, dict):
+        raise ValueError(f"Runtime trigger configuration is invalid for BTT record {uuid}.")
+    for key in TRIGGER_SCRIPT_CONFIG_KEYS:
+        wanted, found = expected.get(key), actual.get(key)
+        if key == "BTTTouchBarShellScriptString":
+            same = _same_json(wanted, found)
+        else:
+            same = _numeric_equal(wanted or 0, found or 0)
+        if not same:
+            raise ValueError(f"Runtime operational configuration differs at {key}: {uuid}")
+
+
 def _runtime_action_type(node: dict[str, Any], uuid: str) -> int | None:
     if "BTTPredefinedActionType" not in node:
         return None
@@ -323,6 +339,8 @@ def _validate_record(
     _validate_action_type(expected, node, uuid)
     _validate_payload(expected, node, uuid)
     _validate_config(expected["config"], node, uuid)
+    if int(expected["trigger_type"]) == MENU_BAR_SCRIPT_TYPE:
+        _validate_script_config(expected["config"], node, uuid)
 
 
 def _expected_app_scope(expected: dict[str, Any], uuid: str) -> str | None:

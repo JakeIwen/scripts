@@ -54,6 +54,17 @@ class InstallerCheckpointTests(unittest.TestCase):
         self.assertEqual(self.accept(self.baseline())['status'], Status.TAKEN)
         self.capture.assert_called_once()
 
+    def test_mac_panel_migration_is_accepted_only_with_both_the_new_and_the_retired_uuid(self):
+        # The new 681 item shows up as `added`, the deleted 674 item as `missing`.
+        new, legacy = '77805B78-4542-4929-A947-B7CD6172AB7A', 'AF69261A-4119-4B82-A3C5-F7C337DB7A17'
+        baseline = self.baseline()
+        self.audit.return_value = report(AuditStatus.DRIFT, findings=[
+            {'kind': 'added', 'uuid': new, 'detail': 'watched trigger not in checkpoint'},
+            {'kind': 'missing', 'uuid': legacy, 'detail': 'expected trigger missing'}])
+        self.assertEqual(self.accept(baseline, touched=[new])['reason'], Reason.FOREIGN_FINDINGS)
+        self.capture.assert_not_called()
+        self.assertEqual(self.accept(baseline, touched=[new, legacy])['status'], Status.TAKEN)
+
     def test_ineligible_baselines_do_not_audit_again_or_capture(self):
         for before, reason in [
             (report(checkpoint_id=None), Reason.NO_CHECKPOINT),

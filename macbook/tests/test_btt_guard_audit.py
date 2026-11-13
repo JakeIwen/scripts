@@ -356,6 +356,50 @@ class GuardDatabaseTests(unittest.TestCase):
         # Watched triggers are checked for presence and state; Media keeps the dependency checks.
         self.assertEqual(snapshot['findings'], [])
 
+    SCRIPT = {'BTTTouchBarShellScriptString': '/usr/bin/python3 -I -B cpu_percent.py',
+              'BTTTouchBarScriptUpdateInterval': 3, 'BTTTouchBarAppleScriptStringRunOnInit': 1,
+              'BTTTouchBarOnlyShowIcon': 0, 'BTTTouchBarItemSFSymbolDefaultIcon': 'cosmetic'}
+
+    def insert_menu_bar_script(self, config=None, trait=True):
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute('ALTER TABLE ZBTTBASEENTITY ADD COLUMN ZTRAIT INTEGER')
+            connection.execute('ALTER TABLE ZBTTBASEENTITY ADD COLUMN ZBEZIERPATH BLOB')
+        self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767)
+        self.insert(10, 'menu-trait', Z_ENT=15, ZBEZIERPATH=json.dumps(config or self.SCRIPT).encode())
+        self.insert(11, 'cpu-menu', ZBELONGSTOPRESET2=100, ZGESTURETYPE=681, ZACTION=59,
+                    ZLAUNCHPATH='http://127.0.0.1:8769/', ZTRAIT=10 if trait else None, app_scope=True)
+
+    def test_menu_bar_script_item_is_watched_with_its_script_settings(self):
+        self.insert_menu_bar_script()
+        snapshot = read_snapshot(self.path, ['root'])
+        self.assertIn('cpu-menu', snapshot['watched'])
+        self.assertEqual(snapshot['records']['cpu-menu']['config'], {
+            'BTTTouchBarShellScriptString': '/usr/bin/python3 -I -B cpu_percent.py',
+            'BTTTouchBarScriptUpdateInterval': 3, 'BTTTouchBarAppleScriptStringRunOnInit': 1,
+            'BTTTouchBarOnlyShowIcon': 0})  # the icon symbol is cosmetic, so not compared
+        expected = snapshot
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute('UPDATE ZBTTBASEENTITY SET ZBEZIERPATH=? WHERE ZUNIQUEIDENTIFIER=?',
+                               (json.dumps(dict(self.SCRIPT, BTTTouchBarScriptUpdateInterval=60)).encode(),
+                                'menu-trait'))
+        report = compare(expected, read_snapshot(self.path, ['root'], include_ids=list(expected['records'])), 'c')
+        self.assertEqual(report['findings'], [{
+            'kind': FindingKind.CONFIG_CHANGED.value, 'uuid': 'cpu-menu',
+            'detail': 'fields: config.BTTTouchBarScriptUpdateInterval'}])
+
+    def test_menu_bar_script_item_without_readable_settings_fails_closed(self):
+        self.insert_menu_bar_script(trait=False)
+        with self.assertRaisesRegex(ValueError, 'script settings are missing'):
+            read_snapshot(self.path, ['root'])
+
+    def test_database_without_trait_columns_is_refused_only_for_a_script_item(self):
+        self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767)
+        self.insert(2, 'icon-only', ZBELONGSTOPRESET2=100, ZGESTURETYPE=674, app_scope=True)
+        self.assertIn('icon-only', read_snapshot(self.path, ['root'])['watched'])
+        self.insert(3, 'script-menu', ZBELONGSTOPRESET2=100, ZGESTURETYPE=681, app_scope=True)
+        with self.assertRaisesRegex(ValueError, 'unreadable'):
+            read_snapshot(self.path, ['root'])
+
     def test_trigger_linked_to_trash_and_an_app_is_a_finding(self):
         self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767)
         self.insert(2, 'sequence', ZBELONGSTOPRESET2=100, ZGESTURETYPE=624, app_scope=True)

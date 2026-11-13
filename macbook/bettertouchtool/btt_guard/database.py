@@ -20,6 +20,9 @@ REQUIRED_COLUMNS = {
     'ZICONDATA3', 'ZACTIONDATA', 'ZLAUNCHPATH', 'ZADDITIONALACTIONSTRING',
     'ZSHORTCUT', 'ZGESTURECONFIG', 'ZACTIVATED',
 }
+# The trait row holding a menu-bar script item's settings. Only 681 items need them, so
+# a database without these columns is still read (and refused only if it has a 681 item).
+TRAIT_COLUMNS = ('ZTRAIT', 'ZBEZIERPATH')
 SELECT_COLUMNS = tuple(sorted(REQUIRED_COLUMNS))
 
 # These change whether a menu or scripted item operates, rather than how it
@@ -41,6 +44,14 @@ OPERATIONAL_CONFIG_KEYS = {
     'BTTMenuScriptUpdateInterval', 'BTTMenuShowIfWindowLevelEqualsEnabled',
     'BTTMenuVisibility', 'BTTMenuWindowLevel',
 }
+# A 681 menu-bar item runs a shell script for its title; what it runs and how often is
+# saved as BTTTriggerConfig JSON on its trait row (ZBEZIERPATH). Icon symbol and size are
+# cosmetic and left out, like labels above.
+MENU_BAR_SCRIPT_TYPE = 681
+TRIGGER_SCRIPT_CONFIG_KEYS = (
+    'BTTTouchBarShellScriptString', 'BTTTouchBarScriptUpdateInterval',
+    'BTTTouchBarAppleScriptStringRunOnInit', 'BTTTouchBarOnlyShowIcon',
+)
 NO_ACTION_TYPES = {-1, 366}
 # Top-level triggers watched in every active preset beside the Media graph, so a
 # lost key sequence alerts like a lost menu button. Watched triggers are checked
@@ -49,6 +60,7 @@ NO_ACTION_TYPES = {-1, 366}
 # unwatched rather than block every checkpoint on an export Guard never validated.
 WATCHED_TRIGGER_TYPES = {
     0: 'keyboard shortcut', 624: 'key sequence', 643: 'named trigger', 674: 'menu bar item',
+    681: 'menu bar script item',
     679: 'text transformer', 767: 'floating menu', 779: 'active app changed',
 }
 NAMED_TRIGGER = 643
@@ -73,6 +85,17 @@ def _config(row: sqlite3.Row) -> dict[str, Any]:
     if not isinstance(decoded, dict):
         raise ValueError(f'Invalid stored configuration shape for BTT record {row["ZUNIQUEIDENTIFIER"]}.')
     return {key: decoded[key] for key in sorted(OPERATIONAL_CONFIG_KEYS & decoded.keys())}
+
+
+def _trait_script_config(row: sqlite3.Row, by_pk: dict[int, sqlite3.Row]) -> dict[str, Any]:
+    if not set(TRAIT_COLUMNS) <= set(row.keys()):
+        raise ValueError('Unsupported BTT database schema: menu-bar script settings are unreadable.')
+    trait = by_pk.get(row['ZTRAIT']) if row['ZTRAIT'] is not None else None
+    decoded = _json_blob(trait['ZBEZIERPATH'], 'menu-bar script configuration',
+                         row['ZUNIQUEIDENTIFIER']) if trait is not None else None
+    if not isinstance(decoded, dict):
+        raise ValueError(f'BTT menu-bar script settings are missing for record {row["ZUNIQUEIDENTIFIER"]}.')
+    return {key: decoded[key] for key in TRIGGER_SCRIPT_CONFIG_KEYS if key in decoded}
 
 
 def _payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -119,7 +142,8 @@ def _record(
         action_type=int(row['ZACTION'] if row['ZACTION'] is not None else -1),
         action_category=int(row['ZACTIONCATEGORY'] or 0),
         payload=_payload(row),
-        config=_config(row),
+        config=_config(row) | (_trait_script_config(row, by_pk)
+                               if row['ZGESTURETYPE'] == MENU_BAR_SCRIPT_TYPE else {}),
         app_scope=app_scopes.get(row['Z_PK'], []),
     )
 
@@ -387,7 +411,8 @@ def _read_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     missing = REQUIRED_COLUMNS - columns
     if missing:
         raise ValueError('Unsupported BTT database schema; missing columns: '+', '.join(sorted(missing)))
-    rows = list(connection.execute('SELECT '+','.join(SELECT_COLUMNS)+' FROM ZBTTBASEENTITY'))
+    selected = SELECT_COLUMNS + tuple(name for name in TRAIT_COLUMNS if name in columns)
+    rows = list(connection.execute('SELECT '+','.join(selected)+' FROM ZBTTBASEENTITY'))
     uuids = [row['ZUNIQUEIDENTIFIER'] for row in rows if row['ZUNIQUEIDENTIFIER']]
     duplicates = sorted(uuid for uuid, count in Counter(uuids).items() if count > 1)
     if duplicates:
