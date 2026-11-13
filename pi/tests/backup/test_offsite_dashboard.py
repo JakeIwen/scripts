@@ -113,10 +113,10 @@ class DashboardTests(unittest.TestCase):
                         time.sleep(0.02)
                     # An early admission exit is not readiness; otherwise history is still the prior run's.
                     if not started.exists():
-                        out, err = child.communicate(timeout=25)
+                        out, err = child.communicate(timeout=60)
                         self.fail(f'source backup exited before readiness ({child.returncode}): {out}{err}')
                     child.send_signal(signal.SIGTERM)
-                    out, err = child.communicate(timeout=25)
+                    out, err = child.communicate(timeout=60)
                     self.assertEqual(child.returncode, 143, out + err)
                     row = self.history()[self.f.label]['borg']
                     self.assertIsNone(row['last_ok'])
@@ -126,7 +126,7 @@ class DashboardTests(unittest.TestCase):
                 finally:
                     if child.poll() is None:
                         child.terminate()
-                        child.communicate(timeout=25)
+                        child.communicate(timeout=60)
 
     def test_invalid_or_unreadable_history_is_preserved_without_breaking_backup(self):
         self.ready()
@@ -206,7 +206,7 @@ class DashboardTests(unittest.TestCase):
         wrapper = Path(__file__).resolve().parents[2] / 'scripts' / 'backup' / 'offsite_backup.sh'
         for args in [('dashboard',), ('rates', 'borg')]:
             result = subprocess.run(['/bin/bash', str(wrapper), *args], capture_output=True,
-                                    text=True, cwd=self.f.root, timeout=5)
+                                    text=True, cwd=self.f.root, timeout=60)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(result.stdout, '')
             self.assertEqual(result.stderr, 'Run offsite_backup.sh with sudo.\n')

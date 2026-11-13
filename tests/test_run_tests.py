@@ -77,7 +77,7 @@ class RunnerCase(unittest.TestCase):
                 process.kill()
         process.communicate(timeout=10)
 
-    def wait_for(self, predicate, timeout=10):
+    def wait_for(self, predicate, timeout=60):
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             if predicate():
@@ -483,7 +483,9 @@ class T(unittest.TestCase):
 
     def test_timeout_kills_descendants_and_releases_lock(self):
         self.add_process_tree()
-        code, output = self.run_suite('--timeout', '0.5', FAKE_PIDS=str(self.pid_file))
+        # The timeout must outlast the fixture's Python startup (it writes the pid file), or a loaded
+        # machine kills it first; the child sleeps 30 s, so 5 s still proves the timeout path.
+        code, output = self.run_suite('--timeout', '5',FAKE_PIDS=str(self.pid_file))
         self.assertEqual(code, 1, output)
         self.assertIn('FAIL tests/test_tree.py (timeout)', output)
         self.assertIn('FAILED:', output)
@@ -497,7 +499,7 @@ class T(unittest.TestCase):
                 process = self.start(FAKE_PIDS=str(self.pid_file))
                 self.wait_for(self.pid_file.exists)
                 process.send_signal(sig)
-                output, _ = process.communicate(timeout=5)
+                output, _ = process.communicate(timeout=60)
                 self.assertEqual(process.returncode, 128 + sig, output)
                 self.assertIn('FAILED: interrupted', output)
                 self.assert_children_stopped()
@@ -512,7 +514,7 @@ class T(unittest.TestCase):
             process = self.start()
             self.assertIn('Waiting for another', process.stdout.readline())
             process.send_signal(signal.SIGINT)
-            output, _ = process.communicate(timeout=5)
+            output, _ = process.communicate(timeout=60)
             self.assertEqual(process.returncode, 130, output)
         self.assertEqual(self.executions(), [])
 

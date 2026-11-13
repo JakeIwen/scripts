@@ -4,7 +4,7 @@ import unittest
 
 from shared.codex_autocontinue.demo_environment import create_environment
 from shared.codex_autocontinue.fake_server import ResponsesServer, Scenario
-from shared.codex_autocontinue.tests.pty_driver import LAUNCHER, PTYDriver
+from shared.codex_autocontinue.tests.pty_driver import LAUNCHER, PTYDriver, WAIT_SECONDS
 
 
 CODEX = shutil.which("codex")
@@ -29,14 +29,14 @@ class RealCodexTests(unittest.TestCase):
                        if not key.startswith(("ITERM_", "TERM_PROGRAM", "LC_TERMINAL"))}
         driver = PTYDriver([str(LAUNCHER), "--"] + command, environment, fixture.project)
         self.addCleanup(driver.close)
-        driver.until(lambda: "›".encode() in driver.output, timeout=15)
+        driver.until(lambda: "›".encode() in driver.output, timeout=WAIT_SECONDS)
         self.assertEqual(b"\x1b[?1049h" in driver.output, self.alternate_screen)
         return server, driver
 
     def test_capacity_failure_is_resumed_by_submitted_continue(self):
         server, driver = self.session(max_attempts=1)
         driver.submit("Say hello from the offline fixture")
-        driver.until(lambda: len(server.turn_requests()) >= 2, timeout=20)
+        driver.until(lambda: len(server.turn_requests()) >= 2, timeout=WAIT_SECONDS)
         records = server.turn_requests()
         self.assertEqual(len(records), 2)
         self.assertFalse(records[0].contains_continue)

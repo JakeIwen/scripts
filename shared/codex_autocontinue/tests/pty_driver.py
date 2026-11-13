@@ -13,6 +13,9 @@ import time
 
 
 LAUNCHER = Path(__file__).resolve().parents[1] / "run"
+# Upper bound for real-process waits (startup, answers, exit). It only stops a hung test; a loaded
+# machine (load average 13 to 25) stretched a 15 s startup and an 8 s shutdown past their old bounds.
+WAIT_SECONDS = 60
 
 
 class PTYDriver:
@@ -48,7 +51,7 @@ class PTYDriver:
         self.query_tail = next((pending[-size:] for size in (3, 2, 1)
                                 if pending.endswith(b"\x1b[6n"[:size])), b"")
 
-    def until(self, predicate, timeout=15):
+    def until(self, predicate, timeout=WAIT_SECONDS):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self.pump()
@@ -71,13 +74,13 @@ class PTYDriver:
         self.pause(0.2)
         if self.process.poll() is None:
             self.send(b"\x03")
-        self.until(lambda: self.process.poll() is not None, timeout=8)
+        self.until(lambda: self.process.poll() is not None, timeout=WAIT_SECONDS)
 
     def close(self):
         try:
             if self.process.poll() is None:
                 self.process.terminate()
-                deadline = time.monotonic() + 4
+                deadline = time.monotonic() + 20
                 while self.process.poll() is None and time.monotonic() < deadline:
                     self.pump()
                 if self.process.poll() is None:

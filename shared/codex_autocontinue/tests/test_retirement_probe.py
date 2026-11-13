@@ -109,7 +109,8 @@ class RetirementProbeTests(unittest.TestCase):
                      "Installed ~/.local/bin/codex absent; real-binary capacity probe requires it")
 class InstalledCodexRetirementProbeTests(unittest.TestCase):
     def test_current_codex_fails_once_without_native_capacity_retry(self):
-        result = run_probe(codex=CODEX, timeout=8, scenario=Scenario.ALWAYS_FAIL)
+        # The real binary takes 4.6 to 8.3 s alone; 60 s only stops a hang under machine load.
+        result = run_probe(codex=CODEX, timeout=60, scenario=Scenario.ALWAYS_FAIL)
         self.assertEqual(result.outcome, ProbeOutcome.NEGATIVE, result)
         self.assertEqual(result.turn_requests, 1, result)
         self.assertIsNotNone(result.returncode)
