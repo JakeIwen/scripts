@@ -681,14 +681,26 @@ compare it with this checkout. Deployed files may differ from the repository.
   from `known_terms.py`'s list. On the Pi all four files sit flat in
   `/home/pi/scripts/`: ship `peer_copy.py` first, then `known_terms.py`,
   `glossary_page.py` and `glossary.py` together. Pi page URLs use the Mac's
-  `/Volumes/pihome` mount. Local read/replace transactions use `terms.jsonl.lock`.
+  `/Volumes/pihome` mount. Local read/replace transactions use `terms.jsonl.lock`;
+  peer syncs also hold `terms.jsonl.sync.lock` across their ssh calls, so a
+  Stop record never waits on the network.
   A repeated session+term fills in a page link the first record lacked (the
   long-reply guard's follow-up carries it), and merges keep the linked copy.
 - `shared/sh/long_reply_guard.py` is the Claude/Codex Stop hook (Mac and Pi)
   behind the globals' "Long replies" rule: a reply Jacob reads in a terminal
   that runs past 450 words or 50 estimated rows at 104 columns, fenced blocks
-  left out and with no `~/.agent/artifacts/` link, is blocked once with
-  instructions to move it to a page. Claude sessions count as attended through
+  left out (a fence never closed counts) and with no link to a page in the
+  local `~/.agent/artifacts/` saved during this turn, is blocked once with
+  instructions to move it to a page. The turn's start is searched for
+  backwards through the transcript in 4 MB reads for up to 1 s (Claude's
+  `turnPosition` row for the payload's `prompt_id`, Codex's `task_started`
+  event for its `turn_id`); without it no page exempts. Pi links through
+  `/Volumes/pihome` map to the local store, and nothing under `/Volumes` is
+  stat-ed. Claude blocks are claimed per `prompt_id` in
+  `~/.agent/long-reply-guard/` under one of 64 lock stripes keyed by session
+  (never pruned), so a reply written after another hook's block is checked
+  too and each prompt is blocked at most once; Codex continuations are not
+  checked. Claude sessions count as attended through
   `CLAUDE_CODE_SESSION_ATTENDED`; Codex through its rollout's `session_meta`
   source (`cli`, not `exec` or a subagent). Stdlib; the Pi copy sits flat in
   `/home/pi/scripts/`.
@@ -733,8 +745,18 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/sh/notify_on_finish.py` is the Python 3.9+ Claude/Codex UserPromptSubmit
   and Stop hook behind `+n`: standalone tokens arm a per-session flag under
   `~/.agent/notify-on-finish/`, Stop consumes it once and starts the existing
-  `claude_ntfy_notify.py --send` detached; flags expire after two days. `hold`
-  skips one Stop while background work continues, retaining the armed flag.
+  `claude_ntfy_notify.py --send` detached; flags expire after two days. An
+  explicit `hold` makes the next Stop remember the ids of every live task in
+  its `background_tasks`, shells included (nothing live: it sends there; an
+  unreadable list: it waits for a readable one), and the flag stays armed
+  while any of them is live or a Stop's list is unreadable (missing, or any
+  entry without an id and status); a hold over a task that never ends never
+  sends. Codex (payload `turn_id`) lists no tasks, so its hold lasts through
+  that turn's continuations and the next Stop outside one sends.
+  Without a hold, Claude Stops keep the flag only while a `subagent`,
+  `workflow` or `cloud session` (Claude Code's labels) runs; shells,
+  monitors, teammates, internal tasks and unknown labels never defer, since
+  they may never wake the session.
   Mac hooks run from the checkout; deploy the standalone script flat to `/home/pi/scripts/`
   before installing Pi hooks. CLI tests: `shared/tests/test_notify_on_finish.py`.
 - `shared/sh/branch_check.py --hook` is the Claude/Codex SessionStart hook

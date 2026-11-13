@@ -35,6 +35,12 @@ TRIGGER = re.compile(r"^\+terms(?:\s+(.*))?$", re.DOTALL)
 OPENER = re.compile(r"^\s*(?:\*\*Terms:?\*\*:?|#{1,6}\s+Terms:?(?:\s+#+)?)\s*$", re.I)
 BULLET = re.compile(r"^([ \t]*)[-*]\s+\*\*(.+?)\*\*(.*)$")
 SEPARATOR = re.compile(r"^\s*(?::\s*|[—-]\s+)(.*)$")
+# Lines that end a definition at any indentation: headings, quotes, tables,
+# fences and rules, including the replies' closing `***DONE / CLEAN***`
+# line. A list item ends one only unindented, since an indented one can be
+# part of the definition.
+STRUCTURE = re.compile(r"^\s*(?:#|>|\||`{3}|~{3}|\*{3}|-{3}|_{3})")
+LIST_START = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s)")
 FILE_URL = re.compile(r'''file://[^\s<>"`\)]+''')
 
 
@@ -68,8 +74,16 @@ def parse_terms(message: str) -> list[tuple[str, str]]:
             continue
         opener = bool(OPENER.fullmatch(line))
         bullet = BULLET.match(line) if active and not opener else None
-        continuation = (active and term and line.strip() and
-                        len(line) - len(line.lstrip()) > indent)
+        # Structural lines and a standalone file:// URL (a page link after
+        # the block) end a definition before either continuation applies.
+        # Otherwise an indented line continues it, and so does an unindented
+        # line straight after it (markdown's lazy continuation): ordinary
+        # prose needs a blank line before it to end the definition.
+        tokens = line.split()
+        ends = bool(STRUCTURE.match(line)) or (len(tokens) == 1 and "file://" in tokens[0])
+        lazy = bool(lines and lines[-1].strip()) and not LIST_START.match(line)
+        continuation = (active and term and line.strip() and not ends and
+                        (len(line) - len(line.lstrip()) > indent or lazy))
         if active and not opener and not bullet and (not line.strip() or continuation):
             if term:
                 lines.append(line)
@@ -143,10 +157,10 @@ def write_text(path: Path, text: str) -> None:
 
 
 @contextmanager
-def locked(path: Path):
+def locked(path: Path, suffix: str = ".lock"):
     # Different agent sessions can finish at once; serialize the read/replace.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.with_name(path.name + ".lock").open("a") as handle:
+    with path.with_name(path.name + suffix).open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         yield
 
@@ -193,18 +207,23 @@ def record(path: Path, event: dict) -> None:
 
 
 def change(path: Path, peer: str, removed: list[str] = ()) -> tuple[list[Entry], str]:
-    with locked(path):
-        local = read_store(path)
+    # The sync lock keeps merges with the peer in order (a remove can't be
+    # undone by a concurrent sync's older peer copy) and spans the ssh round
+    # trips. The store lock that Stop records wait on covers only the local
+    # read/merge/replace, so a slow peer never delays another session's stop.
+    with locked(path, ".sync.lock"):
         remote = peer_copy.read_peer(peer, STORE_PATH) if peer else None
-        drop = {term.casefold() for term in removed}
-        merged = {}
-        for entry in local + (parse_store(remote) if remote is not None else []):
-            # Prefer the copy that gained a page link after the other was synced.
-            if entry["term"].casefold() not in drop and not (merged.get(entry["id"]) or {}).get("link"):
-                merged[entry["id"]] = entry
-        entries = newest(list(merged.values()))
-        text = serialize(entries)
-        write_text(path, text)
+        with locked(path):
+            local = read_store(path)
+            drop = {term.casefold() for term in removed}
+            merged = {}
+            for entry in local + (parse_store(remote) if remote is not None else []):
+                # Prefer the copy that gained a page link after the other was synced.
+                if entry["term"].casefold() not in drop and not (merged.get(entry["id"]) or {}).get("link"):
+                    merged[entry["id"]] = entry
+            entries = newest(list(merged.values()))
+            text = serialize(entries)
+            write_text(path, text)
         if not peer:
             return entries, ""
         if remote is not None and peer_copy.write_peer(peer, STORE_PATH, text):

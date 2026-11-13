@@ -12,6 +12,10 @@ import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "sh/notify_on_finish.py"
+# Task entries as Claude Code 2.1.321 labels them in the Stop payload.
+AGENT = {"id": "a1", "type": "subagent", "status": "running", "description": "worker"}
+CLOUD = {"id": "r1", "type": "cloud session", "status": "running", "description": "remote"}
+SHELL = {"id": "b1", "type": "shell", "status": "running", "command": "make"}
 
 
 class NotifyOnFinishTests(unittest.TestCase):
@@ -193,33 +197,217 @@ class NotifyOnFinishTests(unittest.TestCase):
         self.arm()
         result = self.hold()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIsNone(self.stop())
+        self.assertIsNone(self.stop(background_tasks=[SHELL]))
         self.assertEqual(self.deliveries(), [])
         flag = list(self.state.glob("*.json"))[0]
         self.assertFalse(json.loads(flag.read_text()).get("held", False))
-        self.assertIsNone(self.stop())
+        self.assertIsNone(self.stop(background_tasks=[]))
         self.assertEqual(len(self.wait_for_delivery()), 1)
         self.assertEqual(list(self.state.glob("*.json")), [])
 
     def test_each_notification_turn_can_hold_again(self):
+        # A repeated hold replaces the remembered snapshot.
         self.arm()
-        for _ in range(2):
+        for shell in ("b1", "b2"):
             self.assertEqual(self.hold().returncode, 0)
-            self.stop()
+            self.stop(background_tasks=[dict(SHELL, id=shell)])
             self.assertEqual(self.deliveries(), [])
             self.assertEqual(len(list(self.state.glob("*.json"))), 1)
-        self.stop()
+        self.stop(background_tasks=[SHELL])  # b1 is no longer the held task
         self.assertEqual(len(self.wait_for_delivery()), 1)
 
     def test_hold_uses_codex_thread_id(self):
         self.arm(session="codex-session")
         result = self.hold(session="codex-session", codex=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.stop(session="codex-session")
+        self.stop(session="codex-session", turn_id="t1")
         self.assertEqual(self.deliveries(), [])
         self.assertEqual(len(list(self.state.glob("*.json"))), 1)
-        self.stop(session="codex-session")
+        self.stop(session="codex-session", turn_id="t2")
         self.assertEqual(len(self.wait_for_delivery()), 1)
+
+    def test_entry_without_an_id_makes_the_snapshot_unknown(self):
+        # Re-check finding (a): a running shell with no id shortened the list.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop(background_tasks=[SHELL])
+        nameless = {key: value for key, value in SHELL.items() if key != "id"}
+        self.stop(stop_hook_active=True, background_tasks=[nameless])
+        self.stop(background_tasks=[dict(SHELL, status=None)])
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+
+    def test_claude_hold_without_a_snapshot_waits_for_a_readable_one(self):
+        # Re-check finding (b): two list-less Stops released the hold.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop()
+        self.stop()
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+        # The first readable list that shows nothing running sends.
+        self.stop("Finished.", background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Finished.")
+
+    def test_pending_hold_captures_the_first_readable_snapshot(self):
+        # Re-check finding (c): a continuation's running shell didn't hold.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop()
+        self.stop(stop_hook_active=True, background_tasks=[SHELL])
+        self.stop(background_tasks=[SHELL])
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+        self.stop("Shell done.", background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Shell done.")
+
+    def test_hold_with_nothing_running_sends_at_that_stop(self):
+        # Re-check finding 2: an empty snapshot left an empty hold forever.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Already done.", background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Already done.")
+        self.assertEqual(self.flags(), [])
+
+    def flags(self):
+        return list(self.state.glob("*.json"))
+
+    def test_hold_survives_the_continuation_of_a_stop_another_hook_blocked(self):
+        # The audit's repro: the leftover-shells guard blocks the held Stop,
+        # and the continuation's Stop used to send while the work still ran.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        workers = [AGENT]
+        self.stop("Workers launched; waiting.", stop_hook_active=False, background_tasks=workers)
+        self.stop("Stopped shell bx1; keeping workers.", stop_hook_active=True,
+                  background_tasks=workers)
+        self.stop("Still waiting.", stop_hook_active=True, background_tasks=workers)
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+        # The task-notification turn after the work ends sends, once.
+        self.stop("All workers finished.", stop_hook_active=False, background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "All workers finished.")
+        self.assertEqual(self.flags(), [])
+        self.stop(stop_hook_active=True, background_tasks=[])
+        self.assertEqual(len(self.deliveries()), 1)
+
+    def test_held_work_finished_inside_the_cleanup_continuation_sends(self):
+        # Review finding: the continuation finished the work and no later
+        # task-notification turn came, so the alert was never sent.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Waiting on the build shell.", stop_hook_active=False,
+                  background_tasks=[SHELL])
+        self.assertEqual(len(self.flags()), 1)
+        self.stop("Build done; nothing left.", stop_hook_active=True, background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Build done; nothing left.")
+        self.assertEqual(self.flags(), [])
+
+    def test_codex_hold_keeps_through_continuations_and_sends_at_the_next_stop(self):
+        # Codex lists no background work: a held turn's continuations keep
+        # the flag and the next Stop outside a continuation sends.
+        self.arm(session="codex-session")
+        self.assertEqual(self.hold(session="codex-session", codex=True).returncode, 0)
+        for active in (False, True, True):
+            self.stop(session="codex-session", turn_id="t1", stop_hook_active=active)
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+        self.stop("Done.", session="codex-session", turn_id="t2", stop_hook_active=False)
+        self.assertEqual(len(self.wait_for_delivery()), 1)
+        self.assertEqual(self.flags(), [])
+
+    def test_hold_over_a_shell_outlasts_a_blocked_continuation(self):
+        # Re-check finding: the continuation sent while the held shell still ran.
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Build running.", stop_hook_active=False, background_tasks=[SHELL])
+        self.stop("Cleanup after a block.", stop_hook_active=True, background_tasks=[SHELL])
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+
+    def test_hold_keeps_through_a_continuation_with_no_task_list(self):
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Build running.", stop_hook_active=False, background_tasks=[SHELL])
+        self.stop("Cleanup.", stop_hook_active=True)
+        self.stop("Cleanup.", stop_hook_active=False, background_tasks="not a list")
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+
+    def test_held_shell_that_ends_sends_once(self):
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Build running.", stop_hook_active=False, background_tasks=[SHELL])
+        self.stop("Still building.", stop_hook_active=False, background_tasks=[SHELL])
+        self.assertEqual(self.deliveries(), [])
+        self.stop("Build finished.", stop_hook_active=False, background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Build finished.")
+        self.stop(stop_hook_active=False, background_tasks=[])
+        self.assertEqual(len(self.deliveries()), 1)
+        self.assertEqual(self.flags(), [])
+
+    def test_hold_over_a_shell_and_a_subagent_waits_for_both(self):
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Both running.", stop_hook_active=False, background_tasks=[SHELL, AGENT])
+        self.stop("Shell done.", stop_hook_active=False, background_tasks=[AGENT])
+        self.assertEqual(self.deliveries(), [])
+        self.assertEqual(len(self.flags()), 1)
+        # Only tasks live at the held Stop hold it: a shell started later
+        # (b2) does not, and shells never defer on their own.
+        self.stop("Worker done.", stop_hook_active=False, background_tasks=[dict(SHELL, id="b2")])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Worker done.")
+        self.assertEqual(self.flags(), [])
+
+    def test_running_cloud_session_defers_like_a_local_worker(self):
+        # Review finding: Claude Code labels remote_agent tasks "cloud session".
+        self.arm()
+        self.assertEqual(self.hold().returncode, 0)
+        self.stop("Launched.", stop_hook_active=False, background_tasks=[AGENT, CLOUD])
+        self.stop("Local worker done.", stop_hook_active=False, background_tasks=[CLOUD])
+        self.stop("Cleanup.", stop_hook_active=True, background_tasks=[CLOUD])
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+        self.stop("Cloud session done.", stop_hook_active=False, background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Cloud session done.")
+
+    def test_unheld_continuation_without_background_work_sends_as_before(self):
+        self.arm()
+        self.stop(stop_hook_active=True, background_tasks=[])
+        self.assertEqual(len(self.wait_for_delivery()), 1)
+
+    def test_running_subagents_and_workflows_defer_until_the_last_ends(self):
+        self.arm()
+        agent = {"id": "a1", "type": "subagent", "status": "running", "description": "worker"}
+        workflow = {"id": "w1", "type": "workflow", "status": "pending", "description": "flow"}
+        self.stop("Launched.", stop_hook_active=False, background_tasks=[agent, workflow])
+        self.stop("Blocked continuation.", stop_hook_active=True, background_tasks=[agent, workflow])
+        self.stop("One worker done.", stop_hook_active=False, background_tasks=[workflow])
+        self.assertEqual(len(self.flags()), 1)
+        self.assertEqual(self.deliveries(), [])
+        self.stop("Everything finished.", stop_hook_active=False, background_tasks=[])
+        self.assertEqual(self.wait_for_delivery()[0][2], "Everything finished.")
+        self.assertEqual(self.flags(), [])
+
+    def test_shells_monitors_internal_and_malformed_tasks_do_not_defer(self):
+        lists = (
+            [{"id": "b1", "type": "shell", "status": "running", "command": "npm run dev"},
+             {"id": "m1", "type": "monitor", "status": "running"},
+             {"id": "d1", "type": "dream", "status": "running"},
+             {"id": "t1", "type": "teammate", "status": "running"},
+             {"id": "s1", "type": "auto-mode scan", "status": "pending"},
+             {"id": "n1", "type": "a label added later", "status": "running"},
+             {"id": "a1", "type": "subagent", "status": "completed"}],
+            "subagent", [None, "subagent"], {"type": "subagent", "status": "running"},
+        )
+        for index, tasks in enumerate(lists):
+            with self.subTest(tasks=tasks):
+                self.arm(session=f"s{index}")
+                self.stop(session=f"s{index}", background_tasks=tasks)
+                deadline = time.monotonic() + 3
+                while len(self.deliveries()) <= index and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(len(self.deliveries()), index + 1)
 
     def test_hold_without_flag_or_session_errors_clearly(self):
         result = self.hold()

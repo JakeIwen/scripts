@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from urllib.parse import parse_qs, urlparse
 
@@ -150,6 +151,80 @@ Some other prose.
 - **Seam:** A substitution boundary.
 ''')
         self.assertEqual([entry['term'] for entry in self.entries()], ['Adapter', 'Observer', 'Seam'])
+
+    def test_unindented_wrapped_definition_keeps_its_tail_and_later_terms(self):
+        # The audit's repro: the wrapped line cut the definition and dropped "trie".
+        self.stop('x\n\n**Terms**\n- **ring buffer**: fixed-size queue that\n'
+                  'overwrites the oldest entry.\n- **trie**: prefix tree.\n')
+        self.assertEqual([(entry['term'], entry['definition']) for entry in self.entries()], [
+            ('ring buffer', 'fixed-size queue that\noverwrites the oldest entry.'),
+            ('trie', 'prefix tree.')])
+
+    def test_closing_line_heading_and_plain_bullet_end_a_wrapped_definition(self):
+        self.stop('**Terms**\n- **Atomic rename**: replace\nin one step.\n***DONE / CLEAN***\nAfter.',
+                  session='done')
+        self.stop('**Terms**\n- **Seam**: a boundary\n## Next\n- **Not a term**: no.', session='heading')
+        self.stop('**Terms**\n- **Fixture**: test input\n- plain bullet\n- **Not a term**: no.',
+                  session='bullet')
+        self.stop('**Terms**\n- **Trie**: prefix tree.\n\nTrailing prose.\n- **Not a term**: no.',
+                  session='blank')
+        self.assertEqual([(entry['term'], entry['definition']) for entry in self.entries()], [
+            ('Atomic rename', 'replace\nin one step.'), ('Seam', 'a boundary'),
+            ('Fixture', 'test input'), ('Trie', 'prefix tree.')])
+
+    def test_indented_closing_line_table_and_page_link_end_a_definition(self):
+        # Review finding: indentation let these lines into the definition.
+        self.stop('**Terms**\n- **Atomic rename**: replace in one step.\n'
+                  '  ***DONE / CLEAN***\nAfter.', session='done')
+        self.stop('**Terms**\n- **Seam**: a boundary.\n  | a | b |\n  |---|---|\n- **Not a term**: no.',
+                  session='table')
+        self.stop('**Terms**\n- **Fixture**: test input.\n'
+                  'file:///Users/jacobr/.agent/artifacts/x.html\n- **Not a term**: no.', session='url')
+        # An indented plain sub-item still belongs to its definition.
+        self.stop('**Terms**\n- **Trie**: prefix tree.\n  - one node per prefix\n', session='nested')
+        self.assertEqual([(entry['term'], entry['definition']) for entry in self.entries()], [
+            ('Atomic rename', 'replace in one step.'), ('Seam', 'a boundary.'),
+            ('Fixture', 'test input.'), ('Trie', 'prefix tree.\n  - one node per prefix')])
+
+    def test_stop_record_does_not_wait_on_a_slow_peer_sync(self):
+        # The audit's repro: +terms held the store lock across both ssh calls,
+        # so another session's Stop record ran past its hook timeout.
+        started, release = self.root / 'ssh-started', self.root / 'ssh-release'
+        (self.root / 'bin' / 'ssh').write_text(
+            '#!/bin/sh\ntouch "$SSH_STARTED"\n'
+            'n=0; while [ ! -e "$SSH_RELEASE" ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done\n'
+            + FAKE_SSH.split('\n', 1)[1])
+        self.env.update(SSH_STARTED=str(started), SSH_RELEASE=str(release))
+        self.peer_home.mkdir()
+        self.write_entries(self.peer_file, [self.entry('Observer', 'pi')])
+        command = [sys.executable, str(SCRIPT), '--file', str(self.file), '--peer', 'pi',
+                   '--known-file', str(self.known_file), '--page', str(self.page), '--hook']
+        terms = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, env=self.env, cwd=SCRIPT.parent)
+        def stop_terms():
+            terms.kill()
+            terms.wait()
+            terms.stdout.close()
+            terms.stderr.close()
+        self.addCleanup(stop_terms)
+        terms.stdin.write(json.dumps({'hook_event_name': 'UserPromptSubmit', 'prompt': '+terms'}))
+        terms.stdin.close()
+        for _ in range(200):
+            if started.exists():
+                break
+            time.sleep(0.02)
+        self.assertTrue(started.exists())
+        record = subprocess.run(command, input=json.dumps({
+            'hook_event_name': 'Stop', 'session_id': 'other',
+            'last_assistant_message': '**Terms**\n- **Flock:** An advisory lock.'}),
+            capture_output=True, text=True, env=self.env, cwd=SCRIPT.parent, timeout=5)
+        self.assertEqual(record.returncode, 0, record.stderr)
+        self.assertIsNone(terms.poll())  # the sync is still waiting on its peer
+        release.touch()
+        self.assertEqual(terms.wait(timeout=10), 0, terms.stderr.read())
+        self.assertIn('synced with pi', json.loads(terms.stdout.read())['reason'])
+        self.assertEqual({entry['term'] for entry in self.entries()}, {'Flock', 'Observer'})
+        self.assertEqual(self.entries(), self.entries(self.peer_file))
 
     def test_messages_without_terms_or_with_non_definition_bullets_record_nothing(self):
         for message in ('No Terms here.\n- **Not a term:** Ordinary list.',
