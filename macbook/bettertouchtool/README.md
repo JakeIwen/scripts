@@ -292,6 +292,25 @@ current triggers in that state. Guard now watches top-level key sequences (above
 so a lost one alerts and `guard repair --apply` recreates it from the checkpoint;
 this restore covers sequences lost before a checkpoint held them.
 
+### Typed-word triggers
+
+Key-sequence triggers that expand a typed word (`lfd`, `ldev`) ignore keystrokes
+sent by `osascript` / System Events `keystroke`: on 2026-11-01 `lfd`, which works
+when typed by hand, stayed `lfd` in TextEdit. HID-level `CGEventPost` from a Swift
+helper was built but never tried. So scripted typing can't test them; verify a
+trigger through BTT's readback (`bttcli get_trigger uuid=...`)
+and the saved store, check its condition with `text_editing_conditions.js`
+(evaluates it with NSPredicate), then ask Jacob to type the word.
+
+For the "Insert/Type/Paste Custom Text" action (118, BTT 6.885),
+`BTTActionTextToPaste` must be RTF: with plain text, the first `ldev` deleted the
+typed word and pasted nothing (2026-11-02). `ldev` now uses `lfd`'s RTF wrapper
+with the text swapped; `COSNT…` and `SHRG` still store plain text.
+
+`ldev` (UUID `77FDBD40-FC3E-542D-9125-39C84EF98B3B`) pastes `lionfeather.dev`
+everywhere except terminal apps, where `ldev` is a zsh cd function. It exists
+only in BTT's store; no script here builds it.
+
 ### Editing keys
 
 ```sh
@@ -755,7 +774,7 @@ and report identities. Recreate venvs rather than moving them.
   graph but watched by Guard; the installer does not checkpoint them itself, so edit
   acceptance picks them up. Existing Guard drift must be reviewed separately; do not
   accept it just to add Panel.
-- `install_lighting_menu.py/.js`: guarded installer for Media > Lighting, a 💡 submenu
+- `install_lighting_menu.py`: guarded installer for Media > Lighting, a 💡 submenu
   appended to the Media bar holding `<<`, a two-line Solder SW button (the Screen Cap
   button's label form) that runs `macbook/scripts/van_lighting.py toggle
   switch.solder_flood`, and 🎨, which shows the hidden top-level "Lighting Colour"
@@ -763,8 +782,10 @@ and report identities. Recreate venvs rather than moving them.
   `BTTMenuItemWebViewPlain` 0 so BTT's script bridge stays) is the page
   `lighting_control/page.py` builds for the WiZ bulbs; the page runs `van_lighting.py
   lights`/`set` through `runShellScript` and never calls the dashboard directly.
-  The launcher owns the structure (a flat list of items, each naming its parent, `null`
-  for a top-level menu); the worker indexes the Media tree and the owned dropdown once
+  It runs on the shared `media_submenu.py` launcher and `media_submenu_install.js`
+  worker. The installer owns the structure (a flat list of items, each naming its
+  parent, `null` for a top-level menu, plus the noun, title and backup prefix the
+  worker's messages use); the worker indexes the Media tree and the owned dropdown once
   per read. Preview is the default; `--apply` backs up the trees, writes only its own
   UUIDs, verifies runtime and saved records (including each action's Master preset link),
   then checkpoints Guard; `--refresh` redraws the bar. Moved, retyped or disabled items
@@ -776,6 +797,21 @@ and report identities. Recreate venvs rather than moving them.
 
   ```sh
   /usr/bin/python3 -B macbook/bettertouchtool/install_lighting_menu.py --apply --refresh
+  ```
+- `install_mac_menu.py`: guarded installer for Media > Mac, a submenu shown as the SF
+  Symbol `laptopcomputer` (the Sonos join button's icon settings), appended after
+  Lighting, for Mac window and system items. It holds `<<`, iTerm↑ and iTerm↓ (two-line
+  labels like Solder SW), which run `macbook/scripts/iterm_tile.js external` and
+  `builtin`: every iTerm window that is neither a hotkey window nor minimized moves to
+  the largest external monitor or the MacBook display and is tiled side by side, each
+  full height, together filling the visible width. Windows already on that display are
+  re-tiled and keep their left-to-right order; arrivals join on the right. With no
+  external monitor it posts a notification and moves nothing; iTerm is never launched.
+  `iterm_tile.js external --dry-run` prints the plan. Same shared launcher, worker and
+  flags as Lighting.
+
+  ```sh
+  /usr/bin/python3 -B macbook/bettertouchtool/install_mac_menu.py --apply --refresh
   ```
 - `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
   installer for the standard BPM, Rhythm, Convert Video, Interval Analysis and Temp
