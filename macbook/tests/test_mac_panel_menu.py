@@ -52,9 +52,15 @@ class PlanningTests(unittest.TestCase):
         plan = panel.installation_plan(fixture_rows(), [])
         menu, keyboard = plan["desired"]
         self.assertEqual((menu["BTTTriggerType"], menu["BTTTriggerClass"]),
-                         (674, "BTTTriggerTypeOtherTriggers"))
+                         (681, "BTTTriggerTypeOtherTriggers"))
         self.assertNotIn("BTTTouchBarButtonName", menu)
-        self.assertEqual(menu["BTTTriggerConfig"]["BTTTouchBarOnlyShowIcon"], 1)
+        config = menu["BTTTriggerConfig"]
+        self.assertEqual(config["BTTTouchBarOnlyShowIcon"], 0)  # text must show beside the icon
+        self.assertEqual(config["BTTTouchBarScriptUpdateInterval"], 3)
+        self.assertEqual(config["BTTTouchBarAppleScriptStringRunOnInit"], 1)
+        self.assertEqual(config["BTTTouchBarShellScriptString"],
+                         "/usr/bin/python3 -I -B /Users/jacobr/dev/scripts/macbook/scripts/cpu_percent.py")
+        self.assertIsNone(plan["summary"]["menu_bar"]["replaces_type"])
         self.assertEqual(menu["BTTTriggerConfig"]["BTTTouchBarItemSFSymbolDefaultIcon"], panel.MENU_ICON)
         self.assertEqual(keyboard["BTTShortcutKeyCode"], 35)
         self.assertEqual(keyboard["BTTShortcutModifierKeys"], 1835008)
@@ -84,6 +90,17 @@ class PlanningTests(unittest.TestCase):
         new = panel.installation_plan(rows, plan["desired"])
         self.assertEqual([n["BTTUUID"] for n in new["desired"]], [panel.MENU_ID, panel.KEY_ID])
         self.assertEqual(new["desired"][1]["BTTOrder"], 42)
+
+    def test_installed_icon_only_item_is_planned_as_an_upgrade(self):
+        rows, plan = installed_rows()
+        rows[panel.MENU_ID]["ZGESTURETYPE"] = 674
+        legacy = dict(plan["desired"][0], BTTTriggerType=674)
+        new = panel.installation_plan(rows, [legacy, plan["desired"][1]])
+        self.assertEqual(new["summary"]["menu_bar"]["replaces_type"], 674)
+        self.assertEqual(new["desired"][0]["BTTTriggerType"], 681)
+        rows[panel.MENU_ID]["ZGESTURETYPE"] = 773  # any other type stays refused
+        with self.assertRaisesRegex(RuntimeError, "foreign type"):
+            panel.installation_plan(rows, [legacy, plan["desired"][1]])
 
     def test_foreign_markers_and_duplicate_candidates_refused(self):
         rows, plan = installed_rows()

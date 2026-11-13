@@ -751,7 +751,10 @@ and report identities. Recreate venvs rather than moving them.
   its fixed subprocess bridge lets standalone installers use the package without
   import-path shims. Guard's own repair does not use this promotion path.
 - `install_mac_panel_menu.py/.js`: guarded installer for a standalone Mac Panel
-  menu-bar icon (SF Symbol `slider.horizontal.3`, icon only) and All Apps keyboard
+  menu-bar item (type 681, shell-script title: SF Symbol `slider.horizontal.3` plus the
+  whole-machine CPU busy % from `macbook/scripts/cpu_percent.py`, refreshed every 3 s;
+  an existing icon-only 674 item is deleted and re-added under the same UUID, since
+  `update_trigger` isn't known to retype a trigger) and All Apps keyboard
   shortcut (installed as `ctrl+opt+cmd+P`), both using BTT's built-in Open URL
   action for `http://127.0.0.1:8769/`. BTT saves each trigger's notes as its
   description (`ZDESC`) and ignores a button name on menu-bar items. Preview is the

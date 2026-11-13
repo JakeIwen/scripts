@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Preview or explicitly install two standalone Mac Panel triggers in BTT."""
+"""Preview or explicitly install two standalone Mac Panel triggers in BTT: a menu-bar item
+showing the CPU busy percentage and an Open URL keyboard shortcut."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +21,13 @@ KEY_ID = "317CB648-FCCA-4774-9E23-750CB2BE82C4"
 # BTT saves a trigger's notes as its description (ZDESC); the menu item's marker stays readable.
 MARKERS = {MENU_ID: "Mac Panel", KEY_ID: "mac-panel:keyboard"}
 MENU_ICON = "slider.horizontal.3"
+# 681 is BTT's Menu Bar Icon whose title is a shell script's stdout; 674 is the icon-only
+# form an earlier install used, still accepted so it is upgraded rather than refused.
+MENU_TYPE = 681
+LEGACY_MENU_TYPE = 674
+# The main checkout path on purpose: BTT runs this long after any worktree is gone.
+CPU_SCRIPT = "/usr/bin/python3 -I -B /Users/jacobr/dev/scripts/macbook/scripts/cpu_percent.py"
+REFRESH_SECONDS = 3
 MODIFIERS = 1835008  # Control | Option | Command, from BTT's modifier-key table.
 ADVANCED_MODIFIERS = "1835049"  # Same combination in the live BTT keyboard exports.
 SHORTCUTS = (("P", 35), ("M", 46), ("K", 40))
@@ -29,14 +37,18 @@ def definitions(preset, key_code):
     common = {"BTTAppBundleIdentifier": "BT.G", "BTTTriggerBelongsToPreset": preset,
               "BTTEnabled": 1, "BTTEnabled2": 1, "BTTPredefinedActionType": 59,
               "BTTOpenURL": URL, "BTTOpenURLBrowser": "Default"}
-    menu = dict(common, BTTUUID=MENU_ID, BTTTriggerType=674,
+    menu = dict(common, BTTUUID=MENU_ID, BTTTriggerType=MENU_TYPE,
                 BTTTriggerClass="BTTTriggerTypeOtherTriggers",
                 BTTGestureNotes=MARKERS[MENU_ID],
-                # BTT's documented menu-bar icon form; it ignores BTTTouchBarButtonName here.
+                # BTT's documented script-driven menu-bar form: the icon plus the script's
+                # stdout (the CPU percentage) as text; it ignores BTTTouchBarButtonName here.
                 BTTTriggerConfig={"BTTTouchBarItemIconType": 1,
                                   "BTTTouchBarItemSFSymbolDefaultIcon": MENU_ICON,
                                   "BTTTouchBarItemIconWidth": 18, "BTTTouchBarItemIconHeight": 18,
-                                  "BTTTouchBarOnlyShowIcon": 1})
+                                  "BTTTouchBarOnlyShowIcon": 0,
+                                  "BTTTouchBarShellScriptString": CPU_SCRIPT,
+                                  "BTTTouchBarScriptUpdateInterval": REFRESH_SECONDS,
+                                  "BTTTouchBarAppleScriptStringRunOnInit": 1})
     keyboard = dict(common, BTTUUID=KEY_ID, BTTTriggerType=0,
                     BTTTriggerClass="BTTTriggerTypeKeyboardShortcut",
                     BTTGestureNotes=MARKERS[KEY_ID], BTTTriggerOnDown=1,
@@ -120,12 +132,12 @@ def validate_owned(saved, runtime, preset):
         if not stored:
             continue
         row = stored[0]
-        expected_type = 674 if uid == MENU_ID else 0
+        allowed_types = (MENU_TYPE, LEGACY_MENU_TYPE) if uid == MENU_ID else (0,)
         if row["ZPARENT"] is not None or row["ZBELONGSTOPRESET2"] != preset["Z_PK"] or \
-                row["app_scope"] != ["BT.G"] or row["ZGESTURETYPE"] != expected_type:
+                row["app_scope"] != ["BT.G"] or row["ZGESTURETYPE"] not in allowed_types:
             raise RuntimeError("Existing Mac Panel UUID has a foreign type or scope; no changes made.")
         current = live[0]
-        if current.get("BTTTriggerType") != expected_type or \
+        if current.get("BTTTriggerType") not in allowed_types or \
                 current.get("BTTTriggerBelongsToPreset") != preset["ZNAME3"] or \
                 current.get("BTTAppBundleIdentifier", "BT.G") != "BT.G":
             raise RuntimeError("Runtime Mac Panel type or scope differs; no changes made.")
@@ -160,13 +172,21 @@ def installation_plan(saved, runtime):
     return {"before": runtime, "desired": desired, "preset_pk": preset["Z_PK"],
             "summary": {"mode": "preview", "url": URL, "preset": preset["ZNAME3"],
                         "preset_uuid": preset["ZUNIQUEIDENTIFIER"], "app_scope": "BT.G (All Apps)",
-                        "menu_bar": {"uuid": MENU_ID, "trigger_type": 674,
+                        "menu_bar": {"uuid": MENU_ID, "trigger_type": MENU_TYPE,
                                      "trigger_class": desired[0]["BTTTriggerClass"],
-                                     "icon": MENU_ICON, "existing": MENU_ID in saved},
+                                     "icon": MENU_ICON, "existing": MENU_ID in saved,
+                                     "script": CPU_SCRIPT, "refresh_seconds": REFRESH_SECONDS,
+                                     "replaces_type": replaced_type(saved)},
                         "keyboard": {"uuid": KEY_ID, **shortcut, "modifier_flags": MODIFIERS,
                                      "existing": KEY_ID in saved}, "candidates": candidates,
                         "protected_media_roots_touched": False, "restarts_btt": False,
                         "transport": "BTT local socket (no Apple Events)", "changes_applied": False}}
+
+
+def replaced_type(saved):
+    """The saved type the menu item has today when apply must delete and re-add it, else None."""
+    row = saved.get(MENU_ID)
+    return row["ZGESTURETYPE"] if row and row["ZGESTURETYPE"] != MENU_TYPE else None
 
 
 def outside_saved(saved):

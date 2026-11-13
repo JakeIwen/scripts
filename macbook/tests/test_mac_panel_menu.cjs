@@ -26,7 +26,12 @@ function setup(options = {}) {
             if (options.beforeRead) options.beforeRead(state);
             return JSON.stringify(state.items);
         }
-        assert.ok(['add_new_trigger', 'update_trigger'].includes(command));
+        assert.ok(['add_new_trigger', 'update_trigger', 'delete_trigger'].includes(command));
+        if (command === 'delete_trigger') {
+            state.writes.push({command, uuid: parameters.uuid});
+            state.items = state.items.filter(node => node.BTTUUID !== parameters.uuid);
+            return '';
+        }
         const item = JSON.parse(parameters.json);
         state.writes.push({command, uuid: item.BTTUUID});
         if (command === 'add_new_trigger') {
@@ -79,6 +84,26 @@ test('existing stale item is updated in place, not duplicated', () => {
     env.run();
     assert.deepEqual(env.state.writes.map(item => item.command), ['update_trigger', 'add_new_trigger']);
     assert.equal(env.state.items.filter(item => item.BTTUUID === desired[0].BTTUUID).length, 1);
+});
+
+test('an icon-only 674 item is deleted and re-added as 681 under its own UUID only', () => {
+    const env = setup();
+    env.state.items.push({...clone(desired[0]), BTTTriggerType: 674, BTTTriggerConfig: {BTTTouchBarOnlyShowIcon: 1}});
+    env.plan.before = clone(env.state.items);
+    const original = clone(env.unrelated);
+    assert.equal(env.run().writes, 3);
+    assert.deepEqual(env.state.writes.map(item => item.command),
+        ['delete_trigger', 'add_new_trigger', 'add_new_trigger']);
+    assert.equal(env.state.writes[0].uuid, desired[0].BTTUUID);
+    assert.equal(env.state.items.find(item => item.BTTUUID === desired[0].BTTUUID).BTTTriggerType, 681);
+    assert.deepEqual(env.unrelated, original);
+});
+
+test('681 is the only menu-bar type besides 674 the plan may carry', () => {
+    const env = setup();
+    env.plan.desired[0].BTTTriggerType = 680;
+    assert.throws(() => env.run(), /Unsafe/);
+    assert.equal(env.state.writes.length, 0);
 });
 
 test('duplicate runtime UUIDs and changed backup snapshots refuse before mutation', () => {

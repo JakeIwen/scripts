@@ -52,7 +52,7 @@ function validatePlan(plan) {
     if (new Set(ids).size !== 2) throw new Error('Duplicate Mac Panel plan UUID.');
     for (const node of plan.desired) {
         if (node.BTTAppBundleIdentifier !== 'BT.G' || node.BTTTriggerBelongsToPreset !== 'Master' ||
-            node.BTTPredefinedActionType !== 59 || ![0, 674].includes(node.BTTTriggerType) ||
+            node.BTTPredefinedActionType !== 59 || ![0, 674, 681].includes(node.BTTTriggerType) ||
             node.BTTOpenURL !== plan.summary.url || node.BTTTriggerParentUUID ||
             ['BTTActionsToExecute', 'BTTAdditionalActions', 'BTTMenuItems', 'BTTMenuItemActions']
                 .some(key => node[key])) throw new Error('Unsafe Mac Panel plan scope.');
@@ -74,9 +74,20 @@ function applyPlan(socket, common, plan) {
         if (common.fingerprint(fresh) !== common.fingerprint(before)) {
             throw new Error('BTT changed before the next item; stopped without retrying.');
         }
-        if (previous) socket.call('update_trigger', {uuid: desired.BTTUUID, json: JSON.stringify(desired)});
-        else socket.call('add_new_trigger', {json: JSON.stringify(desired)});
-        writes++;
+        if (previous && previous.BTTTriggerType !== desired.BTTTriggerType) {
+            // update_trigger is not known to change a trigger's type (674 -> 681), so a retyped
+            // item is deleted and re-added; only this plan's own UUIDs are ever deleted.
+            if (!ids.includes(previous.BTTUUID)) throw new Error('Refusing to delete a foreign trigger.');
+            socket.call('delete_trigger', {uuid: previous.BTTUUID});
+            socket.call('add_new_trigger', {json: JSON.stringify(desired)});
+            writes += 2;
+        } else if (previous) {
+            socket.call('update_trigger', {uuid: desired.BTTUUID, json: JSON.stringify(desired)});
+            writes++;
+        } else {
+            socket.call('add_new_trigger', {json: JSON.stringify(desired)});
+            writes++;
+        }
         const after = readRuntime(socket, common);
         if (!matches(after.find(node => node.BTTUUID === desired.BTTUUID), desired, common)) {
             throw new Error('Mac Panel runtime verification failed; stopped without retrying.');
