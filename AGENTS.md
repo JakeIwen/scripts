@@ -624,6 +624,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   Deploy the helper first, then `pi/scripts/claude_ntfy_notify.py`, both flat
   in `/home/pi/scripts/`; Mac hooks run directly from the checkout. Tests:
   `shared/tests/test_claude_ntfy_titles.py` includes the Pi's deployed layout.
+  Both reach the phone through `pi/scripts/ntfy_send.sh`, which posts the
+  message with `--data-raw`, keeps each header one line, and reads
+  `NTFY_SECRETS_FILE` in place of the Pi's settings file when set;
+  `pi/tests/test_ntfy_send.py` uses that to stay off the real topic.
 - `shared/sh/plus_commands.py` prints Jacob's + commands: the first sentence of
   each bullet in the global instructions' "+ commands" section. With `--hook`
   it is the UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a
@@ -642,6 +646,27 @@ compare it with this checkout. Deployed files may differ from the repository.
   hook (Claude and Codex, Mac and Pi): `+known <terms>` records terms without
   a model turn, and every session gets the list as hook context, then only
   the terms added since (per-session state in `~/.claude/known-terms-seen/`).
+  The hook answers a `+known` prompt itself (`read_command`) only when it is
+  one line of at most 20 comma- or semicolon-separated terms (60 characters,
+  6 words, no control or separator characters, no other `+` command) and
+  every term is recognised (its name, ignoring case, is in the local
+  glossary store `~/.agent/glossary/terms.jsonl` or already known) or
+  double-quoted (`+known "saga"`, taken as given); an unquoted remainder that
+  is itself one recognised name counts as one term, since the glossary page's
+  copy button sends names that can hold a comma. Anything else goes to the
+  model with nothing stored; a one-line list held back by unrecognised terms
+  also gets context naming the whole list, the unrecognised items and one
+  `add` command for all of them. The confirmation names what it recorded and
+  prints the `remove` command that undoes it. The CLI's `add` and `remove`
+  take each argument as one literal term (nothing is split; `--` before a
+  term starting with `-`), and both printed commands are shell-quoted. A line
+  over 2,000 characters is never parsed; a glossary store over 8 MiB is not
+  read (nothing recognised), and records over 16 KiB or undecodable are
+  skipped. Prompts
+  other hooks block (bare `+cmd` and `+links`, `+terms [search]`, exactly
+  `/rm`, `/rm-cancel`, `/restart`) get no injection. Changes take
+  `KNOWN-TERMS.md.lock`; the hook waits at most 17 s in all (answering "send
+  it again" on contention) and skips the peer when under 16.5 s remain.
   The Mac merges both machines' copies over `vanpi.lan` on each change; the
   Pi copy sits flat in `/home/pi/scripts/`; ship `peer_copy.py` first.
 - `shared/sh/peer_copy.py` owns bounded, noninteractive SSH reads and atomic
