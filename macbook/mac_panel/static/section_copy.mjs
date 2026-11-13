@@ -192,15 +192,15 @@ export const LOGS_COPY = {
 // the mode itself (auto) or only a person can (manual). `auto` is the choice that clears a manual mode.
 export const MODE_COPY = {
   title: 'Mode',
-  info: 'The delegation mode the usage-budget script picked from the spend lines. Choosing one here overrides that automatic choice until it expires (the targeted provider\'s next weekly reset); Automatic clears the override. There is no duration to set.',
+  info: 'The delegation mode the usage-budget script picked from the spend lines. Choosing one here overrides that automatic choice until it expires (the targeted provider\'s next weekly reset); Automatic clears the override. There is no duration to set. A mode changes only which family builds and which model new sessions start on: in every mode the required review comes from the frontier model of the family other than the session\'s parent (Astra for a Claude parent, Opus for a GPT parent), and optional reviews run whenever the reviewer\'s family is ahead of its spend plan.',
   automatic: {label: 'Automatic', text: 'Clear any manual mode; the script picks from the spend lines again.'},
   modes: {
-    'claude-conserve': {kind: 'auto', text: 'Claude in deficit, GPT in surplus. GPT builds at the cheapest fit, Opus reviews its work, new sessions start on Astra.'},
-    'gpt-conserve': {kind: 'auto', text: 'GPT in deficit, Claude in surplus. Claude builds at the cheapest fit, Astra reviews, new sessions start on Opus.'},
-    'balanced-conserve': {kind: 'auto', text: 'Both in deficit. The family less deep in deficit builds, required reviews only, its frontier model parents.'},
-    'balanced-burn': {kind: 'auto', text: 'Both in surplus. Either family builds by fit, step-ups are free on T2 and T3, optional reviews are added, either parent.'},
-    'gpt-burn': {kind: 'manual', text: 'GPT builds everything, parents included, Opus still reviews, extra GPT reviews are added, sessions start on Astra.'},
-    'claude-burn': {kind: 'manual', text: 'Claude builds everything, parents included, Astra still reviews, extra Opus reviews are added, sessions start on Fable or Opus.'},
+    'claude-conserve': {kind: 'auto', text: 'Claude in deficit, GPT in surplus. GPT builds; new sessions start on Astra.'},
+    'gpt-conserve': {kind: 'auto', text: 'GPT in deficit, Claude in surplus. Claude builds; new sessions start on Opus.'},
+    'balanced-conserve': {kind: 'auto', text: 'Both in deficit. The family less deep in deficit builds; its frontier model parents new sessions.'},
+    'balanced-burn': {kind: 'auto', text: 'Both in surplus. The family further ahead of its spend plan builds, the other only when it has no room; new sessions start on Opus or Astra.'},
+    'gpt-burn': {kind: 'manual', text: 'GPT builds everything, parents included; new sessions start on Astra. Once the GPT weekly is used up, no new GPT workers: redeem a banked reset or switch back to Automatic to carry on with credits.'},
+    'claude-burn': {kind: 'manual', text: 'Claude builds everything, parents included; new sessions start on Fable or Opus.'},
   },
   apply: 'Apply',
   confirm: mode => `set mode ${mode}`,

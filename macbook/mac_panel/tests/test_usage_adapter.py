@@ -19,11 +19,11 @@ def facts():
         availability=dict(claude='ok', gpt='constrained'))
 
 
-LIVE = json.loads('''{"claude_weekly":{"used":12.0,"left":88.0,"resets_at":"2026-11-07T18:00:00+00:00"},"claude_session":{"used":19.0,"left":81.0,"resets_at":"2026-11-06T02:10:00+00:00"},"fable_weekly":{"used":17.0,"left":83.0,"resets_at":"2026-11-07T18:00:00+00:00"},"codex_weekly":{"used":9.0,"left":91.0,"resets_at":"2026-11-12T06:46:32+00:00"},"codex_session":null,"credits":{"left":10852.243326,"expires":"2026-12-31","days_left":56.199607994155095},"mode":"balanced-burn","positions":{"claude":{"left":88.0,"line":28.066265568824406,"position":59.933734431175594,"state":"surplus","reset":"2026-11-07T18:00:00+00:00"},"gpt":{"left":91.0,"line":89.02763404348546,"position":1.9723659565145368,"state":"surplus","reset":"2026-11-12T06:46:32+00:00","tolerance":28,"credits":10852.243326,"on_credits":false}},"route":{"builders":"either family by fit; step-ups free on T2 and T3","review":"gpt-built work by opus (room now); claude-built work by astra (room now)","parents":"either (opus or astra)"},"availability":{"claude":"ok","gpt":"ok"},"fetched_at":"2026-11-05T12:00:00+00:00","age_minutes":3.6251888833333337}''')
+LIVE = json.loads('''{"claude_weekly":{"used":12.0,"left":88.0,"resets_at":"2026-11-07T18:00:00+00:00"},"claude_session":{"used":19.0,"left":81.0,"resets_at":"2026-11-06T02:10:00+00:00"},"fable_weekly":{"used":17.0,"left":83.0,"resets_at":"2026-11-07T18:00:00+00:00"},"codex_weekly":{"used":9.0,"left":91.0,"resets_at":"2026-11-12T06:46:32+00:00"},"codex_session":null,"credits":{"left":10852.243326,"expires":"2026-12-31","days_left":56.199607994155095},"mode":"balanced-burn","positions":{"claude":{"left":88.0,"line":28.066265568824406,"position":59.933734431175594,"state":"surplus","reset":"2026-11-07T18:00:00+00:00"},"gpt":{"left":91.0,"line":89.02763404348546,"position":1.9723659565145368,"state":"surplus","reset":"2026-11-12T06:46:32+00:00","tolerance":28,"credits":10852.243326,"on_credits":false}},"route":{"builders":"claude first (further ahead of its plan; table Claude column); gpt when Claude has no room","review":"claude parents by astra (room now); gpt parents by opus (room now)","parents":"either (opus or astra)"},"availability":{"claude":"ok","gpt":"ok"},"fetched_at":"2026-11-05T12:00:00+00:00","age_minutes":3.6251888833333337}''')
 
 ANNOUNCED = dict(
     positions=LIVE['positions'], mode='balanced-burn',
-    generated_at='2026-01-05T12:00:00+00:00', builders='either family by fit', review='cross-family',
+    generated_at='2026-01-05T12:00:00+00:00', builders='claude first', review='parent-based',
     parents='either', lines=['Claude 88% left', 'Codex 91% left'], mode_source='auto',
     expires_at='2026-12-31', knobs={'x': 1}, settings_source='private',
     availability=dict(claude=dict(state='ok', window_left=81.0, reset='2026-11-06T02:10:00+00:00'),
@@ -113,7 +113,7 @@ class UsageTests(unittest.TestCase):
         self.assertIsNone(result['codex_session'])
         self.assertIsNone(result['fable_weekly'])
         self.assertEqual(result['credits'], dict(left=10852.243326))
-        self.assertEqual(result['route'], dict(builders='either family by fit', review='cross-family', parents='either'))
+        self.assertEqual(result['route'], dict(builders='claude first', review='parent-based', parents='either'))
         self.assertEqual((result['lines'], result['mode_source'], result['expires_at']),
                          (ANNOUNCED['lines'], 'auto', '2026-12-31'))
         self.assertEqual(result['lean'], 'balanced-burn')
