@@ -150,25 +150,91 @@ class Plan(unittest.TestCase):
         ]
 
     def test_current_plus_previous_boot_without_duplicates_or_managed(self):
-        plan, sources = lr.restore_plan("now", self.snaps(), [])
+        plan, sources = lr.restore_plan("now", self.snaps(), [], now=40)
         self.assertEqual([i.session.id for i in plan], [A, B])
         self.assertEqual(sources, ["now", "prev"])
 
     def test_consumed_previous_boot_is_dropped(self):
-        plan, sources = lr.restore_plan("now", self.snaps(), ["prev"])
+        plan, sources = lr.restore_plan("now", self.snaps(), ["prev"], now=40)
         self.assertEqual(([i.session.id for i in plan], sources), ([A], ["now"]))
 
     def test_first_run_after_reboot_uses_last_boot(self):
-        plan, sources = lr.restore_plan("new", self.snaps(), [])
+        plan, sources = lr.restore_plan("new", self.snaps(), [], now=40)
         self.assertEqual(([i.session.id for i in plan], sources), ([A], ["now"]))
 
     def test_entries_record_how_long_before_the_snapshot_they_closed(self):
         snap = {"boot": "now", "taken_at": 5000.0, "sessions": [
             session("claude", A, last_seen=5000.0), session("codex", B, last_seen=2600.0)]}
-        plan, _ = lr.restore_plan("now", [snap], [])
+        plan, _ = lr.restore_plan("now", [snap], [], now=5000.0)
         self.assertEqual([i.closed_for for i in plan], [0.0, 2400.0])
         self.assertTrue(plan[0].describe().startswith("open at"))
-        self.assertTrue(plan[1].describe().startswith("closed 40m before the last snapshot"))
+        self.assertTrue(plan[1].describe().startswith("closed 40m before the last snapshot or loss"))
+
+    def tick(self, previous, live, now):
+        """One cron snapshot, as snapshot() records it."""
+        sessions = lr.merge_seen(previous["sessions"] if previous else [], live, now)
+        return {"boot": "now", "taken_at": now, "last_loss": lr.last_loss(previous, live), "sessions": sessions}
+
+    def in_window(self, snap, minutes=30):
+        plan, _ = lr.restore_plan("now", [snap], [], now=snap["taken_at"])
+        return sorted(i.session.id for i in plan if i.session.last_seen < snap["taken_at"]
+                      and i.closed_for <= minutes * 60)
+
+    def test_a_crash_stays_restorable_after_snapshots_go_on(self):
+        a, b, c = session("claude", A), session("claude", B), session("codex", C)
+        snap = self.tick(None, [a, b, c], 1000.0)
+        snap = self.tick(snap, [a], 1060.0)  # iTerm dies with B and C
+        snap = self.tick(snap, [a], 1060.0 + 3 * 3600)
+        self.assertEqual(self.in_window(snap), [B, C])
+        snap = self.tick(snap, [], snap["taken_at"] + 60)  # then one tab closed by hand
+        self.assertEqual((snap["last_loss"], self.in_window(snap)), (1000.0, [A, B, C]))
+
+    def test_one_closed_tab_is_not_a_loss(self):
+        a, b, managed = session("claude", A), session("claude", B), session("codex", C, managed="llm-switchboard")
+        snap = self.tick(None, [a, b, managed], 1000.0)
+        snap = self.tick(snap, [a], 1060.0)  # B closed; the managed session doesn't count
+        self.assertIsNone(snap["last_loss"])
+        self.assertEqual(self.in_window(self.tick(snap, [a], 1060.0 + 3600)), [])
+
+    def test_reopening_a_crash_does_not_bring_back_older_closes(self):
+        a, b, c = session("claude", A), session("claude", B), session("codex", C)
+        snap = self.tick(None, [a, b, c], 1000.0)
+        snap = self.tick(snap, [b, c], 1060.0)  # A closed on purpose
+        snap = self.tick(snap, [b, c], 9000.0)
+        snap = self.tick(snap, [], 9060.0)  # crash takes B and C
+        self.assertEqual(self.in_window(self.tick(snap, [], 12000.0)), [B, C])
+        snap = self.tick(snap, [b, c], 12000.0)  # restored
+        self.assertEqual(self.in_window(self.tick(snap, [b, c], 12060.0)), [])
+
+    def test_a_scan_with_warnings_keeps_the_recorded_loss(self):
+        a, b = session("claude", A), session("claude", B)
+        snap = {"boot": "now", "taken_at": 1000.0, "last_loss": 500.0, "sessions": [a, b]}
+        snap = {**snap, "sessions": lr.merge_seen(snap["sessions"], [a, b], 1000.0)}
+        self.assertEqual(lr.last_loss(snap, [], partial=True), 500.0)  # both missed, but the scan warned
+        self.assertEqual(lr.last_loss(snap, []), 1000.0)
+
+    def test_a_drifted_mac_boot_id_is_not_a_previous_boot(self):
+        snaps = [{"boot": "mac-1000", "taken_at": 30, "sessions": [session("claude", A)]},
+                 {"boot": "mac-1001", "taken_at": 20, "sessions": [session("claude", B)]},
+                 {"boot": "mac-500", "taken_at": 10, "sessions": [session("claude", C)]}]
+        plan, sources = lr.restore_plan("mac-1000", snaps, [], now=40)
+        self.assertEqual(([i.session.id for i in plan], sources), ([A, C], ["mac-1000", "mac-500"]))
+
+    def test_previous_boot_expires_a_day_after_its_last_snapshot(self):
+        prev = {"boot": "prev", "taken_at": 1000.0, "sessions": [session("claude", B, last_seen=1000.0)]}
+        cur = {"boot": "now", "taken_at": 1000.0, "sessions": [session("claude", A, last_seen=1000.0)]}
+        for now, ids in ((1000.0 + lr.RETAIN_S - 1, [A, B]), (1000.0 + lr.RETAIN_S, [A])):
+            plan, _ = lr.restore_plan("now", [cur, prev], [], now=now)  # cur stale: recording paused
+            self.assertEqual([i.session.id for i in plan], ids)
+        plan, _ = lr.restore_plan("now", [prev], [], now=1000.0 + lr.RETAIN_S)  # just booted, long after
+        self.assertEqual(plan, [])
+
+    def test_mac_boot_id_reuses_the_newest_snapshot_of_the_same_boot(self):
+        known = {"mac-1000": 50.0, "mac-1001": 20.0, "mac-500": 90.0}
+        self.assertEqual(lr.mac_boot_id(1001, known), "mac-1000")
+        self.assertEqual(lr.mac_boot_id(999, known), "mac-1000")
+        self.assertEqual(lr.mac_boot_id(1001 + lr.BOOT_JITTER_S + 1, known), f"mac-{1001 + lr.BOOT_JITTER_S + 1}")
+        self.assertEqual(lr.mac_boot_id(7000, {}), "mac-7000")
 
     def test_window_flags_parse_to_minutes_within_retention(self):
         self.assertEqual((lr._window(1)("45"), lr._window(60)("1.5"), lr._window(60)("24")), (45, 90, 1440))

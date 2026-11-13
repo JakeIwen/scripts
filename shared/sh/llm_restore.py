@@ -12,7 +12,9 @@ that SSH to the Pi: the Pi decides what to open, the Mac opens the tabs.
 A boot's snapshot keeps each session for 24 hours after it was last seen
 open, and a restore reopens those open or closed within 30 minutes
 (`-m/--minutes` or `-H/--hours`) of the last snapshot, so the terminals
-closing during shutdown (or by hand beforehand) don't empty the list.
+closing during shutdown (or by hand beforehand) don't empty the list, or of
+the boot's last loss: a snapshot that found several sessions gone at once (a
+terminal crash, a closed window), which stays restorable after later snapshots.
 `--last N` instead reopens the N most recently closed sessions, from up to
 24 hours back, skipping any that are open. The restore list is the current boot's snapshot plus the previous
 boot's last one. The previous boot's sessions are dropped from the list once a
@@ -71,7 +73,7 @@ SWITCHBOARD_ENV = "LLM_SWITCHBOARD_SESSION"
 TMUX_SESSION = "llmrestore"
 # ssh's config picks the LAN address when the Pi answers there, else Tailscale.
 PI_HOST = os.environ.get("LLM_RESTORE_PI_HOST", "vanpi")
-PI_RESTORE_SCRIPT = "~/.local/state/llm-restore/restore"  # expanded by the Pi's shell
+PI_LLM_RESTORE = "/usr/bin/python3 -I -B ~/scripts/llm_restore.py"  # ~ expanded by the Pi's shell
 CRON_BEGIN = "# BEGIN managed llm-restore"
 CRON_END = "# END managed llm-restore"
 KEEP_BOOTS = 5
@@ -85,6 +87,13 @@ LAUNCH_GRACE_S = 120
 DEFAULT_MINUTES = 30
 # Snapshots keep closed sessions this long, the furthest --minutes can reach.
 RETAIN_S = 24 * 3600
+# macOS derives kern.boottime from the wall clock minus uptime, so a clock
+# correction moves it a second or so within one boot (2026-10-31 read ...376 on
+# a boot otherwise read as ...375). Boot ids this close are the same boot;
+# otherwise the drifted id's snapshot later restores as a "previous boot".
+BOOT_JITTER_S = 60
+# Sessions one snapshot must find gone to record a loss (one is a closed tab).
+LOSS_MIN = 2
 ROLLOUT_RE = re.compile(r"rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$")
 IS_MAC = sys.platform == "darwin"
 CLAUDE, CODEX = "claude", "codex"
@@ -127,7 +136,7 @@ class Session:
 @dataclass(frozen=True)
 class PlanItem:
     """A restore-list entry: the session and how long before its boot's last
-    snapshot it was closed (0 if it was still open)."""
+    snapshot or last loss it was closed (0 if still open, or lost in that loss)."""
 
     session: Session
     closed_for: float
@@ -139,7 +148,7 @@ class PlanItem:
     def describe(self) -> str:
         if not self.closed_for:
             return f"open at {_clock(self.session.last_seen)}"
-        return f"closed {self.closed_for / 60:.0f}m before the last snapshot, last seen {_clock(self.session.last_seen)}"
+        return f"closed {self.closed_for / 60:.0f}m before the last snapshot or loss, last seen {_clock(self.session.last_seen)}"
 
 
 @dataclass(frozen=True)
@@ -504,10 +513,24 @@ def list_open_sessions(json_output: bool) -> int:
 
 # ---------------------------------------------------------------- state
 
+def same_boot(a: str, b: str) -> bool:
+    """Whether two boot ids name one boot (Mac ids within BOOT_JITTER_S)."""
+    m, n = (re.fullmatch(r"mac-(\d+)", x) for x in (a, b))
+    return a == b or bool(m and n and abs(int(m[1]) - int(n[1])) <= BOOT_JITTER_S)
+
+
+def mac_boot_id(sec: int, known: dict[str, float]) -> str:
+    """This boot's id: the most recently written snapshot id (`known` maps id
+    to mtime) that is the same boot as `sec`, so a drifted read reuses it."""
+    near = [b for b in known if same_boot(b, f"mac-{sec}")]
+    return max(near, key=lambda b: known[b]) if near else f"mac-{sec}"
+
+
 def boot_id() -> str:
     if IS_MAC:
         out = _run(["/usr/sbin/sysctl", "-n", "kern.boottime"]).stdout
-        return "mac-" + re.search(r"sec = (\d+)", out).group(1)
+        known = {p.stem: p.stat().st_mtime for p in BOOTS.glob("mac-*.json")}
+        return mac_boot_id(int(re.search(r"sec = (\d+)", out).group(1)), known)
     return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 
 
@@ -546,20 +569,39 @@ def boot_snapshots() -> list[dict]:
     return sorted(snaps, key=lambda s: s["taken_at"], reverse=True)
 
 
-def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) -> tuple[list[PlanItem], list[str]]:
+def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str],
+                 now: float) -> tuple[list[PlanItem], list[str]]:
     """Sessions to restore (any age; a restore filters by --minutes) and the
     boots they came from."""
     sources = [s for s in snapshots if s["boot"] == current_boot][:1]
-    earlier = [s for s in snapshots if s["boot"] != current_boot]
-    if earlier and earlier[0]["boot"] not in consumed:
+    earlier = [s for s in snapshots if not same_boot(s["boot"], current_boot)]
+    # A previous boot's list expires like a closed session does, RETAIN_S after its last snapshot.
+    if earlier and earlier[0]["boot"] not in consumed and now - earlier[0]["taken_at"] < RETAIN_S:
         sources.append(earlier[0])
     plan, seen = [], set()
     for snap in sources:
+        # Snapshots go on after a terminal crash, so the crash is measured from
+        # its recorded loss; reopening its sessions doesn't move that.
+        loss = snap.get("last_loss")
         for s in snap["sessions"]:
             if s.key not in seen and not s.managed:
                 seen.add(s.key)
-                plan.append(PlanItem(s, snap["taken_at"] - s.last_seen))
+                closed_for = snap["taken_at"] - s.last_seen
+                if loss is not None and s.last_seen <= loss:
+                    closed_for = min(closed_for, loss - s.last_seen)
+                plan.append(PlanItem(s, closed_for))
     return plan, [s["boot"] for s in sources]
+
+
+def last_loss(previous: dict | None, live: list[Session], partial: bool = False) -> float | None:
+    """The boot's last loss after this snapshot: the previous snapshot's time if LOSS_MIN sessions
+    open then are gone now, else the one it recorded (also kept when a scan warned, so partial)."""
+    if not previous or partial:
+        return (previous or {}).get("last_loss")
+    keys = {s.key for s in live}
+    gone = [s for s in previous["sessions"]
+            if s.last_seen == previous["taken_at"] and not s.managed and s.key not in keys]
+    return previous["taken_at"] if len(gone) >= LOSS_MIN else previous.get("last_loss")
 
 
 def write_restore_script(plan: list[PlanItem], sources: list[str], warnings: list[str],
@@ -571,7 +613,7 @@ def write_restore_script(plan: list[PlanItem], sources: list[str], warnings: lis
         *(header or [
             f"# Generated by {Path(__file__).resolve()} on {os.uname().nodename}, {time.strftime('%Y-%m-%d %H:%M:%S')}.",
             f"# Reopens these sessions if open, or closed under -m/-H (default {DEFAULT_MINUTES} minutes)",
-            "# before the last snapshot (--last N: the N most recently closed instead);",
+            "# before the last snapshot or loss (--last N: the N most recently closed instead);",
             "# any that are already open are skipped. Flags:",
             "# --dry-run shows what would happen, --force ignores the 2-minute guard",
             "# against reopening a session that was just launched."]),
@@ -605,7 +647,7 @@ def _clock(t: float) -> str:
 def regenerate() -> list[PlanItem]:
     """Rewrite the restore script from the saved snapshots (lock held)."""
     current, snaps = boot_id(), boot_snapshots()
-    plan, sources = restore_plan(current, snaps, _read_json(CONSUMED, []))
+    plan, sources = restore_plan(current, snaps, _read_json(CONSUMED, []), time.time())
     warnings = next((s.get("warnings", []) for s in snaps if s["boot"] == current), [])
     write_restore_script(plan, sources, warnings)
     return plan
@@ -617,10 +659,10 @@ def snapshot(quiet: bool) -> int:
             return 0  # a restore is running; the next minute catches up
         live, warnings = live_sessions()
         boot, now = boot_id(), time.time()
-        previous = next((s["sessions"] for s in boot_snapshots() if s["boot"] == boot), [])
-        sessions = merge_seen(previous, live, now)
+        previous = next((s for s in boot_snapshots() if s["boot"] == boot), None)
+        sessions = merge_seen(previous["sessions"] if previous else [], live, now)
         _write_private(BOOTS / f"{boot}.json", json.dumps({
-            "boot": boot, "taken_at": now,
+            "boot": boot, "taken_at": now, "last_loss": last_loss(previous, live, bool(warnings)),
             "sessions": [asdict(s) for s in sessions], "warnings": warnings}, indent=1))
         for old in sorted(BOOTS.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_BOOTS:]:
             old.unlink()
@@ -832,7 +874,7 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
             print(f"{'would open' if opts.dry_run else 'open'}  {s.label}  ({f'{name}, ' if name else ''}{seen})\n"
                   f"      {display_command(s.command)}", file=report)
         if opts.last is None and len(items) > len(plan):
-            print(f"({len(items) - len(plan)} closed more than {opts.minutes} minutes before the last snapshot; "
+            print(f"({len(items) - len(plan)} closed more than {opts.minutes} minutes before the last snapshot or loss; "
                   f"widen with -m or -H)", file=report)
         if opts.dry_run:
             return 0
@@ -871,7 +913,7 @@ def restore_pi(opts: RestoreOptions) -> int:
     flags = ["--emit", *opts.flags()]
     # stderr (the Pi's report) passes straight through to this terminal.
     res = subprocess.run(["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", PI_HOST,
-                          " ".join([PI_RESTORE_SCRIPT, *flags])], stdout=subprocess.PIPE, text=True)
+                          " ".join([PI_LLM_RESTORE, *flags])], stdout=subprocess.PIPE, text=True)
     if res.returncode != 0:
         print(f"Pi restore failed (ssh {PI_HOST} exited {res.returncode}); nothing opened", file=sys.stderr)
         return res.returncode
@@ -881,11 +923,10 @@ def restore_pi(opts: RestoreOptions) -> int:
     return 0
 
 
-def run_restore(opts: RestoreOptions) -> int:
-    if not RESTORE_SCRIPT.exists():
-        with state_lock():
-            regenerate()
-    os.execv(str(RESTORE_SCRIPT), [str(RESTORE_SCRIPT), *opts.flags()])
+def run_restore(opts: RestoreOptions, emit: bool) -> int:
+    with state_lock():  # re-planned now, so expiry holds while cron is paused (--pi too)
+        regenerate()
+    os.execv(str(RESTORE_SCRIPT), [str(RESTORE_SCRIPT), *opts.flags(), *(["--emit"] if emit else [])])
 
 
 # ---------------------------------------------------------------- cron
@@ -960,9 +1001,9 @@ def cron(state: str | None, minutes: int, json_output: bool = False) -> int:
     last, sessions_open = _latest_snapshot(snaps)
     if last:
         print(f"Last snapshot: {_clock(last['taken_at'])}, {sessions_open} session(s) open")
-    plan, _ = restore_plan(boot_id(), snaps, _read_json(CONSUMED, []))
+    plan, _ = restore_plan(boot_id(), snaps, _read_json(CONSUMED, []), time.time())
     recent = sum(i.closed_for <= minutes * 60 for i in plan)
-    print(f"Restore list: {recent} session(s) open or closed within {minutes} minutes of the last snapshot "
+    print(f"Restore list: {recent} session(s) open or closed within {minutes} minutes of the last snapshot or loss "
           f"({len(plan) - recent} older, up to {RETAIN_S // 3600}h) in {RESTORE_SCRIPT}")
     if CRON_LOG.exists() and CRON_LOG.stat().st_size:
         print(f"Errors were logged to {CRON_LOG}")
@@ -1010,7 +1051,7 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="reopen sessions launched in the last 2 minutes")
     window = ap.add_mutually_exclusive_group()
     window.add_argument("-m", "--minutes", type=_window(1), default=DEFAULT_MINUTES,
-                        help=f"also reopen sessions closed up to this long before the last snapshot "
+                        help=f"also reopen sessions closed up to this long before the last snapshot or loss "
                              f"(default {DEFAULT_MINUTES}, max {RETAIN_S // 60})")
     window.add_argument("-H", "--hours", dest="minutes", type=_window(60), metavar="HOURS",
                         help=f"the same, in hours (max {RETAIN_S // 3600})")
@@ -1051,7 +1092,7 @@ def main() -> int:
         return apply(args.apply, opts, args.emit)
     if args.pi:
         return restore_pi(opts)
-    return run_restore(opts)
+    return run_restore(opts, args.emit)
 
 
 if __name__ == "__main__":

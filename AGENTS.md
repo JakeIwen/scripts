@@ -605,6 +605,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   Resume commands start as `codexp`/`claudep` would: Codex under the
   `codex_autocontinue` wrapper when installed, and `env -u DISPLAY` on the Pi.
   State and the generated restore script live in `~/.local/state/llm-restore/`.
+  A restore's window (`-m`, default 30 minutes) counts back from the last
+  snapshot or from the boot's last loss (`last_loss`: a snapshot that found two
+  or more unmanaged sessions gone at once), since snapshots go on after a
+  terminal crash; reopening the lost sessions doesn't move it. A previous
+  boot's list expires 24 h after its last snapshot, checked when the plan is
+  written (each snapshot and each restore). Mac boot ids within 60 s are one
+  boot, because `kern.boottime` drifts with clock fixes.
   `--save [NAME]` writes the sessions open now as a named self-contained script
   in `saved/` (`write_restore_script` with `--apply -`, so no boot snapshot is
   consumed; kept indefinitely); `llmrestore NAME|PATH` runs it through `/bin/sh`
