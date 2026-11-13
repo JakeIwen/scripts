@@ -220,6 +220,20 @@ test('a restyle of the submenu changes only its config', () => {
     assert.equal(environment.find(SUBMENU).BTTMenuItems.length, 3);
 });
 
+test('an item that sets an SF Symbol is restyled when its icon drifts, and verified with it', () => {
+    const withIcon = clone(payload);
+    Object.assign(withIcon.items[0].BTTMenuConfig, {BTTMenuItemSFSymbolName: 'laptopcomputer', BTTMenuItemShowIcon: 1});
+    const environment = setup({payload: withIcon});
+    environment.run();
+    assert.equal(JSON.parse(environment.run()).wrote, false);
+    Object.assign(environment.find(SUBMENU).BTTMenuConfig, {BTTMenuItemSFSymbolName: 'trash', BTTMenuItemShowIcon: 0});
+    assert.deepEqual(JSON.parse(environment.run('inspect')).pending.map(step => [step.uuid, step.change]),
+        [[SUBMENU, 'label']]);
+    environment.run();
+    assert.deepEqual(environment.state.writes.at(-1), ['style', SUBMENU]);
+    assert.equal(environment.find(SUBMENU).BTTMenuConfig.BTTMenuItemSFSymbolName, 'laptopcomputer');
+});
+
 test('refuses without writing when Lighting is taken, moved, disabled or changes during backup', () => {
     const installed = setup();
     installed.run();

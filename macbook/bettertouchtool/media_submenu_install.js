@@ -51,10 +51,15 @@ const CONFIG_KEYS = ['BTTMenuElementIdentifier', 'BTTMenuElementTooltip', 'BTTMe
 function fontSize(config) {
     return (String(config.BTTMenuAttributedText || '').match(/\\fs(\d+)/) || [])[1];
 }
+// Icon settings count only on items that set them (the Mac submenu's SF Symbol), so items
+// without an icon are not restyled over defaults BTT may store.
+const ICON_KEYS = ['BTTMenuItemSFSymbolName', 'BTTMenuItemShowIcon', 'BTTMenuItemIconType', 'BTTMenuItemIconPosition'];
 function configMatches(actual, desired, common) {
     const config = actual.BTTMenuConfig || {};
-    return CONFIG_KEYS.every(key => common.fingerprint(config[key]) === common.fingerprint(desired.BTTMenuConfig[key])) &&
-        fontSize(config) === fontSize(desired.BTTMenuConfig);
+    const wanted = desired.BTTMenuConfig;
+    const keys = CONFIG_KEYS.concat(ICON_KEYS.filter(key => key in wanted));
+    return keys.every(key => common.fingerprint(config[key]) === common.fingerprint(wanted[key])) &&
+        fontSize(config) === fontSize(wanted);
 }
 function actionData(action) {
     const data = action.BTTAdditionalActionData;

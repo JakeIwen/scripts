@@ -30,6 +30,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
 | `macbook/scripts/van_lighting.py` | BTT Media > Lighting: Solder SW (`toggle switch.solder_flood`) and the Lighting Colour web view (`lights`, `set`, JSON) | the script; `macbook/bettertouchtool/install_lighting_menu.py` installs both callers |
+| `macbook/scripts/iterm_tile.js` | BTT Media > Mac: iTerm↑ (`external`) and iTerm↓ (`builtin`) | the script; `macbook/bettertouchtool/install_mac_menu.py` installs both callers |
 | `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
 | `macbook/scripts/czrc.zsh` | `~/.zshrc`'s `czrc` function (`czrc [message words]`) | the script; it finds `~/mac-config` through the `~/.zshrc` symlink, `CZRC_REPO` overrides it; `macbook/tests/test_czrc.zsh` |
 | `pi/configs/labwc/` | labwc/swayidle at `/home/pi/.config/labwc/`; castit's mpv lifetime contract | copied by `pi/sync_scripts.sh` |
@@ -177,8 +178,17 @@ compare it with this checkout. Deployed files may differ from the repository.
   holds Solder SW and 🎨, which shows the top-level "Lighting Colour" dropdown: a Web
   View built from `macbook/bettertouchtool/lighting_control/` (reusable
   `LightControl.mount`, iro.js wheel, runs `van_lighting.py` through BTT's
-  `runShellScript`; see its README). `install_lighting_menu.py/.js` beside it installs
+  `runShellScript`; see its README). `install_lighting_menu.py` beside it installs
   all of it (inspect by default, `--apply`).
+- `macbook/bettertouchtool/media_submenu.py` and `media_submenu_install.js` are the
+  shared launcher and guarded worker for installers that own a Media submenu
+  (`install_lighting_menu.py`, `install_mac_menu.py`): each supplies a flat item list
+  and the noun, title and backup prefix its messages use. BTT's Media > Mac submenu
+  (💻 SF Symbol `laptopcomputer`, after Lighting) holds iTerm↑ and iTerm↓, which run
+  `macbook/scripts/iterm_tile.js external|builtin`: every non-hotkey, non-minimized
+  iTerm window moves to that display and is tiled side by side at full height across
+  its visible width (windows already there keep their order; `--dry-run` prints the
+  plan). Add further Mac items to `install_mac_menu.py`.
 - `macbook/metered/`: Python 3.9+ Mac controller and stable `mac-metered` CLI;
   `com.jacobr.metered` runs once per minute in the GUI login session, not as a
   daemon. `wifi_helper/reader.py` reads fresh Location-authorized CoreWLAN
