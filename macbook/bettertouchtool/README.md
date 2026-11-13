@@ -161,9 +161,10 @@ and referenced floating dropdowns are included. Unreadable databases, unsupporte
 schemas or invalid checkpoints are **unavailable**, never silently healthy.
 
 Beyond the Media graph, Guard watches every top-level keyboard shortcut, key
-sequence, named trigger, text transformer, menu-bar item, app-switch trigger and
-floating menu in each active preset, with their actions (`WATCHED_TRIGGER_TYPES`
-in `btt_guard/database.py`). A lost or changed one is drift like a lost menu button,
+sequence, named trigger, text transformer, menu-bar item (674, and the 681 script
+item with its command, refresh interval, run-on-init and text-visible settings),
+app-switch trigger and floating menu in each active preset, with their actions
+(`WATCHED_TRIGGER_TYPES` in `btt_guard/database.py`). A lost or changed one is drift like a lost menu button,
 and repair recreates it with its original UUID. Watched triggers are checked for
 presence and state only: the named-trigger and empty-button checks stay with
 Media, and a trigger's key binding (shortcut keys, typed sequence) is kept in the
@@ -753,8 +754,10 @@ and report identities. Recreate venvs rather than moving them.
 - `install_mac_panel_menu.py/.js`: guarded installer for a standalone Mac Panel
   menu-bar item (type 681, shell-script title: SF Symbol `slider.horizontal.3` plus the
   whole-machine CPU busy % from `macbook/scripts/cpu_percent.py`, refreshed every 3 s;
-  an existing icon-only 674 item is deleted and re-added under the same UUID, since
-  `update_trigger` isn't known to retype a trigger) and All Apps keyboard
+  the 681 item has its own UUID, added and verified (runtime and saved, including
+  its script settings in the trait's `ZBEZIERPATH`) before the old icon-only 674
+  item (`AF69261A-...`) is deleted, so a failure never leaves the menu bar empty and
+  a rerun finishes the job; `--no-checkpoint` skips the Guard checkpoint) and All Apps keyboard
   shortcut (installed as `ctrl+opt+cmd+P`), both using BTT's built-in Open URL
   action for `http://127.0.0.1:8769/`. BTT saves each trigger's notes as its
   description (`ZDESC`) and ignores a button name on menu-bar items. Preview is the

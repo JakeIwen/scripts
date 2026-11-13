@@ -14,12 +14,16 @@ const desired = JSON.parse(execFileSync('/usr/bin/python3', ['-B', '-c',
     {cwd: directory, encoding: 'utf8'}));
 const clone = value => JSON.parse(JSON.stringify(value));
 
+const LEGACY = 'AF69261A-4119-4B82-A3C5-F7C337DB7A17';
+const legacyItem = () => ({...clone(desired[0]), BTTUUID: LEGACY, BTTTriggerType: 674,
+    BTTTriggerConfig: {BTTTouchBarOnlyShowIcon: 1}});
+
 function setup(options = {}) {
     const unrelated = {BTTUUID: 'protected-media', BTTTriggerType: 767,
         BTTMenuItems: [{BTTUUID: 'nested', BTTShellTaskActionScript: 'private action'}]};
     const state = {items: [unrelated], writes: [], reads: 0};
     const plan = {before: clone(state.items), desired: clone(desired),
-        summary: {url: 'http://127.0.0.1:8769/'}};
+        legacy: {uuid: LEGACY, type: 674}, summary: {url: 'http://127.0.0.1:8769/'}};
     const socket = {call(command, parameters) {
         if (command === 'get_triggers') {
             state.reads++;
@@ -28,11 +32,13 @@ function setup(options = {}) {
         }
         assert.ok(['add_new_trigger', 'update_trigger', 'delete_trigger'].includes(command));
         if (command === 'delete_trigger') {
+            if (options.failDelete) throw new Error('delete failed');
             state.writes.push({command, uuid: parameters.uuid});
             state.items = state.items.filter(node => node.BTTUUID !== parameters.uuid);
             return '';
         }
         const item = JSON.parse(parameters.json);
+        if (options.failAdd) throw new Error('add failed');
         state.writes.push({command, uuid: item.BTTUUID});
         if (command === 'add_new_trigger') {
             assert.ok(!state.items.some(node => node.BTTUUID === item.BTTUUID));
@@ -86,24 +92,89 @@ test('existing stale item is updated in place, not duplicated', () => {
     assert.equal(env.state.items.filter(item => item.BTTUUID === desired[0].BTTUUID).length, 1);
 });
 
-test('an icon-only 674 item is deleted and re-added as 681 under its own UUID only', () => {
+test('apply adds the new 681 item beside the legacy one and never deletes', () => {
     const env = setup();
-    env.state.items.push({...clone(desired[0]), BTTTriggerType: 674, BTTTriggerConfig: {BTTTouchBarOnlyShowIcon: 1}});
+    env.state.items.push(legacyItem());
+    env.plan.before = clone(env.state.items);
+    const legacyBefore = clone(env.state.items.find(item => item.BTTUUID === LEGACY));
+    const result = env.run();
+    assert.deepEqual(result.touched, [desired[0].BTTUUID, desired[1].BTTUUID]);
+    assert.deepEqual(env.state.writes.map(item => item.command), ['add_new_trigger', 'add_new_trigger']);
+    assert.deepEqual(env.state.items.find(item => item.BTTUUID === LEGACY), legacyBefore);
+    assert.equal(env.state.items.find(item => item.BTTUUID === desired[0].BTTUUID).BTTTriggerType, 681);
+    assert.notEqual(desired[0].BTTUUID, LEGACY);
+});
+
+test('a failed add leaves the legacy item and everything else untouched', () => {
+    const env = setup({failAdd: true});
+    env.state.items.push(legacyItem());
+    env.plan.before = clone(env.state.items);
+    const before = clone(env.state.items);
+    assert.throws(() => env.run(), /add failed/);
+    assert.deepEqual(env.state.items, before);
+    assert.equal(env.state.writes.length, 0);
+});
+
+test('apply stops if the legacy item changes while the new one is added', () => {
+    const env = setup({afterWrite(state) { state.items.find(item => item.BTTUUID === LEGACY).BTTOrder = 9; }});
+    env.state.items.push(legacyItem());
+    env.plan.before = clone(env.state.items);
+    assert.throws(() => env.run(), /outside the intended item/);
+});
+
+test('retire deletes only the legacy item, and only once the new items are live', () => {
+    const env = setup();
+    env.state.items.push(legacyItem());
+    env.plan.before = clone(env.state.items);
+    assert.throws(() => env.run('retire'), /not live yet/);
+    assert.equal(env.state.writes.length, 0);
+    env.run();
+    env.state.writes.length = 0;
     env.plan.before = clone(env.state.items);
     const original = clone(env.unrelated);
-    assert.equal(env.run().writes, 3);
-    assert.deepEqual(env.state.writes.map(item => item.command),
-        ['delete_trigger', 'add_new_trigger', 'add_new_trigger']);
-    assert.equal(env.state.writes[0].uuid, desired[0].BTTUUID);
-    assert.equal(env.state.items.find(item => item.BTTUUID === desired[0].BTTUUID).BTTTriggerType, 681);
+    assert.deepEqual(env.run('retire').touched, [LEGACY]);
+    assert.deepEqual(env.state.writes, [{command: 'delete_trigger', uuid: LEGACY}]);
+    assert.ok(!env.state.items.some(item => item.BTTUUID === LEGACY));
+    assert.ok(env.state.items.some(item => item.BTTUUID === desired[0].BTTUUID));
     assert.deepEqual(env.unrelated, original);
 });
 
-test('681 is the only menu-bar type besides 674 the plan may carry', () => {
+test('a failed delete leaves both items and a rerun converges with a delete only', () => {
+    const env = setup({failDelete: true});
+    env.state.items.push(legacyItem());
+    env.plan.before = clone(env.state.items);
+    env.run();
+    env.plan.before = clone(env.state.items);
+    assert.throws(() => env.run('retire'), /delete failed/);
+    assert.ok(env.state.items.some(item => item.BTTUUID === LEGACY));
+    assert.ok(env.state.items.some(item => item.BTTUUID === desired[0].BTTUUID));
+    env.state.writes.length = 0;
+    const rerun = setup();
+    rerun.state.items = clone(env.state.items);
+    rerun.plan.before = clone(rerun.state.items);
+    assert.equal(rerun.run().writes, 0);  // apply on the converged state: nothing to add
+    assert.deepEqual(rerun.run('retire').touched, [LEGACY]);
+    assert.deepEqual(rerun.state.writes.map(item => item.command), ['delete_trigger']);
+});
+
+test('retire refuses a legacy UUID that is not the 674 item and a missing legacy is a no-op', () => {
     const env = setup();
-    env.plan.desired[0].BTTTriggerType = 680;
-    assert.throws(() => env.run(), /Unsafe/);
-    assert.equal(env.state.writes.length, 0);
+    env.run();
+    env.plan.before = clone(env.state.items);
+    assert.equal(env.run('retire').writes, 0);
+    env.state.items.push({...legacyItem(), BTTTriggerType: 773});
+    env.plan.before = clone(env.state.items);
+    assert.throws(() => env.run('retire'), /foreign trigger/);
+    assert.ok(!env.state.writes.some(write => write.command === 'delete_trigger'));
+});
+
+test('681 is the only menu-bar type the plan may carry', () => {
+    for (const type of [680, 674]) {
+        const env = setup();
+        env.plan.desired[0].BTTTriggerType = type;
+        assert.throws(() => env.run(), /Unsafe/);
+        assert.equal(env.state.writes.length, 0);
+    }
 });
 
 test('duplicate runtime UUIDs and changed backup snapshots refuse before mutation', () => {

@@ -14,7 +14,7 @@ import install_mac_panel_menu as panel
 
 def fixture_rows():
     fields = ["ZPARENT", "ZBELONGSTOPRESET2", "ZGESTURETYPE", "ZACTION", "ZACTIONCATEGORY",
-              "ZTRAIT", "ZDESC", "ZONLYICON",
+              "ZTRAIT", "ZDESC", "ZONLYICON", "ZBEZIERPATH",
               "ZORDER", "ZISENABLED", "ZENABLEDNEW", "ZKEYCODE", "ZMODIFIERKEYS",
               "ZTRIGGERONDOWN", "ZNOTES", "ZLAUNCHPATH", "ZADDITIONALACTIONSTRING", "ZACTIONDATA",
               "ZGESTURECONFIG", "ZCONDITIONS", "ZACTIVATED", "ZNAME3", "ZBUNDLEIDENTIFIER"]
@@ -40,7 +40,8 @@ def installed_rows():
                                     ZPARENT=None, app_scope=["BT.G"])
         if node["BTTUUID"] == panel.MENU_ID:
             rows[panel.MENU_ID].update(ZTRAIT=100)
-            rows["menu-trait"] = dict(rows["global"], Z_PK=100, ZUNIQUEIDENTIFIER="menu-trait", ZONLYICON=0)
+            rows["menu-trait"] = dict(rows["global"], Z_PK=100, ZUNIQUEIDENTIFIER="menu-trait", ZONLYICON=0,
+                                      ZBEZIERPATH=json.dumps(node["BTTTriggerConfig"]).encode())
         if node["BTTUUID"] == panel.KEY_ID:
             rows[panel.KEY_ID].update(ZKEYCODE=35, ZMODIFIERKEYS=panel.MODIFIERS,
                                       ZTRIGGERONDOWN=1, ZGESTURECONFIG=panel.ADVANCED_MODIFIERS)
@@ -60,7 +61,9 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(config["BTTTouchBarAppleScriptStringRunOnInit"], 1)
         self.assertEqual(config["BTTTouchBarShellScriptString"],
                          "/usr/bin/python3 -I -B /Users/jacobr/dev/scripts/macbook/scripts/cpu_percent.py")
-        self.assertIsNone(plan["summary"]["menu_bar"]["replaces_type"])
+        self.assertIsNone(plan["summary"]["menu_bar"]["retires_legacy_type"])
+        self.assertEqual(plan["legacy"], {"uuid": panel.LEGACY_MENU_ID, "type": 674, "present": False})
+        self.assertNotEqual(panel.MENU_ID, panel.LEGACY_MENU_ID)
         self.assertEqual(menu["BTTTriggerConfig"]["BTTTouchBarItemSFSymbolDefaultIcon"], panel.MENU_ICON)
         self.assertEqual(keyboard["BTTShortcutKeyCode"], 35)
         self.assertEqual(keyboard["BTTShortcutModifierKeys"], 1835008)
@@ -91,16 +94,46 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual([n["BTTUUID"] for n in new["desired"]], [panel.MENU_ID, panel.KEY_ID])
         self.assertEqual(new["desired"][1]["BTTOrder"], 42)
 
-    def test_installed_icon_only_item_is_planned_as_an_upgrade(self):
+    def legacy_state(self):
+        """Saved rows and runtime as an install from before the 681 item left them."""
         rows, plan = installed_rows()
-        rows[panel.MENU_ID]["ZGESTURETYPE"] = 674
-        legacy = dict(plan["desired"][0], BTTTriggerType=674)
-        new = panel.installation_plan(rows, [legacy, plan["desired"][1]])
-        self.assertEqual(new["summary"]["menu_bar"]["replaces_type"], 674)
-        self.assertEqual(new["desired"][0]["BTTTriggerType"], 681)
-        rows[panel.MENU_ID]["ZGESTURETYPE"] = 773  # any other type stays refused
+        menu = rows.pop(panel.MENU_ID)
+        rows.pop("menu-trait")
+        rows[panel.LEGACY_MENU_ID] = dict(menu, ZUNIQUEIDENTIFIER=panel.LEGACY_MENU_ID, ZGESTURETYPE=674,
+                                         ZTRAIT=None, ZORDER=5)
+        legacy = dict(plan["desired"][0], BTTUUID=panel.LEGACY_MENU_ID, BTTTriggerType=674)
+        return rows, [legacy, plan["desired"][1]]
+
+    def test_installed_icon_only_item_is_kept_while_the_new_item_is_planned_beside_it(self):
+        rows, runtime = self.legacy_state()
+        new = panel.installation_plan(rows, runtime)
+        self.assertEqual(new["summary"]["menu_bar"]["retires_legacy_type"], 674)
+        self.assertEqual(new["legacy"]["present"], True)
+        menu = new["desired"][0]
+        self.assertEqual((menu["BTTUUID"], menu["BTTTriggerType"], menu["BTTOrder"]),
+                         (panel.MENU_ID, 681, 5))  # takes the retiring item's slot
+        self.assertEqual([n["BTTUUID"] for n in new["desired"]], [panel.MENU_ID, panel.KEY_ID])
+        rows[panel.LEGACY_MENU_ID]["ZGESTURETYPE"] = 773  # any other type under the legacy UUID stays refused
         with self.assertRaisesRegex(RuntimeError, "foreign type"):
-            panel.installation_plan(rows, [legacy, plan["desired"][1]])
+            panel.installation_plan(rows, runtime)
+
+    def test_saved_and_runtime_type_must_agree_per_uuid(self):
+        rows, runtime = self.legacy_state()
+        runtime[0] = dict(runtime[0], BTTTriggerType=681)  # saved 674, live 681
+        with self.assertRaisesRegex(RuntimeError, "Runtime Mac Panel type"):
+            panel.installation_plan(rows, runtime)
+        rows, plan = installed_rows()
+        rows[panel.MENU_ID]["ZGESTURETYPE"] = 674  # saved 674 under the new UUID: not an allowed type
+        with self.assertRaisesRegex(RuntimeError, "foreign type"):
+            panel.installation_plan(rows, plan["desired"])
+
+    def test_both_items_present_plans_only_the_retirement(self):
+        rows, plan = installed_rows()
+        legacy_rows, runtime = self.legacy_state()
+        rows[panel.LEGACY_MENU_ID] = legacy_rows[panel.LEGACY_MENU_ID]
+        both = panel.installation_plan(rows, plan["desired"] + [runtime[0]])
+        self.assertEqual(both["legacy"]["present"], True)
+        self.assertEqual(both["desired"][0]["BTTOrder"], rows[panel.MENU_ID]["ZORDER"])
 
     def test_foreign_markers_and_duplicate_candidates_refused(self):
         rows, plan = installed_rows()
@@ -159,25 +192,96 @@ class InstallerTests(unittest.TestCase):
         worker.assert_called_once_with("inspect")
         backup.assert_not_called()
 
+    def run_apply(self, rows, runtime, worker, verify=None, backup=None):
+        with patch.object(panel, "current_database", return_value=Path("fixture")), \
+                patch.object(panel, "saved_state", return_value=rows), \
+                patch.object(panel, "worker", side_effect=worker), \
+                patch.object(panel, "backup_configuration", side_effect=backup or (
+                    lambda *a, **k: Path("/private/backup/backup.json"))), \
+                patch.object(panel, "before_install", return_value={"fixture": True}), \
+                patch.object(panel, "after_install", return_value={"status": "taken"}) as after, \
+                patch.object(panel, "verify_saved", side_effect=verify or (lambda *a, **k: True)) as check:
+            return panel.install(apply=True), after, check
+
     def test_apply_backs_up_before_only_mutating_worker_and_verifies_disk(self):
         events = []
-        rows = fixture_rows()
         def worker(mode, path=None):
             events.append(mode)
-            return [] if mode == "inspect" else {"writes": 2}
+            return [] if mode == "inspect" else {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID]}
         def backup(*args, **kwargs):
             events.append("backup")
             self.assertEqual(kwargs["prefix"], "btt-mac-panel-backup-")
             return Path("/private/backup/backup.json")
-        with patch.object(panel, "current_database", return_value=Path("fixture")), \
-                patch.object(panel, "saved_state", return_value=rows), \
-                patch.object(panel, "worker", side_effect=worker), \
-                patch.object(panel, "backup_configuration", side_effect=backup), \
-                patch.object(panel, "verify_saved", return_value=True) as verify:
-            result = panel.install(apply=True)
-        self.assertEqual(events, ["inspect", "backup", "apply"])
+        result, after, check = self.run_apply(fixture_rows(), [], worker, backup=backup)
+        self.assertEqual(events, ["inspect", "backup", "apply"])  # nothing to retire on a fresh install
         self.assertTrue(result["saved_verified"])
-        verify.assert_called_once()
+        check.assert_called_once()
+        after.assert_called_once_with({"fixture": True}, [panel.MENU_ID, panel.KEY_ID],
+                                      "install_mac_panel_menu", wrote=True)
+
+    def test_no_checkpoint_flag_reaches_the_guard_baseline(self):
+        with patch.object(panel, "current_database", return_value=Path("fixture")), \
+                patch.object(panel, "saved_state", return_value=fixture_rows()), \
+                patch.object(panel, "worker", return_value={"writes": 0, "touched": []}), \
+                patch.object(panel, "backup_configuration", return_value=Path("/private/b/backup.json")), \
+                patch.object(panel, "verify_saved", return_value=True), \
+                patch.object(panel, "before_install", return_value={}) as before, \
+                patch.object(panel, "after_install", return_value={}):
+            panel.worker.side_effect = lambda mode, path=None: [] if mode == "inspect" else {"writes": 0, "touched": []}
+            panel.install(apply=True, no_checkpoint=True)
+        before.assert_called_once_with(no_checkpoint=True)
+
+    def test_legacy_item_is_retired_only_after_the_new_one_is_saved_and_verified(self):
+        rows, runtime = PlanningTests.legacy_state(self)
+        events = []
+        def worker(mode, path=None):
+            events.append(mode)
+            if mode == "inspect":
+                return runtime
+            return {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID]} if mode == "apply" else \
+                {"writes": 1, "touched": [panel.LEGACY_MENU_ID]}
+        def verify(database, plan, before, retired=False):
+            events.append("saved-retired" if retired else "saved-new")
+            return True
+        result, after, _ = self.run_apply(rows, runtime, worker, verify)
+        self.assertEqual(events, ["inspect", "apply", "saved-new", "inspect", "retire", "saved-retired"])
+        self.assertEqual(result["touched_uuids"], [panel.MENU_ID, panel.KEY_ID, panel.LEGACY_MENU_ID])
+        after.assert_called_once_with({"fixture": True}, [panel.MENU_ID, panel.KEY_ID, panel.LEGACY_MENU_ID],
+                                      "install_mac_panel_menu", wrote=True)
+
+    def test_failed_add_never_reaches_the_retirement_or_the_checkpoint(self):
+        rows, runtime = PlanningTests.legacy_state(self)
+        events = []
+        def worker(mode, path=None):
+            events.append(mode)
+            if mode == "apply":
+                raise RuntimeError("add failed")
+            return runtime
+        with self.assertRaisesRegex(RuntimeError, "add failed"):
+            self.run_apply(rows, runtime, worker)
+        self.assertEqual(events, ["inspect", "apply"])
+
+    def test_failed_delete_leaves_both_items_and_a_rerun_finishes_it(self):
+        rows, runtime = PlanningTests.legacy_state(self)
+        installed, plan = installed_rows()
+        both_rows = dict(installed, **{panel.LEGACY_MENU_ID: rows[panel.LEGACY_MENU_ID]})
+        both_runtime = plan["desired"] + [runtime[0]]
+        def failing(mode, path=None):
+            if mode == "retire":
+                raise RuntimeError("delete failed")
+            return runtime if mode == "inspect" else {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID]}
+        with self.assertRaisesRegex(RuntimeError, "delete failed"):
+            self.run_apply(rows, runtime, failing)
+        events = []
+        def rerun(mode, path=None):
+            events.append(mode)
+            if mode == "inspect":
+                return both_runtime
+            return {"writes": 0, "touched": []} if mode == "apply" else \
+                {"writes": 1, "touched": [panel.LEGACY_MENU_ID]}
+        result, after, _ = self.run_apply(both_rows, both_runtime, rerun)
+        self.assertEqual(events, ["inspect", "apply", "inspect", "retire"])  # no re-add, only the delete
+        self.assertEqual(result["touched_uuids"], [panel.LEGACY_MENU_ID])
 
     def test_backup_failure_or_saved_race_never_invokes_mutation(self):
         for race in (False, True):
@@ -208,6 +312,42 @@ class InstallerTests(unittest.TestCase):
             saved["other"]["ZACTION"] = 88
             with self.assertRaisesRegex(RuntimeError, "outside Mac Panel"):
                 panel.verify_saved("fixture", plan, fixture_rows())
+
+    def test_saved_verification_requires_the_script_settings(self):
+        saved, plan = installed_rows()
+        wanted = plan["desired"][0]["BTTTriggerConfig"]
+        with patch.object(panel, "saved_state", return_value=saved):
+            before = fixture_rows()
+            for key, value in [("BTTTouchBarShellScriptString", "/bin/echo 1%"),
+                               ("BTTTouchBarScriptUpdateInterval", 60),
+                               ("BTTTouchBarAppleScriptStringRunOnInit", 0),
+                               ("BTTTouchBarOnlyShowIcon", 1)]:
+                with self.subTest(key=key):
+                    saved["menu-trait"]["ZBEZIERPATH"] = json.dumps(dict(wanted, **{key: value})).encode()
+                    self.assertFalse(panel.verify_saved("fixture", plan, before))
+                    missing = {k: v for k, v in wanted.items() if k != key}
+                    saved["menu-trait"]["ZBEZIERPATH"] = json.dumps(missing).encode()
+                    self.assertFalse(panel.verify_saved("fixture", plan, before))
+            for broken in (None, b"not json", b"[1]"):
+                saved["menu-trait"]["ZBEZIERPATH"] = broken
+                self.assertFalse(panel.verify_saved("fixture", plan, before))
+            saved["menu-trait"]["ZBEZIERPATH"] = json.dumps(dict(wanted, BTTTouchBarOnlyShowIcon=False)).encode()
+            self.assertTrue(panel.verify_saved("fixture", plan, before))  # False == 0, as BTT stores flags
+
+    def test_saved_verification_tracks_the_legacy_item(self):
+        saved, plan = installed_rows()
+        legacy_rows, _ = PlanningTests.legacy_state(self)
+        before = fixture_rows()
+        before[panel.LEGACY_MENU_ID] = legacy_rows[panel.LEGACY_MENU_ID]
+        saved[panel.LEGACY_MENU_ID] = dict(before[panel.LEGACY_MENU_ID])
+        with patch.object(panel, "saved_state", return_value=saved):
+            self.assertTrue(panel.verify_saved("fixture", plan, before))
+            self.assertFalse(panel.verify_saved("fixture", plan, before, retired=True))  # not deleted yet
+            saved[panel.LEGACY_MENU_ID]["ZORDER"] = 99
+            with self.assertRaisesRegex(RuntimeError, "legacy"):
+                panel.verify_saved("fixture", plan, before)
+            del saved[panel.LEGACY_MENU_ID]
+            self.assertTrue(panel.verify_saved("fixture", plan, before, retired=True))
 
     def test_shared_display_trait_is_refused_before_writes(self):
         saved, plan = installed_rows()

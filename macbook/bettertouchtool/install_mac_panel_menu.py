@@ -4,25 +4,34 @@ showing the CPU busy percentage and an Open URL keyboard shortcut."""
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 import json
 import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import time
 
 from btt_common import MEDIA, backup_configuration, connect, current_database
+from btt_guard.installer_checkpoint import after_install, before_install
 
 DIRECTORY = Path(__file__).resolve().parent
 URL = "http://127.0.0.1:8769/"
-MENU_ID = "AF69261A-4119-4B82-A3C5-F7C337DB7A17"
+# The 681 item gets a fresh UUID so it can be added and verified while the old 674 item
+# still exists; only then is the legacy item deleted (a retype under one UUID needs
+# delete-then-add, which loses the menu item if the add fails).
+MENU_ID = "77805B78-4542-4929-A947-B7CD6172AB7A"
+LEGACY_MENU_ID = "AF69261A-4119-4B82-A3C5-F7C337DB7A17"
 KEY_ID = "317CB648-FCCA-4774-9E23-750CB2BE82C4"
 # BTT saves a trigger's notes as its description (ZDESC); the menu item's marker stays readable.
 MARKERS = {MENU_ID: "Mac Panel", KEY_ID: "mac-panel:keyboard"}
+OWNED_IDS = (MENU_ID, LEGACY_MENU_ID, KEY_ID)
+OWNED_TYPES = {MENU_ID: (681,), LEGACY_MENU_ID: (674,), KEY_ID: (0,)}
+INSTALLER = "install_mac_panel_menu"
 MENU_ICON = "slider.horizontal.3"
 # 681 is BTT's Menu Bar Icon whose title is a shell script's stdout; 674 is the icon-only
-# form an earlier install used, still accepted so it is upgraded rather than refused.
+# form an earlier install used, under LEGACY_MENU_ID, which is retired once 681 is saved.
 MENU_TYPE = 681
 LEGACY_MENU_TYPE = 674
 # The main checkout path on purpose: BTT runs this long after any worktree is gone.
@@ -67,7 +76,7 @@ def saved_state(database):
             ZPARENT,ZBELONGSTOPRESET2,ZGESTURETYPE,ZACTION,ZACTIONCATEGORY,ZORDER,ZTRAIT,ZDESC,ZONLYICON,
             ZISENABLED,ZENABLEDNEW,ZKEYCODE,ZMODIFIERKEYS,ZTRIGGERONDOWN,ZNOTES,
             ZLAUNCHPATH,ZADDITIONALACTIONSTRING,ZACTIONDATA,ZGESTURECONFIG,ZCONDITIONS,
-            ZACTIVATED,ZNAME3,ZBUNDLEIDENTIFIER FROM ZBTTBASEENTITY""")]
+            ZACTIVATED,ZNAME3,ZBUNDLEIDENTIFIER,ZBEZIERPATH FROM ZBTTBASEENTITY""")]
         # This installer deliberately supports the inspected schema only; drift fails closed.
         links = [tuple(row) for row in connection.execute(
             "SELECT Z_2GESTURES,Z_9APPS_GESTURES FROM Z_2APPS_GESTURES ORDER BY 1,2")]
@@ -83,6 +92,25 @@ def saved_state(database):
                                    for app, trigger in links if trigger == row["Z_PK"]})
         result[uid] = row
     return result
+
+
+def saved_trigger_config(saved, row):
+    """BTT keeps a menu-bar item's script settings (BTTTriggerConfig) as JSON in its trait
+    row's ZBEZIERPATH; {} when the trait or its JSON is missing."""
+    trait = next((r for r in saved.values() if row["ZTRAIT"] is not None
+                  and r["Z_PK"] == row["ZTRAIT"]), None)
+    raw = (trait or {}).get("ZBEZIERPATH")
+    try:
+        config = json.loads(bytes(raw) if isinstance(raw, (bytes, bytearray)) else raw)
+    except (TypeError, ValueError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def config_saved(saved, row, wanted):
+    """Every setting we install is stored with the same value (True == 1 for BTT's flags)."""
+    stored = saved_trigger_config(saved, row)
+    return all(key in stored and stored[key] == value for key, value in wanted.items())
 
 
 def worker(mode, plan_path=None):
@@ -117,11 +145,15 @@ def choose_shortcut(saved, runtime):
 
 
 def validate_owned(saved, runtime, preset):
-    for uid, marker in MARKERS.items():
+    for uid in OWNED_IDS:
+        marker = MARKERS.get(uid)
+
+        def mine(found_uid, *texts):
+            # The legacy item shares the menu item's marker; only its UUID identifies it.
+            return found_uid == uid or bool(marker and found_uid != LEGACY_MENU_ID and marker in texts)
         stored = [row for row in saved.values()
-                  if row["ZUNIQUEIDENTIFIER"] == uid or marker in (row["ZNOTES"], row["ZDESC"])]
-        live = [row for row in runtime
-                if row.get("BTTUUID") == uid or row.get("BTTGestureNotes") == marker]
+                  if mine(row["ZUNIQUEIDENTIFIER"], row["ZNOTES"], row["ZDESC"])]
+        live = [row for row in runtime if mine(row.get("BTTUUID"), row.get("BTTGestureNotes"))]
         if len(stored) > 1 or len(live) > 1:
             raise RuntimeError("Ambiguous Mac Panel items; no changes made.")
         if any(row["ZUNIQUEIDENTIFIER"] != uid for row in stored) or any(
@@ -131,22 +163,23 @@ def validate_owned(saved, runtime, preset):
             raise RuntimeError("Saved/runtime Mac Panel state differs; wait for BTT to save.")
         if not stored:
             continue
-        row = stored[0]
-        allowed_types = (MENU_TYPE, LEGACY_MENU_TYPE) if uid == MENU_ID else (0,)
+        row, current = stored[0], live[0]
+        allowed_types = OWNED_TYPES[uid]
         if row["ZPARENT"] is not None or row["ZBELONGSTOPRESET2"] != preset["Z_PK"] or \
                 row["app_scope"] != ["BT.G"] or row["ZGESTURETYPE"] not in allowed_types:
             raise RuntimeError("Existing Mac Panel UUID has a foreign type or scope; no changes made.")
-        current = live[0]
-        if current.get("BTTTriggerType") not in allowed_types or \
+        # Saved and runtime must agree per UUID: a 674 on disk with a 681 live (or the reverse)
+        # means BTT has not finished saving the last change.
+        if current.get("BTTTriggerType") != row["ZGESTURETYPE"] or \
                 current.get("BTTTriggerBelongsToPreset") != preset["ZNAME3"] or \
                 current.get("BTTAppBundleIdentifier", "BT.G") != "BT.G":
             raise RuntimeError("Runtime Mac Panel type or scope differs; no changes made.")
         if row["ZCONDITIONS"] or any(r["ZPARENT"] == row["Z_PK"] for r in saved.values()):
             raise RuntimeError("Existing Mac Panel item has conditions/children; review before replacing.")
-        if any(live[0].get(key) for key in ("BTTActionsToExecute", "BTTAdditionalActions",
-                                           "BTTMenuItems", "BTTMenuItemActions",
-                                           "BTTTriggerParentUUID", "BTTTriggerConditionsFormat",
-                                           "BTTTriggerConditionsFormatReadOnly")):
+        if any(current.get(key) for key in ("BTTActionsToExecute", "BTTAdditionalActions",
+                                            "BTTMenuItems", "BTTMenuItemActions",
+                                            "BTTTriggerParentUUID", "BTTTriggerConditionsFormat",
+                                            "BTTTriggerConditionsFormatReadOnly")):
             raise RuntimeError("Existing Mac Panel runtime tree needs review; no changes made.")
 
 
@@ -163,45 +196,51 @@ def installation_plan(saved, runtime):
     outside_saved(saved)
     shortcut, candidates = choose_shortcut(saved, runtime)
     desired = definitions(preset["ZNAME3"], shortcut["key_code"])
+    legacy = saved.get(LEGACY_MENU_ID)
     for node in desired:
         previous = saved.get(node["BTTUUID"])
+        if previous is None and node["BTTUUID"] == MENU_ID and legacy:
+            previous = legacy  # take the retiring item's slot so the icon keeps its position
         node["BTTOrder"] = previous["ZORDER"] or 0 if previous else 1 + max(
             [-1] + [row["ZORDER"] or 0 for row in saved.values()
                     if row["ZBELONGSTOPRESET2"] == preset["Z_PK"]
                     and row["ZGESTURETYPE"] == node["BTTTriggerType"]])
     return {"before": runtime, "desired": desired, "preset_pk": preset["Z_PK"],
+            "legacy": {"uuid": LEGACY_MENU_ID, "type": LEGACY_MENU_TYPE, "present": bool(legacy)},
             "summary": {"mode": "preview", "url": URL, "preset": preset["ZNAME3"],
                         "preset_uuid": preset["ZUNIQUEIDENTIFIER"], "app_scope": "BT.G (All Apps)",
                         "menu_bar": {"uuid": MENU_ID, "trigger_type": MENU_TYPE,
                                      "trigger_class": desired[0]["BTTTriggerClass"],
                                      "icon": MENU_ICON, "existing": MENU_ID in saved,
                                      "script": CPU_SCRIPT, "refresh_seconds": REFRESH_SECONDS,
-                                     "replaces_type": replaced_type(saved)},
+                                     "legacy_uuid": LEGACY_MENU_ID,
+                                     "retires_legacy_type": LEGACY_MENU_TYPE if legacy else None},
                         "keyboard": {"uuid": KEY_ID, **shortcut, "modifier_flags": MODIFIERS,
                                      "existing": KEY_ID in saved}, "candidates": candidates,
                         "protected_media_roots_touched": False, "restarts_btt": False,
                         "transport": "BTT local socket (no Apple Events)", "changes_applied": False}}
 
 
-def replaced_type(saved):
-    """The saved type the menu item has today when apply must delete and re-add it, else None."""
-    row = saved.get(MENU_ID)
-    return row["ZGESTURETYPE"] if row and row["ZGESTURETYPE"] != MENU_TYPE else None
-
-
 def outside_saved(saved):
     # BTT stores trigger display properties in a separate, exclusively owned trait.
     trait_pks = {row["ZTRAIT"] for uid, row in saved.items()
-                 if uid in MARKERS and row["ZTRAIT"] is not None}
-    if any(row["ZTRAIT"] in trait_pks for uid, row in saved.items() if uid not in MARKERS):
+                 if uid in OWNED_IDS and row["ZTRAIT"] is not None}
+    if any(row["ZTRAIT"] in trait_pks for uid, row in saved.items() if uid not in OWNED_IDS):
         raise RuntimeError("Mac Panel shares a display trait with another item; no changes made.")
-    return {uid: row for uid, row in saved.items() if uid not in MARKERS and row["Z_PK"] not in trait_pks}
+    return {uid: row for uid, row in saved.items() if uid not in OWNED_IDS and row["Z_PK"] not in trait_pks}
 
 
-def verify_saved(database, plan, before):
+def verify_saved(database, plan, before, retired=False):
+    """True once BTT has saved every desired item (including the menu item's script settings)
+    and the legacy item is as expected: untouched until `retired`, then gone."""
     saved = saved_state(database)
     if outside_saved(saved) != outside_saved(before):
         raise RuntimeError("Saved configuration outside Mac Panel changed; inspect the private backup.")
+    legacy_before = before.get(LEGACY_MENU_ID)
+    if legacy_before and not retired and saved.get(LEGACY_MENU_ID) != legacy_before:
+        raise RuntimeError("The legacy Mac Panel item changed before it was retired; inspect the private backup.")
+    if retired and LEGACY_MENU_ID in saved:
+        return False
     for node in plan["desired"]:
         uid = node["BTTUUID"]
         row = saved.get(uid)
@@ -217,12 +256,31 @@ def verify_saved(database, plan, before):
                             ZTRIGGERONDOWN=1, ZGESTURECONFIG=ADVANCED_MODIFIERS)
         if any(row[key] != value for key, value in expected.items()):
             return False
+        if "BTTTriggerConfig" in node and not config_saved(saved, row, node["BTTTriggerConfig"]):
+            return False
         if any(r["ZPARENT"] == row["Z_PK"] for r in saved.values()) or row["ZCONDITIONS"]:
             raise RuntimeError("Unexpected saved Mac Panel children or conditions.")
     return True
 
 
-def install(apply=False):
+def wait_saved(database, plan, before, retired=False):
+    deadline = time.monotonic() + 60
+    while not verify_saved(database, plan, before, retired):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("BTT has not saved the expected configuration; no restart or retry attempted.")
+        time.sleep(.25)
+
+
+def retire_legacy(database, plan, before):
+    """Delete the legacy 674 item, only after the new 681 item is verified in runtime and on disk."""
+    fresh = dict(plan, before=worker("inspect"))
+    path = backup_configuration(database, fresh, prefix="btt-mac-panel-retire-")
+    result = worker("retire", path)
+    wait_saved(database, plan, before, retired=True)
+    return result["touched"], path
+
+
+def install(apply=False, no_checkpoint=False):
     os.umask(0o077)
     database = current_database()
     before = saved_state(database)
@@ -232,17 +290,21 @@ def install(apply=False):
     path = backup_configuration(database, plan, prefix="btt-mac-panel-backup-")
     if saved_state(database) != before:
         raise RuntimeError("BTT changed during backup; no changes made.")
+    baseline = before_install(no_checkpoint=no_checkpoint)
     try:
         result = worker("apply", path)
-        deadline = time.monotonic() + 60
-        while not verify_saved(database, plan, before):
-            if time.monotonic() >= deadline:
-                raise RuntimeError("BTT has not saved the expected configuration; no restart or retry attempted.")
-            time.sleep(.25)
+        wait_saved(database, plan, before)
+        touched = list(result["touched"])
+        if plan["legacy"]["present"]:
+            retired, path = retire_legacy(database, plan, before)
+            touched += retired
     except (RuntimeError, ValueError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
         raise RuntimeError(str(error) + " Backup: " + str(path.parent)) from error
-    return {**plan["summary"], "mode": "apply", "changes_applied": bool(result["writes"]),
-            "writes": result["writes"], "saved_verified": True, "backup": str(path.parent)}
+    with redirect_stdout(sys.stderr):  # the checkpoint note must not break this JSON stdout
+        checkpoint = after_install(baseline, touched, INSTALLER, wrote=bool(touched))
+    return {**plan["summary"], "mode": "apply", "changes_applied": bool(touched),
+            "writes": len(touched), "touched_uuids": touched, "saved_verified": True,
+            "backup": str(path.parent), "checkpoint": checkpoint}
 
 
 def main():
@@ -250,9 +312,10 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="back up, apply through BTT's socket, verify disk")
     mode.add_argument("--inspect", action="store_true", help="read-only preview (the default)")
+    parser.add_argument("--no-checkpoint", action="store_true", help="do not advance BTT Guard's checkpoint")
     args = parser.parse_args()
     try:
-        print(json.dumps(install(apply=args.apply), indent=2))
+        print(json.dumps(install(apply=args.apply, no_checkpoint=args.no_checkpoint), indent=2))
     except (RuntimeError, ValueError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
         parser.exit(1, str(error) + "\n")
 
