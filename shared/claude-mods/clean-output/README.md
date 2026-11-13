@@ -6,10 +6,19 @@ reply's text only. Every tool call (`Bash(...)`, `Read`, `Grep`...) and tool
 result is stripped. `c` copies the text as the pane shows it, Esc closes.
 
 It runs at once even while Claude is working, instead of queueing behind
-the turn. A pane left open rebuilds itself when each turn ends, and takes
-the keyboard back after each prompt you send, so Esc closes it before Esc
-can interrupt the turn; a second Esc interrupts. Once you start typing the
-keys are the prompt's again: ctrl+x tab returns them to the pane.
+the turn, and takes the keyboard, so Esc closes it without interrupting the
+turn. A mod has no key hook, and once you type the keys are the prompt's,
+where Esc interrupts a running turn. So sending a prompt of your own closes
+the pane (`/clean` again reopens it), while a slash command, a worker
+message, a background-task notice or a wake-up leaves it open and takes the
+keyboard back, so Esc during the turn that starts still closes the pane
+first. Claude Code hands it the keys only over an empty prompt box: with
+text there the keys stay yours, and ctrl+x tab gives them to the pane. A
+pane left open through a turn rebuilds itself when the turn ends. A
+`/clean` you run in the instant a sent prompt is closing the old pane can
+lose its pane to that close, and a pane closed in the instant a notice
+asks for the keyboard can come back; both windows are narrow, not
+impossible, since a mod cannot close or focus a pane atomically.
 
 The pane opens on the newest reply: at the start of its last turn when
 injected messages split it, else at the newest prompt. A line under the pane
@@ -24,7 +33,10 @@ instead: full width, at most half the terminal's height, and the mouse wheel
 scrolls it while the pointer is over it (fullscreen reports the wheel; the
 classic renderer leaves it to the terminal's scrollback). `x: close`
 (clicked, or `x` once the band has the keys) closes it, `[-]` folds it, and
-the band's own `↑ n more · ↓ n more` row replaces the rows line.
+the band's own `↑ n more · ↓ n more` row replaces the rows line. The band
+never holds the keyboard on its own: a prompt you send closes it, and Esc
+during a turn that a worker message, notice or wake-up started interrupts
+that turn and leaves the band open.
 
 - An exchange is one of your prompts (or a slash command that got a reply)
   and everything the assistant wrote until your next one. Worker messages,

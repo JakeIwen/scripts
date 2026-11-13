@@ -6,7 +6,7 @@ const band = {
   surface: 'terminal',
   component: 'AbovePrompt',
   requestId: 'band',
-  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 9 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 9 }, view: {} },
 } as const
 
 /** The world beneath the plugin: an empty band, the clean pane shown, every scroll allowed. */

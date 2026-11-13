@@ -7,7 +7,11 @@ import type { SessionMessage } from 'claude-code'
 
 import type { PromptRecord } from '../types'
 
-/** Origins the person produced themselves (PromptOrigin kinds). */
+/**
+ * Origins that stand for the person's own turn (PromptOrigin kinds): typed at
+ * the terminal, sent through the Remote Control bridge, or an SDK host's turn
+ * (`claude -p`, the Agent SDK), which is programmatic but plays the person.
+ */
 export const TYPED_KINDS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
 export const COMMAND_KIND = 'command'
 /** A `!command` the person ran in Codex: their shell, not a prompt to the model. */

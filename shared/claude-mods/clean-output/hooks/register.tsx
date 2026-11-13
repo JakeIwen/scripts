@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, On, Register, RenderSurface } from 'claude-code'
 
-import type { SessionMessage } from 'claude-code'
+import type { SessionMessage, StateRead } from 'claude-code'
 
 import type { CleanSite, CleanView, PromptRecord } from '../types'
 import { parseArgs, type CleanOptions } from './clean'
@@ -20,13 +20,28 @@ const PROMPT_BACKGROUND = 'userMessageBackground'
 const EMPTY: CleanView = { label: '', sections: [] }
 const NO_PROMPTS: PromptRecord[] = []
 const MAX_PROMPTS = 200
-const pane = atom({ plugin: 'clean-output', key: 'pane' } as const, EMPTY)
+/**
+ * Every read in one dispatch sees one moment, so a hook that awaited across a
+ * newer `/clean` (it runs at once, mid-turn too) can't see that view by
+ * reading. These two are written with `ifVersion` instead: `/clean` rewrites
+ * both, so the write misses and the newer view stays.
+ */
+const PANE_REF = { plugin: 'clean-output', key: 'pane' } as const
+const OPTIONS_REF = { plugin: 'clean-output', key: 'options' } as const
+const pane = atom(PANE_REF, EMPTY)
 const prompts = atom({ plugin: 'clean-output', key: 'prompts' } as const, NO_PROMPTS)
 const paneWindow = atom({ plugin: 'clean-output', key: 'window' } as const, NO_WINDOW)
 const NO_OPTIONS: CleanOptions | null = null
-const paneOptions = atom({ plugin: 'clean-output', key: 'options' } as const, NO_OPTIONS)
+const paneOptions = atom(OPTIONS_REF, NO_OPTIONS)
 const PANE_SITE: CleanSite = 'pane'
 const site = atom({ plugin: 'clean-output', key: 'site' } as const, PANE_SITE)
+/**
+ * Counts the pane's closes that went through, in this module's own memory,
+ * which every hook of one load shares: a state read could not see a close
+ * landing mid-dispatch. A reload starts a fresh count, which a hook still
+ * running from the old load does not see.
+ */
+let paneCloses = 0
 /** Waits before each try: the pane draws its tree a moment after `$.ui.open` places it. */
 const REVEAL_WAITS_MS = [0, 50, 100, 200, 400]
 
@@ -51,7 +66,12 @@ async function openOptions($: EngineInterface): Promise<CleanOptions | null> {
   const opts = await read($, paneOptions)
   if (opts === null) return null
   if ((await read($, site)) === 'band') return opts
-  return (await $.ui.panes()).some(p => p.id === PANE) ? opts : null
+  return (await isPaneListed($)) ? opts : null
+}
+
+/** Whether the engine lists the pane now (its own record, not this dispatch's state moment). */
+async function isPaneListed($: EngineInterface): Promise<boolean> {
+  return (await $.ui.panes()).some(p => p.id === PANE)
 }
 
 /** Forgets the open view: the pane's close does this, and the band's close button. */
@@ -74,25 +94,61 @@ async function sessionView($: EngineInterface, opts: CleanOptions): Promise<Clea
 }
 
 /**
- * Typing a prompt hands the keyboard to the composer, and while the turn runs
- * Esc there interrupts it. Taking the keys back lets Esc close an open pane
- * first; the next keystroke the person types returns them.
+ * Closes the open view when the person sends a prompt. A mod has no key hook
+ * and their first keystroke hands the keyboard to the composer, so a view
+ * left open while the chat goes on can't stop Esc from interrupting the turn
+ * (the band never holds the keys at all); `/clean` brings it back.
+ *
+ * Only the view that was open when the prompt arrived (`held`, the options as
+ * read then): the write misses if a later `/clean` opened another, which stays.
+ * A `/clean` landing between that write and the pane's close can still lose
+ * its pane; the window is one engine call wide.
  */
-async function refocusPane($: EngineInterface): Promise<void> {
-  if ((await $.ui.panes()).some(p => p.id === PANE)) await $.ui.open(PANE_OPEN)
+async function closeView($: EngineInterface, held: StateRead<CleanOptions | null> | undefined): Promise<void> {
+  if (held === undefined || held.value == null) return
+  const claimed = await $.state.set(OPTIONS_REF, null, { ifVersion: held.version })
+  // The band is drawn from the options alone (its window stays empty), so the
+  // write closed it; clearing them again could erase a newer `/clean`'s.
+  if (!claimed.isSet || (await read($, site)) === 'band') return
+  // The pane's close runs the `ui.close` hook, which forgets the rest and
+  // counts the close; none counted means a hook refused it and the pane
+  // stays, so it gets its options back unless a newer `/clean` wrote its own.
+  const closes = paneCloses
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+  if (paneCloses === closes) await $.state.set(OPTIONS_REF, held.value, { ifVersion: claimed.version })
+}
+
+/**
+ * Asks the keyboard back for a pane left open by a prompt the person didn't
+ * type (a worker message, a notice, a wake-up) or by a slash command: any key
+ * they pressed since `/clean` handed it to the composer, where Esc would
+ * interrupt the turn that prompt starts. The engine grants it only over an
+ * empty composer, so text they are writing keeps the keys. The band never
+ * holds them. A pane closed before `ui.panes` answers, or while it answers,
+ * stays closed; one closed after that check, in the instant before the open
+ * reaches the engine, would be opened again. Focusing only a pane that is
+ * still open, atomically, needs the engine's support.
+ */
+async function refocusPane($: EngineInterface, held: StateRead<CleanOptions | null> | undefined): Promise<void> {
+  if (held === undefined || held.value == null || (await read($, site)) !== 'pane') return
+  const closes = paneCloses
+  if (!(await isPaneListed($)) || paneCloses !== closes) return
+  await $.ui.open(PANE_OPEN)
 }
 
 /**
  * Rebuilds an open pane from the options it was opened with and moves to the
- * newest reply, so a pane left open keeps up with the session.
+ * newest reply, so a pane left open keeps up with the session. A `/clean`
+ * that rebuilt the view while this one read the session wins.
  */
 async function refreshPane($: EngineInterface): Promise<void> {
+  const held = await $.state.get(PANE_REF)
   const opts = await openOptions($)
   if (opts === null) return
   const view = await sessionView($, opts)
-  if (view === undefined || JSON.stringify(view) === JSON.stringify(await read($, pane))) return
-  await update($, pane, () => view)
-  await revealNewest($, newestTarget(view), await read($, site))
+  if (view === undefined || JSON.stringify(view) === JSON.stringify(held.value)) return
+  const written = await $.state.set(PANE_REF, view, { ifVersion: held.version })
+  if (written.isSet) await revealNewest($, newestTarget(view), await read($, site))
 }
 
 /** `/clean` itself, and the record of where each prompt came from. */
@@ -110,13 +166,20 @@ function onCommand(on: On): void {
   // Remember where each prompt came from, so the views can tell the person's
   // own prompts from worker messages, notices and wake-ups.
   on('prompt.submit', async ($, e, next) => {
+    const held = await $.state.get(OPTIONS_REF).catch(() => undefined)
     if (!e.command) {
       const record: PromptRecord = { head: promptHead(e.text), kind: e.origin.kind }
       // A failed record only weakens the grouping; it must never hold up the prompt.
       await update($, prompts, list => [...list, record].slice(-MAX_PROMPTS)).catch(() => undefined)
     }
     const submitted = await next(e)
-    if (!e.command && TYPED_KINDS.has(e.origin.kind)) await refocusPane($).catch(() => undefined)
+    // Waits for `next`: a hook beneath may drop the prompt, and then nothing
+    // starts. The person's own prompt closes the view; worker messages,
+    // notices and wake-ups land while they read, and a slash command may be
+    // `/clean` itself, so those keep it and ask the keyboard back.
+    if (submitted.drop !== undefined) return submitted
+    const isTyped = !e.command && TYPED_KINDS.has(e.origin.kind)
+    await (isTyped ? closeView($, held) : refocusPane($, held)).catch(() => undefined)
     return submitted
   })
 
@@ -158,7 +221,7 @@ function onCommand(on: On): void {
   })
 }
 
-/** Keeps an open pane's window, content and keyboard in step with the session. */
+/** Keeps an open pane's window and content in step with the session. */
 function onPaneLife(on: On): void {
   // Every move reports the window's rows; the band below draws them, since the
   // pane's own header scrolls away with the rest of its body.
@@ -171,6 +234,8 @@ function onPaneLife(on: On): void {
     return moved
   })
 
+  // A sent prompt closes the view, so this serves one opened mid-turn and
+  // turns that worker messages, notices and wake-ups start.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     // A refresh that fails leaves the pane as it was; the turn is unaffected.
@@ -180,6 +245,12 @@ function onPaneLife(on: On): void {
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
+    // A hook beneath that refused the close, or answered for it without
+    // passing it on, kept the pane, and its view. The engine has dropped a
+    // closed pane from its list by now; if a close ever lagged there, the
+    // options would outlive their pane, and every reader gates on the pane.
+    if (closed.deny !== undefined || (await isPaneListed($).catch(() => false))) return closed
+    paneCloses += 1
     await forgetView($).catch(() => undefined)
     return closed
   })
