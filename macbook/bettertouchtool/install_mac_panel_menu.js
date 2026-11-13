@@ -23,6 +23,11 @@ function matches(actual, desired, common) {
     return Object.keys(desired).every(key => {
         // Global app scope is absent from BTT's export; Python verifies its saved relation.
         if (key === 'BTTAppBundleIdentifier') return true;
+        // BTT saves this write-only key as the row's launch config but exports a 681 item's
+        // copy as BTTAdditionalConfiguration (642 widgets echo the key itself).
+        if (key === 'BTTShellScriptWidgetGestureConfig') {
+            return [actual[key], actual.BTTAdditionalConfiguration].includes(desired[key]);
+        }
         if (key === 'BTTEnabled' || key === 'BTTEnabled2') {
             return Number(actual[key] === undefined ? 1 : actual[key]) === desired[key];
         }

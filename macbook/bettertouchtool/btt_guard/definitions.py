@@ -44,6 +44,7 @@ BOOLEAN_CONFIG_KEYS = {
     "BTTMenuScriptRunOnMenuHover",
     "BTTMenuShowIfWindowLevelEqualsEnabled",
 }
+MENU_BAR_LAUNCH_FIELD = "BTTShellScriptWidgetGestureConfig"
 PAYLOAD_FIELDS = {
     "BTTShellTaskActionScript",
     "BTTTerminalCommand",
@@ -276,7 +277,7 @@ def _payload_field(key: str, expected: dict[str, Any], uuid: str) -> str:
     if key == "gesture_config" and int(expected["trigger_type"]) == 643:
         return "BTTTriggerName"
     if key == "gesture_config" and int(expected["trigger_type"]) == MENU_BAR_SCRIPT_TYPE:
-        return "BTTShellScriptWidgetGestureConfig"
+        return MENU_BAR_LAUNCH_FIELD
     if key == "additional_action_string" and action_type in ADDITIONAL_STRING_FIELDS:
         return ADDITIONAL_STRING_FIELDS[action_type]
     raise ValueError(f"Unsupported payload mapping {key} for BTT record {uuid}.")
@@ -286,6 +287,10 @@ def _validate_payload(expected: dict[str, Any], node: dict[str, Any], uuid: str)
     claimed: set[str] = set()
     for key, wanted in expected["payload"].items():
         field = _payload_field(key, expected, uuid)
+        if field == MENU_BAR_LAUNCH_FIELD:
+            claimed.add("BTTAdditionalConfiguration")  # a 681 export carries its launch config here
+            if field not in node:
+                field = "BTTAdditionalConfiguration"
         claimed.add(field)
         if key == "shortcut" and wanted in (None, "", "-1", -1):
             if field not in node or node[field] in (None, "", "-1", -1):
@@ -301,6 +306,9 @@ def _validate_payload(expected: dict[str, Any], node: dict[str, Any], uuid: str)
     functional_fields = set(PAYLOAD_FIELDS)
     if int(expected["trigger_type"]) == 643:
         functional_fields.add("BTTTriggerName")
+    if int(expected["trigger_type"]) == MENU_BAR_SCRIPT_TYPE:
+        # A launch config in the runtime with none saved must be refused, not ignored.
+        functional_fields |= {MENU_BAR_LAUNCH_FIELD, "BTTAdditionalConfiguration"}
     for field in functional_fields - claimed:
         if field in node and node[field] not in (None, "", "-1", -1):
             raise ValueError(f"Runtime payload has unexpected {field}: {uuid}")
@@ -610,6 +618,11 @@ def build_definitions(
         _validate_app_scope(expected, nodes[uuid], uuid, require_explicit=False)
         _validate_record(uuid, expected, nodes[uuid], observed_parents[uuid], _enabled_flag(records, uuid))
     _canonicalize_orders(nodes, records)
+    for uuid, expected in records.items():
+        if int(expected["trigger_type"]) == MENU_BAR_SCRIPT_TYPE and "gesture_config" in expected["payload"]:
+            # BTT exports the launch config as BTTAdditionalConfiguration but saves it only
+            # when written as this key, so a replayed definition must carry the writable one.
+            nodes[uuid][MENU_BAR_LAUNCH_FIELD] = expected["payload"]["gesture_config"]
     _finalize(nodes, records, preset_names)
     result = {uuid: nodes[uuid] for uuid in records}
     validate_definitions(result, snapshot)

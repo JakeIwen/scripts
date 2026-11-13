@@ -410,12 +410,20 @@ class GuardDefinitionTests(unittest.TestCase):
                 "BTTOpenURLBrowser": "Default",
                 "BTTTriggerConfig": {"BTTTouchBarShellScriptString": "x", "BTTTouchBarScriptUpdateInterval": 3,
                                      "BTTTouchBarAppleScriptStringRunOnInit": 1}}
-        for runtime in (dict(node, BTTShellScriptWidgetGestureConfig=launch),):
+        live = dict(node, BTTAdditionalConfiguration=launch)  # what BTT exports for a 681 item
+        for runtime in (dict(node, BTTShellScriptWidgetGestureConfig=launch), live):
             result = build_definitions(exports + [runtime], snapshot, {PRESET: "Master"})
             self.assertEqual(result["cpu-menu"]["BTTShellScriptWidgetGestureConfig"], launch)
-        for runtime in (node, dict(node, BTTShellScriptWidgetGestureConfig="/bin/zsh:::-c:::-:::")):
-            with self.assertRaisesRegex(ValueError, "BTTShellScriptWidgetGestureConfig"):
+        for runtime in (node, dict(node, BTTShellScriptWidgetGestureConfig="/bin/zsh:::-c:::-:::"),
+                        dict(node, BTTAdditionalConfiguration="/bin/zsh:::-c:::-:::")):
+            with self.assertRaisesRegex(ValueError, "BTTShellScriptWidgetGestureConfig|BTTAdditionalConfiguration"):
                 build_definitions(exports + [runtime], snapshot, {PRESET: "Master"})
+        # Reverse mismatch: a runtime launch config with nothing saved is refused.
+        unsaved, unsaved_exports = fixture()
+        unsaved["records"]["cpu-menu"] = dict(snapshot["records"]["cpu-menu"], payload={
+            "launch_path": "http://127.0.0.1:8769/", "additional_action_string": "Default"})
+        with self.assertRaisesRegex(ValueError, "unexpected"):
+            build_definitions(unsaved_exports + [live], unsaved, {PRESET: "Master"})
 
     def test_unknown_payload_mapping_or_missing_class_derivation_fails(self):
         snapshot, exports = fixture()

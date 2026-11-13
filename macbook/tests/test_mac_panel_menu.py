@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -372,6 +373,29 @@ class InstallerTests(unittest.TestCase):
             for bad in (None, "", "/bin/zsh:::-c:::-:::"):
                 saved[panel.MENU_ID]["ZGESTURECONFIG"] = bad
                 self.assertFalse(panel.verify_saved("fixture", plan, before), bad)
+
+    def test_runtime_readback_of_a_681_item_is_a_no_op_for_btts_live_export_shape(self):
+        # BTT exports a 681 item's launch config as BTTAdditionalConfiguration, with no
+        # BTTEnabled* or app keys; a rerun against it must write nothing.
+        menu = installed_rows()[1]["desired"][0]
+        live = {key: value for key, value in menu.items()
+                if key not in ("BTTEnabled", "BTTEnabled2", "BTTAppBundleIdentifier",
+                               "BTTShellScriptWidgetGestureConfig")}
+        live.update(BTTAdditionalConfiguration=panel.SHELL_LAUNCH_CONFIG, BTTBelongsToApp="Global")
+        drifted = dict(live, BTTAdditionalConfiguration="/bin/zsh:::-c:::-:::")
+        without = {k: v for k, v in live.items() if k != "BTTAdditionalConfiguration"}
+        script = ("ObjC.import('Foundation');"
+                  "function read(p){return ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError("
+                  "p,$.NSUTF8StringEncoding,null));}"
+                  "function run(a){eval(read(a[0]));eval(read(a[1]));var d=JSON.parse(a[2]);"
+                  "return JSON.stringify(JSON.parse(a[3]).map(function(x){return matches(x,d,BTTCommon);}));}")
+        result = subprocess.run(
+            ["/usr/bin/osascript", "-l", "JavaScript", "-e", script,
+             str(panel.DIRECTORY / "install_mac_panel_menu.js"), str(panel.DIRECTORY / "btt_common.js"),
+             json.dumps(menu), json.dumps([live, drifted, without])],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [True, False, False])
 
     def test_saved_verification_tracks_the_legacy_item(self):
         saved, plan = installed_rows()
