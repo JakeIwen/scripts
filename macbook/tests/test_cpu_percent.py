@@ -1,9 +1,11 @@
 """cpu_percent turns kernel tick counters into one whole-machine busy percentage."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 import cpu_percent as cpu
@@ -72,6 +74,47 @@ class StateTests(unittest.TestCase):
     def test_save_leaves_no_temp_files(self):
         cpu.save_sample(self.path, (1, 2), 5.0)
         self.assertEqual([p.name for p in self.path.parent.iterdir()], ["sample.json"])
+
+
+class OverlapTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.path = Path(folder.name) / "sample.json"
+
+    def test_run_that_finds_the_lock_held_measures_alone_and_leaves_state_alone(self):
+        cpu.save_sample(self.path, (100, 1000), 990.0)
+        held = cpu.try_lock(self.path)
+        self.assertIsNotNone(held)
+        sleeps, queue = [], [(0, 0), (10, 100)]
+        value = cpu.measure(self.path, reader=lambda: queue.pop(0), clock=lambda: 1000.0,
+                            sleeper=sleeps.append)
+        self.assertEqual((value, sleeps), (90.0, [cpu.FALLBACK_GAP]))
+        self.assertEqual(json.loads(self.path.read_text())["total"], 1000)  # untouched
+        os.close(held)
+        self.assertIsNotNone(cpu.try_lock(self.path))  # released once the holder closes
+
+    def test_overlapping_run_cannot_publish_an_older_sample_over_a_newer_one(self):
+        # Run A reads its (older) sample, stalls, and must still be the writer of record
+        # while run B, started inside A's window, writes nothing.
+        cpu.save_sample(self.path, (0, 0), 995.0)
+        inside, release = threading.Event(), threading.Event()
+        def slow_reader():
+            inside.set()
+            release.wait(5)
+            return (500, 1000)  # A: 50% busy
+        outcome = {}
+        first = threading.Thread(target=lambda: outcome.update(
+            a=cpu.measure(self.path, reader=slow_reader, clock=lambda: 1000.0, sleeper=lambda s: None)))
+        first.start()
+        self.assertTrue(inside.wait(5))
+        queue = iter([(900, 1000), (910, 1100)])  # B sees 90% then 10% busy
+        outcome["b"] = cpu.measure(self.path, reader=lambda: next(queue), clock=lambda: 1001.0,
+                                   sleeper=lambda s: None)
+        release.set()
+        first.join(5)
+        self.assertEqual(outcome, {"a": 50.0, "b": 90.0})
+        self.assertEqual(json.loads(self.path.read_text())["idle"], 500)  # only A wrote
 
 
 @unittest.skipUnless(sys.platform == "darwin", "reads the macOS Mach CPU counters")

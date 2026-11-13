@@ -9,6 +9,7 @@ against the totals the previous run saved: no `top`, no `ps`, no sleeping
 from __future__ import annotations
 
 import ctypes
+import fcntl
 import json
 import os
 import sys
@@ -33,10 +34,16 @@ def read_ticks():
     libc.host_processor_info.argtypes = [
         ctypes.c_uint, ctypes.c_int, ctypes.POINTER(ctypes.c_uint),
         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint)]
+    libc.mach_port_deallocate.argtypes = [ctypes.c_uint, ctypes.c_uint]
     libc.vm_deallocate.argtypes = [ctypes.c_uint, ctypes.c_void_p, ctypes.c_size_t]
     cpus, info, count = ctypes.c_uint(), ctypes.c_void_p(), ctypes.c_uint()
-    status = libc.host_processor_info(libc.mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
-                                      ctypes.byref(cpus), ctypes.byref(info), ctypes.byref(count))
+    host = libc.mach_host_self()  # each call adds a send right; release it or the port table grows
+    task = ctypes.c_uint.in_dll(libc, "mach_task_self_")
+    try:
+        status = libc.host_processor_info(host, PROCESSOR_CPU_LOAD_INFO, ctypes.byref(cpus),
+                                          ctypes.byref(info), ctypes.byref(count))
+    finally:
+        libc.mach_port_deallocate(task.value, host)
     if status != 0 or not info.value:
         raise OSError("host_processor_info failed (%d)" % status)
     try:
@@ -44,7 +51,6 @@ def read_ticks():
         # Counters are unsigned 32-bit ticks that may wrap; mask to keep them non-negative.
         ticks = [v & 0xFFFFFFFF for v in values]
     finally:
-        task = ctypes.c_uint.in_dll(libc, "mach_task_self_")
         libc.vm_deallocate(task.value, info, count.value * ctypes.sizeof(ctypes.c_int))
     idle = sum(ticks[CPU_STATE_IDLE::CPU_STATES])
     return idle, sum(ticks)
@@ -92,19 +98,52 @@ def save_sample(path, sample, now):
         raise
 
 
-def measure(path=STATE_FILE, reader=read_ticks, clock=time.time, sleeper=time.sleep):
-    """Percent since the previous run; falls back to a short two-sample window."""
-    now = clock()
-    current = reader()
-    previous = load_previous(path, now)
-    if previous is None:
-        sleeper(FALLBACK_GAP)
-        previous, now, current = current, clock(), reader()
+def stateless_percent(reader, sleeper):
+    """Percent over a short window of its own; touches no saved state."""
+    first = reader()
+    sleeper(FALLBACK_GAP)
+    return busy_percent(first, reader())
+
+
+def try_lock(path):
+    """Non-blocking exclusive lock on a file beside the state, or None if held or unavailable."""
+    lock_path = Path(path).with_suffix(".lock")
     try:
-        save_sample(path, current, now)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     except OSError:
-        pass  # Without state every run just pays the short fallback window.
-    return busy_percent(previous, current)
+        return None
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(descriptor)
+        return None
+    return descriptor
+
+
+def measure(path=STATE_FILE, reader=read_ticks, clock=time.time, sleeper=time.sleep):
+    """Percent since the previous run; falls back to a short two-sample window.
+
+    Read, sample and write happen under one lock so two overlapping runs cannot publish an
+    older sample over a newer one; a run that finds the lock held measures on its own
+    and leaves the state alone."""
+    descriptor = try_lock(path)
+    if descriptor is None:
+        return stateless_percent(reader, sleeper)
+    try:
+        now = clock()
+        current = reader()
+        previous = load_previous(path, now)
+        if previous is None:
+            sleeper(FALLBACK_GAP)
+            previous, now, current = current, clock(), reader()
+        try:
+            save_sample(path, current, now)
+        except OSError:
+            pass  # Without state every run just pays the short fallback window.
+        return busy_percent(previous, current)
+    finally:
+        os.close(descriptor)  # closing the descriptor releases the flock
 
 
 def main():
