@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import install_bpm_menu
 import install_lighting_menu as lighting
+import media_submenu
 import repair_text_transforms as text
 import repair_script_paths as paths
 import tools_menu_item as tools
@@ -168,23 +169,23 @@ class LightingCheckpointWiringTests(unittest.TestCase):
         receipt = dict(message='verified lighting', wrote=wrote,
                        touched_uuids=['submenu', 'button'] if wrote else [], saved_plan={'fixture': True})
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
-            stack.enter_context(patch.object(lighting, 'BUILD', Path(directory)/'build'))
-            stack.enter_context(patch.object(lighting, 'saved_facts',
+            stack.enter_context(patch.object(media_submenu, 'BUILD', Path(directory)/'build'))
+            stack.enter_context(patch.object(media_submenu, 'saved_facts',
                 return_value={'unlinked_actions': [], 'menu_order': 4}))
             def worker(payload, mode, refresh):
                 events.append(mode)
                 return SimpleNamespace(returncode=1 if worker_fails else 0, stderr='failed',
                                        stdout=json.dumps(receipt))
-            stack.enter_context(patch.object(lighting, 'worker', side_effect=worker))
-            before = stack.enter_context(patch.object(lighting, 'before_install',
+            stack.enter_context(patch.object(media_submenu, 'worker', side_effect=worker))
+            before = stack.enter_context(patch.object(media_submenu, 'before_install',
                 side_effect=lambda **kw: events.append('baseline') or {'fixture': True}))
-            after = stack.enter_context(patch.object(lighting, 'after_install',
+            after = stack.enter_context(patch.object(media_submenu, 'after_install',
                 side_effect=lambda *a, **kw: events.append('checkpoint')))
             def saved(plan):
                 events.append('saved')
                 if saved_fails:
                     raise RuntimeError('saved verification failed')
-            stack.enter_context(patch.object(lighting, 'verify_saved_item', side_effect=saved))
+            stack.enter_context(patch.object(media_submenu, 'verify_saved_item', side_effect=saved))
             stack.enter_context(redirect_stdout(io.StringIO()))
             if saved_fails:
                 with self.assertRaisesRegex(RuntimeError, 'saved verification failed'):

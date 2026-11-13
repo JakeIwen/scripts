@@ -7,7 +7,7 @@ const {execFileSync} = require('node:child_process');
 const {withCommon, shellArguments} = require('./btt_test_support.cjs');
 
 const folder = path.join(__dirname, '../bettertouchtool');
-const workerCode = fs.readFileSync(path.join(folder, 'install_lighting_menu.js'), 'utf8');
+const workerCode = fs.readFileSync(path.join(folder, 'media_submenu_install.js'), 'utf8');
 const commonCode = withCommon('');
 const payload = JSON.parse(execFileSync('/usr/bin/python3', ['-c',
     'import json; from install_lighting_menu import definition; print(json.dumps(definition()))'], {

@@ -1,6 +1,7 @@
-// Guarded installer for Media > Lighting (the 💡 submenu) and its colour dropdown; writes
-// only its own UUIDs. The Python launcher owns the structure: a flat list of items, each
-// naming its parent (null for a top-level floating menu).
+// Guarded installer for an owned Media submenu (Lighting, Mac) and any top-level dropdowns
+// it shows; writes only its own UUIDs. The Python launcher (media_submenu.py) owns the
+// structure: a flat list of items, each naming its parent (null for a top-level floating
+// menu), plus the noun, title and backup prefix its messages use.
 ObjC.import('Foundation');
 
 // loadCommon, enabled, pick and refreshMedia repeat install_tools_menu_item.js's private helpers.
@@ -107,6 +108,7 @@ function rejectNameClash(index, node, owned) {
 // retyped or disabled are refused here, so a step only ever adds an item or repairs its
 // label or actions. Installed items keep their saved position, so a hand reorder survives.
 function plan(trees, payload, common) {
+    const noun = payload.noun;
     const index = locate(trees);
     const owned = new Set(payload.items.map(item => item.BTTUUID));
     const unlinked = payload.unlinked_actions || [];
@@ -120,10 +122,10 @@ function plan(trees, payload, common) {
         }
         const previous = found.node;
         if (found.count > 1 || found.parent !== node.BTTTriggerParentUUID) {
-            throw new Error('Lighting item ' + node.BTTUUID + ' was moved elsewhere; no changes made.');
+            throw new Error(noun + ' item ' + node.BTTUUID + ' was moved elsewhere; no changes made.');
         }
         if (Number(previous.BTTTriggerType) !== node.BTTTriggerType || !enabled(previous)) {
-            throw new Error('Lighting item ' + node.BTTUUID + ' is disabled or has another type; ' +
+            throw new Error(noun + ' item ' + node.BTTUUID + ' is disabled or has another type; ' +
                 'enable or delete it in BTT. No changes made.');
         }
         node.BTTOrder = Number(previous.BTTOrder || 0);
@@ -172,10 +174,10 @@ function verify(btt, payload, before, steps, common, backupPath) {
     const after = readTrees(btt, payload);
     const index = locate(after);
     if (!steps.every(step => savedAs(index, step.node, common))) {
-        throw new Error('Lighting menu verification failed. Backup: ' + backupPath);
+        throw new Error(payload.noun + ' menu verification failed. Backup: ' + backupPath);
     }
     if (common.fingerprint(foreignView(after, steps)) !== common.fingerprint(foreignView(before, steps))) {
-        throw new Error('Unexpected change outside the Lighting items. Backup: ' + backupPath);
+        throw new Error('Unexpected change outside the ' + payload.noun + ' items. Backup: ' + backupPath);
     }
     return index;
 }
@@ -215,6 +217,9 @@ function run(argv) {
     if (!['inspect', 'apply'].includes(mode)) throw new Error('Explicit inspect/apply mode required.');
     const common = loadCommon(commonPath);
     const payload = common.readJSON(payloadPath);
+    if (!['noun', 'title', 'backup_prefix'].every(key => typeof payload[key] === 'string' && payload[key])) {
+        throw new Error('Payload lacks its noun, title or backup prefix; no changes made.');
+    }
     const btt = Application('/Applications/BetterTouchTool.app');
     const before = readTrees(btt, payload);
     const steps = plan(before, payload, common);
@@ -225,9 +230,9 @@ function run(argv) {
             change: describe(step)}))}, null, 2);
     }
     let index = locate(before);
-    let message = 'Already configured: Media > Lighting.';
+    let message = 'Already configured: ' + payload.title + '.';
     if (todo.length) {
-        const backupPath = common.backup({trees: before}, backupDirectory + '/btt-lighting-menu-backup-' +
+        const backupPath = common.backup({trees: before}, backupDirectory + '/' + payload.backup_prefix +
             ObjC.unwrap($.NSUUID.UUID.UUIDString), {
             create: 'Cannot create private backup; no changes made.',
             verify: 'Backup verification failed; no changes made.',
@@ -241,7 +246,7 @@ function run(argv) {
             throw new Error(error.message + ' Backup: ' + backupPath);
         }
         index = verify(btt, payload, before, steps, common, backupPath);
-        message = 'Verified configuration: Media > Lighting. Backup: ' + backupPath;
+        message = 'Verified configuration: ' + payload.title + '. Backup: ' + backupPath;
     }
     if (refreshFlag === 'refresh') {
         refreshMedia(btt, payload.media_uuid);
