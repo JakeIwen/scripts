@@ -70,9 +70,17 @@ class PTYDriver:
         self.send(b"\r")
 
     def quit_codex(self):
+        start = len(self.output)
         self.send(b"\x03")
-        self.pause(0.2)
-        if self.process.poll() is None:
+        # A second Ctrl-C is for a Codex that only showed its quit hint. Sent while Codex is
+        # already shutting down from the first, it lands after the terminal is restored and
+        # interrupts the launcher (exit 130), which a loaded machine made routine.
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and self.process.poll() is None:
+            self.pump()
+            if b"Shutting down" in self.output[start:]:
+                break
+        if self.process.poll() is None and b"Shutting down" not in self.output[start:]:
             self.send(b"\x03")
         self.until(lambda: self.process.poll() is not None, timeout=WAIT_SECONDS)
 
