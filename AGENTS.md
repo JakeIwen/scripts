@@ -819,8 +819,36 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/test_bashrc_codex.sh` loads the file in Codex mode and checks it.
 - `shared/sh/destructive_command_guard.py`: PreToolUse hook for Claude/Codex on Mac/Pi
   (Python 3.9+, flat `/home/pi/scripts/` on Pi); blocks protected-path recursive rm,
-  forced pushes, and Mac-only destructive find/disk commands, with chain-local cd tracking.
-  Fail-open; Jacob runs a deliberately blocked command himself with `! <command>` in Claude.
+  forced and `--mirror` pushes, and Mac-only destructive find/disk commands (with
+  `-exec` clauses checked as commands). It follows wrappers (`rtk`, `sudo`, `env -C`,
+  `exec`, `nice`, `xargs` ...), heredocs a shell runs, and every folder a command may
+  run in, starting from the payload's `cwd`. It reads every command as possibly running in
+  every folder that could be current, and narrows that only by the table `WHITELIST` in
+  `destructive_guard_flow.py` (plain literal `cd`, `!`, plain `exit`, subshells, earlier
+  pipeline stages, background jobs: shapes probed identical in bash, sh and zsh). Known
+  false blocks, accepted: `set -e; cd /tmp/x; rm -rf ./*` from a protected folder
+  (zsh ignores `set -e` inside Claude Code's `eval ... &&` wrapper); a broad relative
+  removal after `cd -`, `popd` or a `pushd`/`cd` stack move (`+N`, `-N`), or after a
+  relative `cd` in a command that mentions `CDPATH` anywhere, quoted text included (a
+  text scan, as is physical mode); `cd x &>/dev/null || exit 1` (dash runs `&>` as a
+  background job). Executed `alias`, `unalias`, `disable`, `enable -n`, `unfunction` and
+  `unset -f` commands (also through `builtin`/`command`) take `cd`, `exit`, `pushd` or
+  `popd` off the whitelist for the names they touch, all four when an argument is not
+  literal; the words in prose or options do not count. Known limits: values that exist
+  only at run time (a script built by a substitution, loop items from a glob) are not
+  followed; paths are resolved lexically, so a component that is a symlink into a
+  protected folder is not seen; `bash -c f` with a heredoc follows `f` only when the
+  command itself defines it, not a function exported before it ran; an alias or
+  builtin switch for `cd` or `exit` made inside `eval` or sourced text does not reach
+  the caller's later commands. Fail-open,
+  except nesting or command counts too large to check, which it denies; Jacob runs a
+  deliberately blocked command himself with `! <command>`. It imports four sibling modules, so deploy all five files together to
+  the Pi's `/home/pi/scripts/` (a missing one makes the guard fail open):
+  `destructive_guard_shell.py` (words, heredocs, redirections: `ShellWords`,
+  `parse_script`, `Segment`), `destructive_guard_tree.py` (`parse_tree`: if, loops,
+  groups, subshells, functions), `destructive_guard_flow.py` (`Flow`: the set of
+  (folder, status) paths through that tree, capped and widened to "any folder") and
+  `destructive_guard_paths.py` (protected folders and what a target names).
 - `shared/claude-mods/clean-output/` is the Claude Code mod behind `/clean`
   (usage in its README). The Mac loads it from the checkout; the Pi, which
   has no checkout, loads the copy `zsh shared/claude-mods/deploy_pi.zsh
