@@ -125,6 +125,13 @@ The wired paths are:
 - `port_media_icons.py` (all three style scopes), `repair_media_actions.py`
   (actions and dependencies), `repair_script_paths.py` (ordinary and media-suite
   modes), `restore_media.py`, `stabilize_media.py`, and `repair_rps.py`.
+- `install_mac_panel_menu.py`: the baseline is taken after its backup and before the
+  first write; after saved verification of the new item and the retirement of the
+  legacy one, it requests a checkpoint for the new, retired and written UUIDs. The
+  checkpoint is skipped (not failed) when Guard had no active checkpoint, had drift
+  or was unavailable beforehand, when `--no-checkpoint` is given, when nothing was
+  written, or when findings outside those UUIDs exist. A skip or failure is printed
+  to stderr and never fails the install; stdout stays JSON with a `checkpoint` field.
 - `btt.py style`, `restore-media`, and the corresponding `repair` commands forward
   `--no-checkpoint`; the installer owns the baseline, so dispatch never captures twice.
 
@@ -136,7 +143,7 @@ Not wired: Custom Conversion, Performance Audio, Strip Metadata, Notes, sizing
 repair/restore and playback-status tuning currently verify API readback, not a
 complete saved-state contract with an edit receipt. Their existing behavior is
 unchanged. `build_performance_audio_menu.py` only generates files. Their edits,
-like those of the unwired top-level installers (editing keys, Mac Panel), reach the
+like those of the unwired top-level installers (editing keys), reach the
 checkpoint through edit acceptance below. Guard's own `repair --apply` restores the
 checkpoint and never replaces it.
 
@@ -777,9 +784,12 @@ and report identities. Recreate venvs rather than moving them.
   Uses the existing local socket (`btt_socket.js`), not Apple Events; read-only
   preview works from an agent shell when BTT's Command Line / Socket Server is
   enabled. Apply is always explicit. These top-level triggers are outside the Media
-  graph but watched by Guard; the installer does not checkpoint them itself, so edit
-  acceptance picks them up. Existing Guard drift must be reviewed separately; do not
-  accept it just to add Panel.
+  graph but watched by Guard; the installer requests a checkpoint itself when Guard
+  was healthy beforehand (see the wired paths above), else edit acceptance picks them
+  up. Existing Guard drift must be reviewed separately; do not accept it just to add
+  Panel. Retirement of the legacy item refuses any runtime or saved change made
+  since the verified apply (it compares the full runtime export to the one apply
+  verified), so a rerun is the way to retry.
 - `install_lighting_menu.py`: guarded installer for Media > Lighting, a 💡 submenu
   appended to the Media bar holding `<<`, a two-line Solder SW button (the Screen Cap
   button's label form) that runs `macbook/scripts/van_lighting.py toggle

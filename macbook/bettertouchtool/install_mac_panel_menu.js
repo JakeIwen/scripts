@@ -111,7 +111,8 @@ function applyPlan(socket, common, plan) {
         common.fingerprint(outsideOwned(plan.before, ids))) {
         throw new Error('Unexpected runtime changes outside Mac Panel.');
     }
-    return {writes: touched.length, touched};
+    // The verified post-apply export: retirement must find the runtime exactly like this.
+    return {writes: touched.length, touched, runtime: before};
 }
 
 // Deletes only the legacy item, and only while every desired item is already live.

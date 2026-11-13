@@ -139,6 +139,41 @@ test('retire deletes only the legacy item, and only once the new items are live'
     assert.deepEqual(env.unrelated, original);
 });
 
+function appliedWithLegacy() {
+    const env = setup();
+    env.state.items.push(legacyItem());
+    env.plan.before = clone(env.state.items);
+    const applied = env.run();
+    env.plan.before = applied.runtime;  // what Python carries into retirement
+    env.state.writes.length = 0;
+    return env;
+}
+
+test('retire refuses every edit made after the verified apply, and retires when unchanged', () => {
+    const edits = {
+        'a child added to the legacy item': state => {
+            state.items.find(item => item.BTTUUID === LEGACY).BTTAdditionalActions = [{BTTUUID: 'child'}];
+        },
+        'conditions added to the replacement': state => {
+            state.items.find(item => item.BTTUUID === desired[0].BTTUUID)
+                .BTTTriggerConditionsFormat = 'FALSEPREDICATE';
+        },
+        'scope changed on the replacement': state => {
+            state.items.find(item => item.BTTUUID === desired[0].BTTUUID).BTTAppBundleIdentifier = 'some.app';
+        },
+        'an unrelated edit during the saved-state wait': state => { state.items[0].concurrent = true; },
+    };
+    for (const [name, edit] of Object.entries(edits)) {
+        const env = appliedWithLegacy();
+        edit(env.state);
+        assert.throws(() => env.run('retire'), /changed since preview/, name);
+        assert.equal(env.state.writes.length, 0, name);
+        assert.ok(env.state.items.some(item => item.BTTUUID === LEGACY), name);
+    }
+    const env = appliedWithLegacy();
+    assert.deepEqual(env.run('retire').touched, [LEGACY]);
+});
+
 test('a failed delete leaves both items and a rerun converges with a delete only', () => {
     const env = setup({failDelete: true});
     env.state.items.push(legacyItem());

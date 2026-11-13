@@ -238,16 +238,42 @@ class InstallerTests(unittest.TestCase):
             events.append(mode)
             if mode == "inspect":
                 return runtime
-            return {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID]} if mode == "apply" else \
-                {"writes": 1, "touched": [panel.LEGACY_MENU_ID]}
+            return {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID], "runtime": ["verified"]} \
+                if mode == "apply" else {"writes": 1, "touched": [panel.LEGACY_MENU_ID]}
         def verify(database, plan, before, retired=False):
             events.append("saved-retired" if retired else "saved-new")
             return True
         result, after, _ = self.run_apply(rows, runtime, worker, verify)
-        self.assertEqual(events, ["inspect", "apply", "saved-new", "inspect", "retire", "saved-retired"])
+        # Saved state is rechecked right before the delete; no fresh runtime export is taken.
+        self.assertEqual(events, ["inspect", "apply", "saved-new", "saved-new", "retire", "saved-retired"])
         self.assertEqual(result["touched_uuids"], [panel.MENU_ID, panel.KEY_ID, panel.LEGACY_MENU_ID])
         after.assert_called_once_with({"fixture": True}, [panel.MENU_ID, panel.KEY_ID, panel.LEGACY_MENU_ID],
                                       "install_mac_panel_menu", wrote=True)
+
+    def test_retirement_baseline_is_the_verified_apply_runtime_and_saved_drift_blocks_it(self):
+        rows, runtime = PlanningTests.legacy_state(self)
+        plans = []
+        def worker(mode, path=None):
+            if mode == "inspect":
+                return runtime
+            return {"writes": 2, "touched": [panel.MENU_ID], "runtime": ["verified"]} if mode == "apply" \
+                else {"writes": 1, "touched": [panel.LEGACY_MENU_ID]}
+        def backup(database, plan, **kwargs):
+            plans.append(plan["before"])
+            return Path("/private/backup/backup.json")
+        self.run_apply(rows, runtime, worker, backup=backup)
+        self.assertEqual(plans[-1], ["verified"])  # never a fresh `inspect`
+        events = []
+        def tracking(mode, path=None):
+            events.append(mode)
+            return worker(mode, path)
+        calls = []
+        def verify(database, plan, before, retired=False):
+            calls.append(retired)
+            return len(calls) == 1  # saved on the first check, drifted by the recheck
+        with self.assertRaisesRegex(RuntimeError, "changed before retirement"):
+            self.run_apply(rows, runtime, tracking, verify)
+        self.assertNotIn("retire", events)
 
     def test_failed_add_never_reaches_the_retirement_or_the_checkpoint(self):
         rows, runtime = PlanningTests.legacy_state(self)
@@ -269,7 +295,8 @@ class InstallerTests(unittest.TestCase):
         def failing(mode, path=None):
             if mode == "retire":
                 raise RuntimeError("delete failed")
-            return runtime if mode == "inspect" else {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID]}
+            return runtime if mode == "inspect" else {"writes": 2, "touched": [panel.MENU_ID, panel.KEY_ID],
+                                                       "runtime": runtime}
         with self.assertRaisesRegex(RuntimeError, "delete failed"):
             self.run_apply(rows, runtime, failing)
         events = []
@@ -277,10 +304,10 @@ class InstallerTests(unittest.TestCase):
             events.append(mode)
             if mode == "inspect":
                 return both_runtime
-            return {"writes": 0, "touched": []} if mode == "apply" else \
+            return {"writes": 0, "touched": [], "runtime": both_runtime} if mode == "apply" else \
                 {"writes": 1, "touched": [panel.LEGACY_MENU_ID]}
         result, after, _ = self.run_apply(both_rows, both_runtime, rerun)
-        self.assertEqual(events, ["inspect", "apply", "inspect", "retire"])  # no re-add, only the delete
+        self.assertEqual(events, ["inspect", "apply", "retire"])  # no re-add, only the delete
         self.assertEqual(result["touched_uuids"], [panel.LEGACY_MENU_ID])
 
     def test_backup_failure_or_saved_race_never_invokes_mutation(self):

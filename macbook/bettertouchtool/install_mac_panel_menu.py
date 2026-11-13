@@ -271,10 +271,17 @@ def wait_saved(database, plan, before, retired=False):
         time.sleep(.25)
 
 
-def retire_legacy(database, plan, before):
-    """Delete the legacy 674 item, only after the new 681 item is verified in runtime and on disk."""
-    fresh = dict(plan, before=worker("inspect"))
-    path = backup_configuration(database, fresh, prefix="btt-mac-panel-retire-")
+def retire_legacy(database, plan, before, verified_runtime):
+    """Delete the legacy 674 item, only after the new 681 item is verified in runtime and on disk.
+
+    The baseline is the runtime apply verified, never a fresh export: edits made since
+    (a child on the legacy item, conditions on its replacement) must be refused, not adopted."""
+    # Saved state is rechecked right before deletion, for both owned UUIDs (children,
+    # conditions, scope); a still-pending save is not good enough here.
+    if not verify_saved(database, plan, before):
+        raise RuntimeError("Saved Mac Panel state changed before retirement; the legacy item stays.")
+    checked = dict(plan, before=verified_runtime)
+    path = backup_configuration(database, checked, prefix="btt-mac-panel-retire-")
     result = worker("retire", path)
     wait_saved(database, plan, before, retired=True)
     return result["touched"], path
@@ -296,7 +303,7 @@ def install(apply=False, no_checkpoint=False):
         wait_saved(database, plan, before)
         touched = list(result["touched"])
         if plan["legacy"]["present"]:
-            retired, path = retire_legacy(database, plan, before)
+            retired, path = retire_legacy(database, plan, before, result["runtime"])
             touched += retired
     except (RuntimeError, ValueError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
         raise RuntimeError(str(error) + " Backup: " + str(path.parent)) from error
