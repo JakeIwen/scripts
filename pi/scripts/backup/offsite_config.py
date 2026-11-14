@@ -164,7 +164,8 @@ LIVE_BOUNDARIES = {
 LIVE_DATA = (
     '/home/pi/secrets/', '/home/pi/hooks/', '/home/pi/backups/', '/home/pi/.ssh/',
     # Borg exclusion patterns and inputs named by backup_conf.sh.
-    '/home/pi/.codex', '/home/pi/build/', '/home/pi/dev/obd-things/tmp', '/home/pi/rsync-exclude-media.txt',
+    '/home/pi/.codex', '/home/pi/.local/share/claude/', '/home/pi/build/', '/home/pi/dev/obd-things/tmp',
+    '/home/pi/rsync-exclude-media.txt',
     '/etc/', '/var/lib/', '/run/', '/root/', '/mnt/',
 )
 INSTALLED_RESTIC = '/usr/local/bin/restic'

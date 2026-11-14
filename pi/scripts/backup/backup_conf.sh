@@ -63,6 +63,19 @@ BORG_EXCLUDES=(
   '/home/*/.local/share/Trash/*'
   '/var/lib/vanpi-network'
   '/var/log/openwrt'
+  # High-churn or reproducible data, trimmed to shrink nightly churn and the
+  # iCloud copy of the repository. obd-things' tmp/ is its ignored transient
+  # output (durable findings live in projects/*/findings). The journal, syslog
+  # and auth.log stay on the Pi; only post-restore forensics would lose them.
+  # The Codex and Claude installs are re-downloaded by their installers (a
+  # restored ~/.local/bin/claude or codex link dangles until then).
+  '/home/pi/dev/obd-things/tmp/*'
+  '/var/log/journal/*'
+  '/var/log/syslog*'
+  '/var/log/auth.log*'
+  '/home/pi/.codex/packages'
+  '/home/pi/.codex/logs_2.sqlite*'
+  '/home/pi/.local/share/claude/versions'
 )
 
 # state + notifications
