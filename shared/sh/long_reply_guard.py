@@ -195,7 +195,7 @@ def reason(event: dict, words: int, rows: int) -> str:
         f"then reply in one line saying which."
     )
     if claude:
-        armed = "+x or +handoff" if sys.platform == "darwin" else "+handoff"
+        armed = "+x or +ho" if sys.platform == "darwin" else "+ho"
         text += f" If you armed {armed} this turn, arm it again as your last tool call."
     return text
 
