@@ -13,12 +13,12 @@ if [ $# -gt 0 ]; then roots=("$@"); else roots=("$HOME/ais" "$HOME/dev"); fi
 # linux-test-lane VM rewrites a 40 GiB sparse disk image that every hourly
 # backup recopied (`linux-test-lane up` rebuilds it from pins.env); missing
 # paths are skipped. Photos' MediaAnalysis cache (rebuilt by mediaanalysisd)
-# and rtk's savings-stats history are rewritten whole on most backups.
+# and the model gateway's request logs are rewritten on most backups.
 fixed=(
   "$HOME/Downloads"
   "$HOME/.lima"
   "$HOME/Pictures/Photos Library.photoslibrary/private/com.apple.mediaanalysisd/MediaAnalysis"
-  "$HOME/Library/Application Support/rtk/history.db"
+  "$HOME/.claude/model-gateway/logs"
   "/Applications/Xcode-26.1.0.app"
   "/Applications/Xcode-26.6.0.app"
   "$HOME/Library/Application Support/Spotify/PersistentCache"
@@ -31,6 +31,21 @@ fixed=(
   "$HOME/.rbenv"
   "$HOME/.nvm"
 )
+
+# SQLite files rewritten every few minutes, so every hourly backup stored a
+# full fresh copy of each (~600 MB/hour, Nov 2026). Codex's thread history is
+# an index it builds from the rollout files in ~/.codex/sessions (it records a
+# byte offset per rollout), and those rollouts stay backed up. The rest are
+# logs, chart samples and a search index. Each database's -wal and -shm files
+# are excluded too; SQLite recreates them, which the hourly re-stamp covers.
+sqlite_dbs=(
+  "$HOME/.codex/thread_history_1.sqlite"
+  "$HOME/.codex/logs_2.sqlite"
+  "$HOME/.local/state/mac-panel/history.sqlite"
+  "$HOME/.local/share/llm-switchboard/transcript-search.sqlite3"
+  "$HOME/Library/Application Support/rtk/history.db"
+)
+for db in "${sqlite_dbs[@]}"; do fixed+=("$db" "$db-wal" "$db-shm"); done
 
 n=0
 while IFS= read -r -d '' d; do
