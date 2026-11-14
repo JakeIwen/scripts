@@ -273,6 +273,11 @@ class OffsiteTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'linux', 'kernel inherited-flock ownership requires Linux /proc fdinfo')
     def test_unlocked_descriptor_refuses_public_entry(self):
         import fcntl
+        # Warm the setup replay first: prepare() must still run the command, since the replay key sees
+        # files, not the lock this test releases.
+        warm = OffsiteFixture()
+        self.addCleanup(warm.close)
+        self.assertEqual(warm.prepare_replayed().returncode, 0)
         fcntl.flock(self.f.fd, fcntl.LOCK_UN)
         self.assert_no_erase(self.f.prepare(), 'does not hold')
 

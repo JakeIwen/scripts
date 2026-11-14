@@ -166,6 +166,9 @@ def high_descriptor(fd):
     return moved
 
 
+_RECORDED = {}
+
+
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -298,9 +301,109 @@ class OffsiteFixture:
             raise
         return subprocess.CompletedProcess(process.args, process.returncode, out, err)
 
+    PREPARE_ARGS = ('--priority', '10', '--erase-confirm', 'SERIAL123')
+
     def prepare(self):
-        return self.run('prepare-disk', '--device', str(self.link), '--label', self.label,
-                        '--priority', '10', '--erase-confirm', 'SERIAL123')
+        """Run prepare-disk for real: tests of its checks (descriptor, admission, refusals) need the process."""
+        return self.run('prepare-disk', '--device', str(self.link), '--label', self.label, *self.PREPARE_ARGS)
+
+    def prepare_replayed(self):
+        """prepare-disk as setup for other tests; replays an identical fixture's earlier run (see run_replayed).
+
+        The replay key covers files only, not held locks, so never use it where prepare-disk's own checks
+        are what the test is about.
+        """
+        return self.run_replayed('prepare-disk', '--device', str(self.link), '--label', self.label,
+                                 *self.PREPARE_ARGS)
+
+    def run_replayed(self, *args):
+        """`run`, but a successful command replays from a recording of an identical fixture's earlier run.
+
+        Only for setup steps whose effect is the files they leave: the replay does not start the command, so
+        it cannot show process behavior (locks, signals, env) and runs no code under test.
+        """
+        before = self.tree_snapshot()
+        key = self.replay_key(args, before)
+        recorded = _RECORDED.get(key)
+        if recorded:
+            return self.replay(recorded)
+        result = self.run(*args)
+        if result.returncode == 0:
+            _RECORDED[key] = self.record_delta(before, result)
+        return result
+
+    # A fresh fixture's prepare-disk costs about 35 command doubles (1.5 s) and every test pays it in setUp;
+    # a remote backup's key derivations cost seconds more.
+    # The key is the whole pre-run tree (config, fixture state, remote.json) plus the arguments, so a test
+    # that tweaked anything first misses the cache and runs the real command.
+    SNAPSHOT_SKIP = ('registry', 'legacy.lock', 'bin', 'live')
+
+    def tokens(self):
+        # Longest first: the unresolved temp path can be a suffix of the resolved one.
+        return ((str(self.root), '@ROOT@'), (str(self.registry.root), '@RAW@'))
+
+    def normalized(self, data):
+        text = data.decode(errors='surrogateescape')
+        for real, token in self.tokens():
+            text = text.replace(real, token)
+        return text
+
+    def restored(self, text):
+        for real, token in self.tokens():
+            text = text.replace(token, real)
+        return text.encode(errors='surrogateescape')
+
+    def tree_snapshot(self):
+        rows = {}
+        for directory, names, files in os.walk(self.root):
+            relative = Path(directory).relative_to(self.root)
+            if relative.parts[:1] and relative.parts[0] in self.SNAPSHOT_SKIP:
+                names[:] = []
+                continue
+            if relative == Path('.'):
+                names[:] = [name for name in names if name not in self.SNAPSHOT_SKIP]
+                files = [name for name in files if name not in self.SNAPSHOT_SKIP]
+            for name in [*names, *files]:
+                path = Path(directory, name)
+                key = str(path.relative_to(self.root))
+                info = path.lstat()
+                if path.is_symlink():
+                    rows[key] = ('link', 0, self.normalized(os.fsencode(os.readlink(path))))
+                elif path.is_dir():
+                    rows[key] = ('dir', info.st_mode & 0o7777, '')
+                else:
+                    rows[key] = ('file', info.st_mode & 0o7777, self.normalized(path.read_bytes()))
+        return rows
+
+    def replay_key(self, args, before):
+        # The environment is a function of the root (normalized away), so the tree and arguments decide.
+        return hashlib.sha256(json.dumps([type(self).__qualname__, [self.normalized(arg.encode()) for arg in args], before],
+                                         sort_keys=True).encode()).hexdigest()
+
+    def record_delta(self, before, result):
+        after = self.tree_snapshot()
+        changed = {key: row for key, row in after.items() if before.get(key) != row}
+        return {'changed': changed, 'removed': sorted(set(before) - set(after)),
+                'stdout': self.normalized(result.stdout.encode()), 'stderr': self.normalized(result.stderr.encode())}
+
+    def replay(self, recorded):
+        for key in sorted(recorded['removed'], reverse=True):
+            path = self.root / key
+            path.unlink() if path.is_symlink() or path.is_file() else shutil.rmtree(path)
+        for key, (kind, mode, content) in sorted(recorded['changed'].items()):
+            path = self.root / key
+            if kind == 'dir':
+                path.mkdir(exist_ok=True)
+            else:
+                path.unlink(missing_ok=True)
+                if kind == 'link':
+                    path.symlink_to(os.fsdecode(self.restored(content)))
+                    continue
+                path.write_bytes(self.restored(content))
+            if kind != 'link':
+                path.chmod(mode)
+        return subprocess.CompletedProcess(('replayed',), 0, self.restored(recorded['stdout']).decode(),
+                                           self.restored(recorded['stderr']).decode())
 
     def sources(self):
         self.reload()

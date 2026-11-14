@@ -105,7 +105,7 @@ class StateCompatibilityTests(unittest.TestCase):
     def fixture(self, kind=RemoteFixture):
         f = kind()
         self.addCleanup(f.close)
-        result = f.prepare()
+        result = f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         f.sources()
         return f

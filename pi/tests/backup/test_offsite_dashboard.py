@@ -16,7 +16,7 @@ class DashboardTests(unittest.TestCase):
         self.addCleanup(self.f.close)
 
     def ready(self):
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.f.sources()
 

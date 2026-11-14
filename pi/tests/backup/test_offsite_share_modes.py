@@ -244,7 +244,7 @@ class ShareFlowTests(unittest.TestCase):
         self.addCleanup(self.f.close)
 
     def ready(self):
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.path = self.f.cfg.mount_root / self.f.label / REPO_PATH
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o777)
@@ -445,7 +445,7 @@ with context:''')
     def test_remote_backup_and_check_do_not_share_local_files(self):
         remote = RemoteFixture()
         self.addCleanup(remote.close)
-        result = remote.prepare()
+        result = remote.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         remote.sources()
         path = remote.cfg.mount_root / remote.label / REPO_PATH / 'private-pack'

@@ -332,7 +332,7 @@ class SmbRepositoryTests(unittest.TestCase):
     def setUp(self):
         self.f = SmbFixture()
         self.addCleanup(self.f.close)
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.f.sources()
         self.environment = patch.dict(os.environ, self.f.env)
@@ -434,7 +434,7 @@ class SmbCliTests(unittest.TestCase):
     def fixture(self, password=SMB_PASSWORD):
         f = SmbFixture(password)
         self.addCleanup(f.close)
-        result = f.prepare()
+        result = f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         f.sources()
         return f

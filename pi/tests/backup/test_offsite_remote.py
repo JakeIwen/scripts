@@ -13,7 +13,7 @@ class RemoteTests(unittest.TestCase):
     def setUp(self):
         self.f = RemoteFixture()
         self.addCleanup(self.f.close)
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.f.sources()
 

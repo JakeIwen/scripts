@@ -271,7 +271,7 @@ class InitRemoteTests(unittest.TestCase):
     def setUp(self):
         self.f = SmbFixture()
         self.addCleanup(self.f.close)
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.environment = patch.dict(os.environ, self.f.env)
         self.environment.start()
@@ -402,7 +402,7 @@ class SharedFolderCliTests(unittest.TestCase):
     def setUp(self):
         self.f = SmbFixture()
         self.addCleanup(self.f.close)
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.f.sources()
 

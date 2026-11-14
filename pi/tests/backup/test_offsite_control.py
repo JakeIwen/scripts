@@ -18,7 +18,7 @@ class RemoteControlsTests(unittest.TestCase):
     def setUp(self):
         self.f = RemoteFixture()
         self.addCleanup(self.f.close)
-        result = self.f.prepare()
+        result = self.f.prepare_replayed()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.f.sources()
 
@@ -30,7 +30,8 @@ class RemoteControlsTests(unittest.TestCase):
         return self.f.run(action, '--remote', '--label', self.f.label, '--revision', revision)
 
     def seed_plan(self):
-        result = self.backup()
+        # Only the plan and history files this leaves matter to the tests, so an identical earlier run is replayed.
+        result = self.f.run_replayed('backup', '--remote', '--label', self.f.label, '--only', 'exfat512')
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
     def test_idle_hold_survives_new_process_and_does_not_start_work_or_signal_saved_pid(self):
