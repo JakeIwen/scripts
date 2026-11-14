@@ -8,8 +8,14 @@
 if [ $# -gt 0 ]; then roots=("$@"); else roots=("$HOME/ais" "$HOME/dev"); fi
 
 # reinstallable installs, caches and runtime output that churned the most
-# backup space in Oct 2026 (see the TM growth review); missing paths are skipped.
+# backup space in Oct 2026 (see the TM growth review), plus ~/Downloads (85 GB,
+# excluded at Jacob's request, Nov 2026) and ~/.lima, whose always-running
+# linux-test-lane VM rewrites a 40 GiB sparse disk image that every hourly
+# backup recopied (`linux-test-lane up` rebuilds it from pins.env); missing
+# paths are skipped.
 fixed=(
+  "$HOME/Downloads"
+  "$HOME/.lima"
   "/Applications/Xcode-26.1.0.app"
   "/Applications/Xcode-26.6.0.app"
   "$HOME/Library/Application Support/Spotify/PersistentCache"
