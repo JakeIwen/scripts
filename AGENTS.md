@@ -883,13 +883,14 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/claude-mods/term-highlight/` is a Claude Code mod that bolds the first
   mention of each term a reply's **Terms** block defines, by rewriting the
   `AssistantMessage` markdown before the engine draws it (the stored reply is
-  unchanged). Mac only, loaded from the checkout through `settings.json`
-  `env.CLAUDE_CODE_PLUGIN_DIRS`; the Pi has no copy.
+  unchanged). Loaded through `settings.json` `env.CLAUDE_CODE_PLUGIN_DIRS` on
+  both machines: from the checkout on the Mac, from the copy
+  `deploy_pi.zsh term-highlight` installs on the Pi (re-deploy after changes).
 - `shared/claude-mods/effort-shortcut/` is a Claude Code mod that adds
   `/e l|m|h|x|M`, `claudepm`'s effort letters, forwarding to the built-in
   `/effort` (which also saves the level as that model's default). The mod API
   has no effort setter, and `$.command.run` refuses calls from inside a hook,
-  so it runs on the next tick. Mac only, loaded like term-highlight.
+  so it runs on the next tick. Loaded on both machines like term-highlight.
 - `shared/claude-mods/agent-label/` is a Claude Code mod that puts the model
   and effort an agent runs at in front of its Agent call's description
   (`[sonnet 5.5 · high] Read the logs`), which the agent list under the prompt
