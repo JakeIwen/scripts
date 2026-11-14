@@ -62,6 +62,18 @@ class NtfyWarningTests(unittest.TestCase):
         self.assertEqual([(m["Title"], m["Priority"]) for m in WarningTopic.received],
                          [("healthy", "default")])
 
+    def test_topic_var_and_tags_select_another_topic(self):
+        self.secrets.write_text(
+            f"export NTFY_WARNING_URL='{self.url}'\nexport OTHER_URL='{self.url}-other'\n")
+        result = self.send("hi", "--title", "t", "--topic-var", "OTHER_URL", "--tags", "robot")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((WarningTopic.received[0]["path"], WarningTopic.received[0]["Tags"]),
+                         ("/private-topic-other", "robot"))
+        self.assertIsNone(send_warning("t", "m", secrets=self.secrets, topic_var="OTHER_URL"))
+        self.assertEqual(self.send("x", "--title", "t", "--topic-var", "MISSING_URL").returncode, 1)
+        self.assertEqual(self.send("x", "--title", "t", "--topic-var", "bad name").returncode, 2)
+        self.assertIsNotNone(send_warning("t", "m", secrets=self.secrets, topic_var="x; echo"))
+
     def test_unusable_url_is_refused_without_revealing_it(self):
         for url in ("ftp://127.0.0.1/topic", "http://user:pass@127.0.0.1/topic", ""):
             with self.subTest(url=url):
