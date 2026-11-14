@@ -194,8 +194,9 @@ def reason(event: dict, words: int, rows: int) -> str:
         f"explicitly asked for the answer there, or a script or parent agent reads it; "
         f"then reply in one line saying which."
     )
-    if claude and sys.platform == "darwin":
-        text += " If you armed +x this turn, arm it again as your last tool call."
+    if claude:
+        armed = "+x or +handoff" if sys.platform == "darwin" else "+handoff"
+        text += f" If you armed {armed} this turn, arm it again as your last tool call."
     return text
 
 
