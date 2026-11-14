@@ -1412,7 +1412,13 @@ extend that registry instead of adding per-test `sys.path` patches.
 - State lives in `<git common dir>/run_tests/` (`timings.json`,
   `passes.json`, `lock`): untracked and shared by all worktrees. Corrupt
   JSON is discarded; writes replace files atomically. The runner's CLI
-  regression tests are `tests/test_run_tests.py`.
+  regression tests are `tests/test_run_tests*.py`, split by topic so the pool
+  overlaps them, sharing `tests/run_tests_fixture.py`.
+- Wall time is set by the longest single test file, since the pool runs one
+  command per file. Keep each file under about 60 s at rest: wait on a
+  condition instead of a fixed sleep, share setup that's expensive and only
+  read, and split a long file into self-contained files that share a fixture
+  module (a name not starting with `test_`, so it is not discovered).
 - Selection: `--path PREFIX` (repeatable) runs only tests under those
   repository paths and `--exclude-path PREFIX` drops some; both match whole
   path components, a prefix that matches no repository path is an error, and
