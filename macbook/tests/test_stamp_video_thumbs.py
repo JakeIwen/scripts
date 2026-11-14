@@ -58,15 +58,20 @@ class StampVideoThumbTests(unittest.TestCase):
         cls.build_tmp = tempfile.TemporaryDirectory(prefix="stamp-icon-tests-")
         cls.addClassCleanup(cls.build_tmp.cleanup)
         cls.build = Path(cls.build_tmp.name)
+        # A cold clang module cache costs most of the compile time (about 75 s of 80 under load), so
+        # keep it across runs; swiftc locks it and invalidates it when the toolchain changes.
+        cls.modules = Path(tempfile.gettempdir()) / f"stamp-icon-tests-modules-{os.getuid()}"
         cls.source = SCRIPT.read_text()
         cls.swift = cls.source.split("<<'EOF'\n", 1)[1].split("\nEOF\n", 1)[0] + "\n"
         source_path = cls.build / "stampicon.swift"
         source_path.write_text(cls.swift)
         cls.helper = cls.build / "stampicon"
-        subprocess.run([
-            "/usr/bin/swiftc", "-O", "-module-cache-path", str(cls.build / "modules"),
+        # The two swiftc builds are independent and dominate setup, so they compile side by side.
+        helper_build = subprocess.Popen([
+            "/usr/bin/swiftc", "-Onone", "-module-cache-path", str(cls.modules),
             "-o", str(cls.helper), str(source_path),
-        ], check=True, capture_output=True, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        cls.addClassCleanup(helper_build.kill)
         # Exercise the actual comparison functions with image fixtures, without
         # relying on the test runner's access to the logged-in icon service.
         compare_source = cls.build / "compare.swift"
@@ -99,9 +104,12 @@ do {
 ''')
         cls.comparator = cls.build / "compare"
         subprocess.run([
-            "/usr/bin/swiftc", "-O", "-module-cache-path", str(cls.build / "modules"),
+            "/usr/bin/swiftc", "-Onone", "-module-cache-path", str(cls.modules),
             "-o", str(cls.comparator), str(compare_source),
         ], check=True, capture_output=True, text=True)
+        output, _ = helper_build.communicate()
+        if helper_build.returncode:
+            raise subprocess.CalledProcessError(helper_build.returncode, "swiftc stampicon", output)
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="stamp-icon-fixtures-")
