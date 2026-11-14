@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 from macbook.linux_test_lane import cli, lima, sync
 from macbook.linux_test_lane.pins import PINS_FILE, parse_pins, read_pins
-from tests.test_run_tests import RunnerCase
+from tests.run_tests_fixture import RunnerCase
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / 'macbook/linux_test_lane/linux-test-lane'
