@@ -38,6 +38,38 @@ ccq=881
 target_ssid=real-network
 """
 
+def _iw_info(ifname, ssid, mode="AP", txpower="28.00"):
+    ssid_line = f"\tssid {ssid}\n" if ssid else ""
+    return (
+        f"Interface {ifname}\n\tifindex 13\n{ssid_line}\ttype {mode}\n"
+        f"\tchannel 1 (2412 MHz), width: 40 MHz\n\ttxpower {txpower} dBm\n"
+        "\tmulticast TXQ:\n\t\tqsz-byt\tqsz-pkt\n\t\t0\t0\n"
+    )
+
+
+def _clients(count):
+    entries = ",".join(
+        '"aa:bb:cc:00:00:%02x":{"auth":true,"assoc":true,"authorized":true}' % n
+        for n in range(count)
+    )
+    return '{"freq":2412,"clients":{%s}}\n' % entries
+
+
+def _ap(ifname, iw, clients=""):
+    return f"__VAN_DASH_AP__={ifname}\n{iw}OBJECT hostapd.{ifname}\n{clients}"
+
+
+def _radios(*blocks):
+    return "__VAN_DASH_RADIOS_BEGIN__\n" + "".join(blocks) + "__VAN_DASH_RADIOS_END__\n"
+
+
+NORMAL_RADIOS = _radios(
+    "__VAN_DASH_RADIO__=radio0|2g|true\n",
+    _ap("wl0-ap0", _iw_info("wl0-ap0", "van"), _clients(3)),
+    "__VAN_DASH_RADIO__=radio1|5g|true\n",
+    _ap("wl1-ap0", _iw_info("wl1-ap0", "van", txpower="27.00"), _clients(1)),
+)
+
 WAN_TRAFFIC_SAMPLE = """__VAN_DASH_WAN_STATUS__=wan={"up":true,"l3_device":"wan","device":"wan"}
 __VAN_DASH_WAN_STATUS__=clientwan={"up":false,"pending":true,"device":"wl1-sta0","data":{}}
 __VAN_DASH_WAN_STATUS__=lifiwan=
@@ -240,6 +272,95 @@ class ConnectivityParserTests(unittest.TestCase):
         self.assertFalse(status["ubnt"]["connected"])
         self.assertEqual(len(calls), 3)
         self.assertFalse(any("scan" in " ".join(call).lower() for call in calls))
+
+    def test_radios_report_each_band_with_clients_and_power(self):
+        radios = connectivity.parse_router_radios(MWAN_SAMPLE + NORMAL_RADIOS)
+        self.assertEqual(
+            radios,
+            [
+                {"radio": "radio0", "band": "2.4 GHz", "up": True, "broadcasting": True,
+                 "txpower_dbm": 28.0, "clients": 3, "interfaces": ["wl0-ap0"]},
+                {"radio": "radio1", "band": "5 GHz", "up": True, "broadcasting": True,
+                 "txpower_dbm": 27.0, "clients": 1, "interfaces": ["wl1-ap0"]},
+            ],
+        )
+
+    def test_beacon_stuck_ap_is_not_broadcasting(self):
+        output = _radios(
+            "__VAN_DASH_RADIO__=radio0|2g|true\n",
+            _ap("wl0-ap0", _iw_info("wl0-ap0", None), _clients(0)),
+        )
+        (radio,) = connectivity.parse_router_radios(output)
+        self.assertTrue(radio["up"])
+        self.assertFalse(radio["broadcasting"])
+        self.assertEqual(radio["txpower_dbm"], 28.0)
+
+    def test_radio_that_is_down_has_no_interfaces(self):
+        output = _radios("__VAN_DASH_RADIO__=radio1|5g|false\n")
+        (radio,) = connectivity.parse_router_radios(output)
+        self.assertEqual(
+            (radio["up"], radio["broadcasting"], radio["txpower_dbm"], radio["clients"], radio["interfaces"]),
+            (False, False, None, 0, []),
+        )
+
+    def test_station_interface_is_not_counted_as_an_ap(self):
+        # The router's script only lists mode=ap interfaces; a station that
+        # slipped in would show up as a second block, so check the real shape.
+        output = _radios(
+            "__VAN_DASH_RADIO__=radio1|5g|true\n",
+            _ap("wl1-ap0", _iw_info("wl1-ap0", "van"), _clients(2)),
+        )
+        (radio,) = connectivity.parse_router_radios(output)
+        self.assertEqual(radio["interfaces"], ["wl1-ap0"])
+        self.assertEqual(radio["clients"], 2)
+        self.assertIn("config.mode='ap'", connectivity.ROUTER_RADIO_STATUS_SCRIPT)
+
+    def test_zero_dbm_txpower_is_a_number(self):
+        output = _radios(
+            "__VAN_DASH_RADIO__=radio0|2g|true\n",
+            _ap("wl0-ap0", _iw_info("wl0-ap0", "van", txpower="0.00"), _clients(0)),
+        )
+        self.assertEqual(connectivity.parse_router_radios(output)[0]["txpower_dbm"], 0.0)
+
+    def test_unreadable_hostapd_makes_clients_unknown(self):
+        output = _radios(
+            "__VAN_DASH_RADIO__=radio0|2g|true\n",
+            _ap("wl0-ap0", _iw_info("wl0-ap0", "van"), ""),
+        )
+        self.assertIsNone(connectivity.parse_router_radios(output)[0]["clients"])
+
+    def test_missing_or_garbled_radio_section_is_unknown(self):
+        garbled = (
+            NORMAL_RADIOS.replace("radio0|2g|true", "radio0|2g|"),
+            NORMAL_RADIOS.replace("__VAN_DASH_RADIOS_END__\n", ""),
+            NORMAL_RADIOS.replace("radio0|2g", "radio0|9g"),
+            _radios("junk\n"),
+            "",
+        )
+        for output in garbled:
+            with self.subTest(output=output[:60]):
+                self.assertIsNone(connectivity.parse_router_radios(output))
+
+    def test_collector_keeps_mwan_state_when_radio_section_is_missing(self):
+        def command(args, timeout):
+            return SimpleNamespace(returncode=0, stdout=MWAN_SAMPLE, stderr="")
+
+        router, online = connectivity.collect_router(command)
+        self.assertIsNone(router["radios"])
+        self.assertEqual(router["mode"], "clientwan")
+        self.assertTrue(online)
+
+    def test_collector_reports_radios_from_the_same_ssh_call(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append(args)
+            return SimpleNamespace(returncode=0, stdout=MWAN_SAMPLE + NORMAL_RADIOS, stderr="")
+
+        router, online = connectivity.collect_router(command)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([r["band"] for r in router["radios"]], ["2.4 GHz", "5 GHz"])
+        self.assertTrue(online)
 
     def test_unreachable_ubnt_skips_radio_ssh(self):
         calls = []

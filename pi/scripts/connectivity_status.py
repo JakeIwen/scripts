@@ -31,6 +31,29 @@ PING = os.environ.get("CONNECTIVITY_PING", "/usr/bin/ping")
 STARLINK_SSID = "denlink"
 
 MWAN_PRIORITY = ("clientwan", "lifiwan", "wan")
+ROUTER_RADIOS = ("radio0", "radio1")
+# Per-radio AP state for the same ssh call as the mwan command. Every command is
+# guarded so a failure here never changes the mwan output; the END marker lets
+# the parser tell a complete section from a truncated one. `iw ... info` shows
+# an `ssid` line only while the AP is really beaconing (hostapd can say ENABLED
+# with the beacon stuck), and station interfaces are left out by config.mode.
+ROUTER_RADIO_STATUS_SCRIPT = (
+    "printf '__VAN_DASH_RADIOS_BEGIN__\\n'; "
+    "ws=$(/bin/ubus -S call network.wireless status 2>/dev/null || true); "
+    f"for radio in {' '.join(ROUTER_RADIOS)}; do "
+    "band=$(/sbin/uci -q get wireless.$radio.band 2>/dev/null || true); "
+    '[ -n "$band" ] || continue; '
+    "printf '__VAN_DASH_RADIO__=%s|%s|%s\\n' \"$radio\" \"$band\" "
+    '"$(printf \'%s\\n\' "$ws" | /usr/bin/jsonfilter -e "@.$radio.up" 2>/dev/null)"; '
+    "for ifname in $(printf '%s\\n' \"$ws\" | /usr/bin/jsonfilter "
+    "-e \"@.$radio.interfaces[@.config.mode='ap'].ifname\" 2>/dev/null); do "
+    "printf '__VAN_DASH_AP__=%s\\n' \"$ifname\"; "
+    '/usr/sbin/iw dev "$ifname" info 2>/dev/null || true; '
+    "printf 'OBJECT hostapd.%s\\n' \"$ifname\"; "
+    '/bin/ubus -S call "hostapd.$ifname" get_clients 2>/dev/null || true; '
+    "done; done; "
+    "printf '__VAN_DASH_RADIOS_END__\\n'; "
+)
 MWAN_STATUS_COMMAND = (
     "printf '__VAN_DASH_DEFAULT_POLICY__='; "
     "/sbin/uci -q get mwan3.default_rule_v4.use_policy; "
@@ -46,7 +69,8 @@ MWAN_STATUS_COMMAND = (
     "printf '__VAN_DASH_UPTIME__='; /bin/cat /proc/uptime; "
     # LAN bridge members, for traffic switched between van devices.
     "printf '__VAN_DASH_BRIDGE_PORTS__=%s\\n' \"$(echo /sys/class/net/br-lan/brif/*)\"; "
-    "/bin/sed 's/^/__VAN_DASH_NETDEV__=/' /proc/net/dev; true"
+    "/bin/sed 's/^/__VAN_DASH_NETDEV__=/' /proc/net/dev; "
+    f"{ROUTER_RADIO_STATUS_SCRIPT}true"
 )
 WAN_STATUS_LINE = re.compile(
     rf"^__VAN_DASH_WAN_STATUS__=({'|'.join(MWAN_PRIORITY)})=(.*)$", re.MULTILINE
@@ -57,7 +81,7 @@ ROUTER_UPTIME_LINE = re.compile(
 BRIDGE_PORTS_LINE = re.compile(r"^__VAN_DASH_BRIDGE_PORTS__=(.*)$", re.MULTILINE)
 LAN_BRIDGE = "br-lan"
 NETDEV_LINE = re.compile(r"^__VAN_DASH_NETDEV__=\s*([^:\s]+):(.*)$", re.MULTILINE)
-ROUTER_CLIENTS_COMMAND = r"""
+ROUTER_CLIENTS_COMMAND = rf"""
 printf '__VAN_DASH_LEASES__\n'
 /bin/cat /tmp/dhcp.leases 2>/dev/null || true
 printf '__VAN_DASH_NEIGHBORS__\n'
@@ -72,7 +96,7 @@ for object in $(/bin/ubus -S list 'hostapd.*' 2>/dev/null); do
 done
 printf '__VAN_DASH_RADIOS__\n'
 wireless_status=$(/bin/ubus -S call network.wireless status 2>/dev/null || true)
-for radio in radio0 radio1; do
+for radio in {' '.join(ROUTER_RADIOS)}; do
   band=$(/sbin/uci -q get "wireless.$radio.band" 2>/dev/null || true)
   [ -n "$band" ] || continue
   printf '%s\n' "$wireless_status" \
@@ -469,6 +493,83 @@ def parse_radio_interfaces(output):
     return interfaces
 
 
+RADIOS_SECTION = re.compile(
+    r"^__VAN_DASH_RADIOS_BEGIN__$(.*?)^__VAN_DASH_RADIOS_END__$",
+    re.MULTILINE | re.DOTALL,
+)
+RADIO_HEADER = re.compile(r"^__VAN_DASH_RADIO__=(.*)$")
+AP_HEADER = re.compile(r"^__VAN_DASH_AP__=(.*)$")
+IW_SSID_LINE = re.compile(r"^\s*ssid\b", re.MULTILINE)
+IW_TXPOWER_LINE = re.compile(
+    r"^\s*txpower\s+(-?\d+(?:\.\d+)?)\s+dBm", re.MULTILINE
+)
+
+
+def _parse_ap_block(text):
+    """One AP interface: `iw dev info` text, then its hostapd get_clients."""
+    iw_text, _, hostapd_text = text.partition("OBJECT ")
+    payload = hostapd_text.partition("\n")[2]
+    try:
+        readable = isinstance(json.loads(payload), dict)
+    except ValueError:
+        readable = False
+    power = IW_TXPOWER_LINE.search(iw_text)
+    return {
+        "broadcasting": bool(IW_SSID_LINE.search(iw_text)),
+        "txpower_dbm": float(power.group(1)) if power else None,
+        "clients": (
+            len(parse_hostapd_clients("OBJECT " + hostapd_text)) if readable else None
+        ),
+    }
+
+
+def _radio_entry(header, ap_blocks):
+    fields = header.split("|")
+    if len(fields) != 3:
+        return None
+    radio, raw_band, up = fields
+    band = RADIO_BANDS.get(raw_band)
+    if band is None or not RADIO_NAME.fullmatch(radio) or up not in ("true", "false"):
+        return None
+    aps = []
+    for ifname, text in ap_blocks:
+        if not WIRELESS_INTERFACE.fullmatch(ifname):
+            return None
+        aps.append((ifname, _parse_ap_block(text)))
+    lit = next((ap for _, ap in aps if ap["broadcasting"]), None)
+    shown = lit or (aps[0][1] if aps else None)
+    counts = [ap["clients"] for _, ap in aps]
+    return {
+        "radio": radio,
+        "band": band,
+        "up": up == "true",
+        "broadcasting": lit is not None,
+        "txpower_dbm": shown["txpower_dbm"] if shown else None,
+        "clients": None if None in counts else sum(counts),
+        "interfaces": [ifname for ifname, _ in aps],
+    }
+
+
+def parse_router_radios(output):
+    """Per-radio AP broadcast state, or None when the section is missing or garbled."""
+    match = RADIOS_SECTION.search(output)
+    if not match:
+        return None
+    groups = []  # [header, [[ifname, text], ...]] per radio
+    for line in match.group(1).splitlines(keepends=True):
+        text = line.rstrip("\n")
+        if radio_line := RADIO_HEADER.match(text):
+            groups.append([radio_line.group(1), []])
+        elif (ap_line := AP_HEADER.match(text)) and groups:
+            groups[-1][1].append([ap_line.group(1), ""])
+        elif groups and groups[-1][1]:
+            groups[-1][1][-1][1] += line
+        elif line.strip():
+            return None
+    radios = [_radio_entry(header, blocks) for header, blocks in groups]
+    return None if None in radios else radios
+
+
 def parse_router_clients(output, checked_at):
     sections = split_client_sections(output)
     leases = parse_dhcp_leases(sections.get("leases", ""))
@@ -660,6 +761,7 @@ def collect_router(command):
         "default_policy": None,
         "route_members": [],
         "wan_traffic": None,
+        "radios": None,
         "error": None,
     }
     internet_online = None
@@ -683,6 +785,7 @@ def collect_router(command):
                 parse_mwan3_default_route(result.stdout)
             )
             router["wan_traffic"] = parse_wan_traffic(result.stdout)
+            router["radios"] = parse_router_radios(result.stdout)
             if router["interfaces"]:
                 internet_online = selected_route_health(router)
             else:
