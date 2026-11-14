@@ -8,6 +8,9 @@ mkdir -p "$test_root/bin" "$test_root/profiles" "$test_root/config" "$test_root/
 for command_name in iwlist iwgetid mca-status ip ping softrestart cfgmtd; do
     ln -s "$script_dir/mock_command.sh" "$test_root/bin/$command_name"
 done
+ln -s "$script_dir/fixtures/fast_sleep.sh" "$test_root/bin/sleep"
+PATH="$test_root/bin:$PATH"
+export PATH
 export UBNT_PROFILE_DIR="$test_root/profiles" UBNT_CONFIG_DIR="$test_root/config"
 export UBNT_STATE_DIR="$test_root/state" UBNT_SYSTEM_CFG="$test_root/system.cfg"
 export UBNT_LOG_FILE="$test_root/manager.log" UBNT_UPTIME_FILE="$test_root/uptime"

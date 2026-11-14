@@ -64,8 +64,14 @@ setup_case() {
         "$DEVICE_ROOT/tmp" "$DEVICE_ROOT/var/log" "$DEVICE_ROOT/proc/sys/kernel" \
         "$DEVICE_ROOT/dev" "$DEVICE_ROOT/flash" "$DEVICE_ROOT/state" \
         "$TRANSPORT_BIN" "$REMOTE_BIN" "$LOCAL_TMP"
-    /bin/cp -R "$ubnt_root/." "$WORK_UBNT/"
-    /bin/rm -rf "$WORK_UBNT/private-backups" "$WORK_UBNT/persistent/profiles"
+    # private-backups holds ~1800 ignored device dumps the deployment never
+    # reads; copying it per case dominated this suite's runtime.
+    for entry in "$ubnt_root"/* "$ubnt_root"/.[!.]*; do
+        [ -e "$entry" ] || continue
+        [ "${entry##*/}" = private-backups ] && continue
+        /bin/cp -R "$entry" "$WORK_UBNT/"
+    done
+    /bin/rm -rf "$WORK_UBNT/persistent/profiles"
 
     for command in ssh scp date mktemp; do
         ln -s "$transport_helper" "$TRANSPORT_BIN/$command"
@@ -458,12 +464,52 @@ case_existing_pause() {
     assert_cron_restarted
 }
 
+# Cases share nothing but suite_root (each gets its own CASE_ROOT, fake device
+# and exported FAKE_* environment inside its own subshell), so they run side by
+# side; per-case time is process spawns, which parallelise well.
+max_parallel=${UBNT_TEST_JOBS:-6}
+case_pids=
+case_names=
+case_launched=0
+case_failed=0
+
+reap_oldest_case() {
+    pid=${case_pids%% *}
+    name=${case_names%% *}
+    case_pids=${case_pids#"$pid"}
+    case_pids=${case_pids# }
+    case_names=${case_names#"$name"}
+    case_names=${case_names# }
+    if wait "$pid"; then
+        case_count=$((case_count + 1))
+    else
+        case_failed=1
+        /bin/cat "$suite_root/$name.log" >&2
+    fi
+}
+
 run_case() {
-    current_case=$1
+    label=$1
     test_function=$2
-    setup_case "$current_case"
-    "$test_function"
-    case_count=$((case_count + 1))
+    while [ "$case_launched" -ge "$max_parallel" ]; do
+        reap_oldest_case
+        case_launched=$((case_launched - 1))
+    done
+    (
+        current_case=$label
+        setup_case "$label"
+        "$test_function"
+    ) > "$suite_root/$label.log" 2>&1 &
+    case_pids="${case_pids:+$case_pids }$!"
+    case_names="${case_names:+$case_names }$label"
+    case_launched=$((case_launched + 1))
+}
+
+wait_for_cases() {
+    while [ -n "$case_pids" ]; do
+        reap_oldest_case
+    done
+    [ "$case_failed" -eq 0 ] || exit 1
 }
 
 /bin/bash -n "$ubnt_root/scp_to_device.sh"
@@ -498,4 +544,5 @@ run_case ambiguous-readback case_ambiguous_readback
 run_case invalid-limits case_invalid_limits
 run_case existing-pause case_existing_pause
 
+wait_for_cases
 printf 'deployment: %s cases ok\n' "$case_count"

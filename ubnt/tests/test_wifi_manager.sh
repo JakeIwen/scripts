@@ -17,6 +17,9 @@ fi
 for command_name in iwlist iwgetid mca-status ip ping softrestart cfgmtd; do
     ln -s "$script_dir/mock_command.sh" "$test_root/bin/$command_name"
 done
+ln -s "$script_dir/fixtures/fast_sleep.sh" "$test_root/bin/sleep"
+PATH="$test_root/bin:$PATH"
+export PATH
 ln -s "$script_dir/../persistent/scripts/ensure_ssh_keys.sh" \
     "$test_root/bin/ensure_ssh_keys"
 
