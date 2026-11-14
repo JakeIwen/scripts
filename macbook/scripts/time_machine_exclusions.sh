@@ -12,10 +12,13 @@ if [ $# -gt 0 ]; then roots=("$@"); else roots=("$HOME/ais" "$HOME/dev"); fi
 # excluded at Jacob's request, Nov 2026) and ~/.lima, whose always-running
 # linux-test-lane VM rewrites a 40 GiB sparse disk image that every hourly
 # backup recopied (`linux-test-lane up` rebuilds it from pins.env); missing
-# paths are skipped.
+# paths are skipped. Photos' MediaAnalysis cache (rebuilt by mediaanalysisd)
+# and rtk's savings-stats history are rewritten whole on most backups.
 fixed=(
   "$HOME/Downloads"
   "$HOME/.lima"
+  "$HOME/Pictures/Photos Library.photoslibrary/private/com.apple.mediaanalysisd/MediaAnalysis"
+  "$HOME/Library/Application Support/rtk/history.db"
   "/Applications/Xcode-26.1.0.app"
   "/Applications/Xcode-26.6.0.app"
   "$HOME/Library/Application Support/Spotify/PersistentCache"
