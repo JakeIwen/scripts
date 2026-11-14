@@ -184,7 +184,32 @@ past time for the next check). `run-now JOB` makes one immediate attempt through
 the same environment, timeout, accounting, log and success-purge path as the
 checker. It sends no failure alert because its caller receives the status and
 can inspect `last.log`; it exits 0 after success, 3 after a completed failed
-attempt, 75 when the checker lock is busy, 1 for another error and 2 for usage.
+attempt, 4 when the job reported not ready (below), 75 when the checker lock is
+busy, 1 for another error and 2 for usage.
+
+Not ready yet: a job whose `run` exits 75 (EX_TEMPFAIL) is saying its condition
+is not met. The checker logs `not ready <id>`, spends no attempt, sends no alert
+and leaves the job pending with its due time, so the next hourly check retries.
+That cannot go on forever: `add --give-up DUE` (same DUE syntax; default the due
+time plus 7 days) sets the time after which a 75 counts as an ordinary failure
+(attempt spent, alert as usual). `reschedule` resets the window to the default.
+Records written before `give_up` existed lack the key and get the default.
+
+Agent follow-ups: `deferred.zsh add-agent [--ready CMD] [--model M] [--effort E]
+[--topic-var VAR] [--cwd DIR] [--attempts N] [--timeout S] [--give-up DUE] DUE NAME
+PROMPT_FILE [DESCRIPTION]` queues a job (run script `scripts/deferred_agent_run.zsh`,
+copied into the job with the prompt) that, once due, runs `--ready CMD` with
+`/bin/zsh -c` (nonzero means not ready, exit 75), then runs
+`claude -p --output-format json --permission-mode bypassPermissions` in `--cwd`
+(default: where you ran `add-agent`; model `haiku`, effort `medium`) with the
+prompt behind a fixed preamble (headless, at most 4 short lines starting `OK` or
+`NEEDS LOOK`, no ntfy of its own). On success it sends one ntfy titled NAME to the
+topic in `--topic-var` (default `NTFY_MACBOOK_URL`, from the same secrets file as
+`NTFY_WARNING_URL`) with the result (about 600 characters) and
+`Open it: cd <cwd> && claude --resume <session_id>`. A nonzero claude exit or
+`is_error` is an ordinary failure (the usual warning, no result ntfy); a finished
+session that could not be reported is not rerun on retry. Example:
+`deferred.zsh add-agent --ready 'test -e /tmp/build.done' +1d check-build prompt.md`.
 
 Each job is a private directory under `~/.agent/deferred/jobs/`. The LaunchAgent
 `com.jacobr.deferred-jobs` (installed by `deferred.zsh install`) runs due jobs

@@ -362,7 +362,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/deferred.zsh` owns one-off future jobs on the Mac (queue,
   hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
-  instead of writing a LaunchAgent per job. Usage is in `macbook/README.md`.
+  instead of writing a LaunchAgent per job; a run exiting 75 means "not ready"
+  (no attempt, no alert, retried until `give_up`, default due+7d; `run-now`
+  reports it as 4), and `add-agent` queues a headless Claude follow-up from
+  `macbook/scripts/deferred_agent_run.zsh` that ntfys the result and a resume
+  command. Usage is in `macbook/README.md`.
   Its `list --json`, `retry`, `run-now` and `reschedule` serve the Mac Panel;
   every mutation (and `cancel`) takes the checker's own flock and exits 75 when
   it is busy, and `run-now` never sends a failure alert.
@@ -438,7 +442,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `~/.local/state/amphetamine-control/`. Enabling starts a keep-awake session;
   disabling auto-lock leaves an existing keep-awake session running.
   `macbook/scripts/ntfy_warning.py` is the one sender for `NTFY_WARNING_URL`
-  warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
+  warnings and, through `--topic-var`/`topic_var`, other topic variables such as
+  `NTFY_MACBOOK_URL` (sourced privately from `pi/secrets/.bash_variables`, never in argv
   or logs): btt_guard imports `send_warning`, deferred.zsh runs it with the
   message on stdin. Reuse it rather than reading the URL again.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,

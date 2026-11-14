@@ -3,7 +3,9 @@
 # Each job is a private directory under $root/jobs holding an executable `run`,
 # a `job` record (see job_keys) and any material the job needs; a successful
 # run deletes the whole directory, and a failure keeps it and sends an ntfy
-# warning. The LaunchAgent com.jacobr.deferred-jobs calls `run-due` hourly and
+# warning. A run exiting 75 (EX_TEMPFAIL) means "condition not met yet": it
+# spends no attempt and sends no alert, and the next check retries, until the
+# job's give-up time, after which 75 is an ordinary failure. The LaunchAgent com.jacobr.deferred-jobs calls `run-due` hourly and
 # at login; the user crontab calls `watchdog` daily, so a checker that stopped
 # running still produces a warning. Job output never goes into a warning.
 set -eu -o pipefail
@@ -31,17 +33,25 @@ stamp_format=%Y-%m-%dT%H:%M
 default_attempts=3
 default_timeout=900
 lock_wait=${DEFERRED_LOCK_WAIT:-10}
-# Every job record defines exactly these keys; `state` is pending or failed.
+# Every job record defines these keys; `state` is pending or failed. `give_up`
+# is optional (records written before it existed lack it): empty means due + 7d.
 job_keys=(name due description created origin attempts max_attempts timeout state)
+not_ready_status=75     # a job's own "condition not met yet" exit status
+run_now_not_ready=4     # run-now's exit status for it (75 there means the lock is busy)
+default_give_up_seconds=$(( 7 * 86400 ))
+agent_template=$repo/macbook/scripts/deferred_agent_run.zsh
 typeset -A job          # the record load_job last read
-typeset run_job_status=0
+typeset run_job_status=0 run_job_not_ready=0
 
 usage() {
-  print -u2 -- "usage: ${script:t} add [--attempts N] [--timeout SECONDS] [--file PATH]... DUE NAME SCRIPT [DESCRIPTION]
+  print -u2 -- "usage: ${script:t} add [--attempts N] [--timeout SECONDS] [--give-up DUE] [--file PATH]... DUE NAME SCRIPT [DESCRIPTION]
+       ${script:t} add-agent [--ready CMD] [--model M] [--effort E] [--topic-var VAR] [--cwd DIR]
+                  [--attempts N] [--timeout SECONDS] [--give-up DUE] DUE NAME PROMPT_FILE [DESCRIPTION]
        ${script:t} list [--json]
        ${script:t} cancel JOB | retry JOB | run-now JOB | reschedule JOB DUE
        ${script:t} status | run-due | watchdog | install | uninstall
-DUE is YYYY-MM-DD, 'YYYY-MM-DD HH:MM' (local time), +Nd or +Nh."
+DUE is YYYY-MM-DD, 'YYYY-MM-DD HH:MM' (local time), +Nd or +Nh.
+A job exiting $not_ready_status means not ready yet (no attempt spent, no alert) until --give-up (default DUE+7d)."
   exit 2
 }
 
@@ -55,12 +65,22 @@ load_job() {  # DIR: fills $job from DIR/job; fails unless every job_keys entry 
       [[ $line == ?*=* ]] && job[${line%%=*}]=${line#*=}
     done } 2>/dev/null < $1/job || return 1
   for key in $job_keys; do (( ${+job[$key]} )) || return 1; done
+  (( ${+job[give_up]} )) || job[give_up]=
+}
+
+give_up_stamp() {  # prints the time after which a not-ready exit counts as a failure
+  [[ -z $job[give_up] ]] || { print -r -- $job[give_up]; return }
+  local epoch out
+  strftime -r -s epoch $stamp_format $job[due]
+  strftime -s out $stamp_format $(( epoch + default_give_up_seconds ))
+  print -r -- $out
 }
 
 save_job() {  # DIR: rewrites DIR/job from $job atomically
   local key
   local -a lines
   for key in $job_keys; do lines+=("$key=$job[$key]"); done
+  [[ -z ${job[give_up]-} ]] || lines+=("give_up=$job[give_up]")
   print -rl -- $lines > $1/job.tmp
   /bin/mv -f -- $1/job.tmp $1/job
 }
@@ -124,12 +144,13 @@ checker_stale() {  # true when the checker has not run within stale_after
 }
 
 cmd_add() {
-  local attempts=$default_attempts timeout=$default_timeout file
+  local attempts=$default_attempts timeout=$default_timeout file give_up=
   local -a files
   while [[ ${1-} == --* ]]; do
     case $1 in
       --attempts) [[ ${2-} == <1-> ]] || die "--attempts needs a positive number"; attempts=$2; shift 2 ;;
       --timeout) [[ ${2-} == <1-> ]] || die "--timeout needs seconds"; timeout=$2; shift 2 ;;
+      --give-up) give_up=$(normalize_due ${2-}) || die "invalid --give-up time: ${2-}"; shift 2 ;;
       --file) [[ -f ${2-} ]] || die "--file needs an existing file"; files+=(${2:A}); shift 2 ;;
       *) usage ;;
     esac
@@ -138,6 +159,7 @@ cmd_add() {
   local due name=$2 src=$3 description=${${4-}//$'\n'/ }
   due=$(normalize_due $1) || die "invalid due time: $1"
   valid_name $name || die "name must be lowercase letters, digits and dashes"
+  [[ -z $give_up || ! $give_up < $due ]] || die "--give-up must not be before the due time"
   [[ -f $src && $(/usr/bin/head -c 2 $src) == '#!' ]] || die "$src must be a script starting with #!"
   for file in $files; do
     [[ ${file:t} != (run|job|last.log) ]] || die "--file $file collides with a job file name"
@@ -149,11 +171,42 @@ cmd_add() {
   /usr/bin/install -m 700 -- $src $dir/run
   for file in $files; do /usr/bin/install -m 600 -- $file $dir/${file:t}; done
   job=(name "$name" due "$due" description "$description" created "$(strftime $stamp_format $EPOCHSECONDS)"
-    origin "$PWD" attempts 0 max_attempts "$attempts" timeout "$timeout" state pending)
+    origin "$PWD" attempts 0 max_attempts "$attempts" timeout "$timeout" state pending give_up "$give_up")
   save_job $dir
   log_line "added ${dir:t} due $due"
   print -r -- $dir
   agent_loaded || print -u2 -- "warning: $label is not loaded, so nothing will run it; run: ${script:t} install"
+}
+
+cmd_add_agent() {
+  local model=haiku effort=medium topic_var=NTFY_MACBOOK_URL ready= cwd=$PWD stage
+  local -a add_opts
+  while [[ ${1-} == --* ]]; do
+    case $1 in
+      --ready) [[ -n ${2-} ]] || die "--ready needs a command"; ready=$2; shift 2 ;;
+      --model) [[ ${2-} == [A-Za-z0-9._\[\]-]## ]] || die "--model needs a model name"; model=$2; shift 2 ;;
+      --effort) [[ ${2-} == (low|medium|high|xhigh|max) ]] || die "--effort needs low, medium, high, xhigh or max"; effort=$2; shift 2 ;;
+      --topic-var) [[ ${2-} == [A-Z_][A-Z0-9_]# ]] || die "--topic-var needs a variable name"; topic_var=$2; shift 2 ;;
+      --cwd) [[ -d ${2-} ]] || die "--cwd needs an existing directory"; cwd=${2:A}; shift 2 ;;
+      --attempts|--timeout|--give-up) add_opts+=($1 ${2-}); shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  (( $# >= 3 )) || usage
+  [[ -d $cwd ]] || die "working directory $cwd does not exist"
+  [[ -f $3 ]] || die "prompt file $3 does not exist"
+  valid_name $2 || die "name must be lowercase letters, digits and dashes"
+  stage=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/deferred-agent.XXXXXX")
+  /usr/bin/install -m 700 -- $agent_template $stage/run
+  /usr/bin/install -m 600 -- $3 $stage/prompt.txt
+  print -rl -- "agent_name=${(q)2}" "agent_cwd=${(q)cwd}" "agent_model=${(q)model}" "agent_effort=${(q)effort}" \
+    "agent_ready=${(q)ready}" "agent_topic_var=${(q)topic_var}" "agent_notifier=${(q)notifier}" \
+    "agent_secrets=${(q)secrets}" > $stage/agent.env
+  local rc=0
+  (cmd_add $add_opts --file $stage/prompt.txt --file $stage/agent.env $1 $2 $stage/run \
+    "${4:-agent follow-up: $2}") || rc=$?
+  [[ -n $stage && $stage == */deferred-agent.* ]] && /bin/rm -rf -- $stage
+  return $rc
 }
 
 emit_json_field() { print -rn -- "$1"$'\0'; }
@@ -312,6 +365,7 @@ cmd_reschedule() {
   new_dir=$jobs_dir/${due%%T*}-$job[name]
   [[ $new_dir == $dir || ! -e $new_dir ]] || die "job ${new_dir:t} already exists"
   job[due]=$due
+  job[give_up]=   # a new due time gets the default window again
   if [[ $job[state] == failed ]]; then
     job[state]=pending
     job[attempts]=0
@@ -323,28 +377,45 @@ cmd_reschedule() {
 }
 
 execute_job() {  # DIR TIMEOUT: one attempt; returns the job's exit status
-  local dir=$1 timeout=$2 pid watcher rc=0
+  local dir=$1 timeout=$2 pid watcher rc=0 flag
+  flag=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/deferred-timeout.XXXXXX")
+  /bin/rm -f -- $flag
+  # The job gets its own session so a timeout can stop everything it started
+  # (an agent job's claude child included), not just its run script.
   (
     cd -- $dir
-    exec /usr/bin/env -i HOME=$HOME USER=$USERNAME LOGNAME=$USERNAME LANG=en_US.UTF-8 \
+    exec /usr/bin/perl -e 'use POSIX (); POSIX::setsid(); exec @ARGV or exit 127' -- \
+      /usr/bin/env -i HOME=$HOME USER=$USERNAME LOGNAME=$USERNAME LANG=en_US.UTF-8 \
       PATH=$job_path TMPDIR=${TMPDIR:-/tmp} DEFERRED_JOB_DIR=$dir ./run
   ) > $dir/last.log 2>&1 &
   pid=$!
-  { sleep $timeout; kill -TERM $pid } >/dev/null 2>&1 &
+  { sleep $timeout; : > $flag; kill -TERM -- -$pid; sleep 2; kill -KILL -- -$pid } >/dev/null 2>&1 &
   watcher=$!
   wait $pid || rc=$?
-  /usr/bin/pkill -P $watcher >/dev/null 2>&1 || true
-  kill $watcher >/dev/null 2>&1 || true
+  if [[ -e $flag ]]; then
+    wait $watcher >/dev/null 2>&1 || true   # let the grace period and KILL finish
+  else
+    /usr/bin/pkill -P $watcher >/dev/null 2>&1 || true
+    kill $watcher >/dev/null 2>&1 || true
+  fi
+  [[ $flag == */deferred-timeout.* ]] && /bin/rm -f -- $flag
   return $rc
 }
 
 run_job() {  # DIR MODE: one scheduled/manual attempt; purge success, warn only scheduled
   local dir=$1 mode=${2:-scheduled} rc=0
-  run_job_status=0
+  run_job_status=0 run_job_not_ready=0
   job[attempts]=$(( job[attempts] + 1 ))
   save_job $dir  # recorded first, so a crash mid-run still counts
   execute_job $dir $job[timeout] || rc=$?
   run_job_status=$rc
+  if (( rc == not_ready_status )) && [[ $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
+    run_job_not_ready=1
+    job[attempts]=$(( job[attempts] - 1 ))
+    save_job $dir
+    log_line "${${mode:#scheduled}:+manual }not ready ${dir:t}; the next check retries"
+    return 0
+  fi
   local tries="attempt $job[attempts]/$job[max_attempts]" prefix=
   [[ $mode == manual ]] && prefix="manual "
   if (( rc == 0 )); then
@@ -373,6 +444,7 @@ job_record_valid() {  # DIR: validate fields that later become paths, numbers or
   [[ $job[state] == (pending|failed) ]] || return 1
   [[ $job[attempts] == <-> && $job[max_attempts] == <1-> && $job[timeout] == <1-> ]] || return 1
   [[ $job[due] == <->-<->-<->T<->:<-> ]] || return 1
+  [[ -z $job[give_up] ]] || normalize_due "$job[give_up]" >/dev/null || return 1
   normalize_due "$job[due]" >/dev/null || return 1
   [[ $job[created] == <->-<->-<->T<->:<-> ]] || return 1
   normalize_due "$job[created]" >/dev/null || return 1
@@ -392,6 +464,10 @@ cmd_run_now() {
   require_runnable_job $dir
   [[ $job[state] == (pending|failed) ]] || die "job $id has invalid state: $job[state]"
   run_job $dir manual
+  if (( run_job_not_ready )); then
+    print -r -- "not ready $id; output in $dir/last.log"
+    exit $run_now_not_ready
+  fi
   if (( run_job_status == 0 )); then
     print -r -- "done $id"
     return 0
@@ -476,6 +552,7 @@ cmd_uninstall() {  # removes only the registration; queued jobs stay
 verb=$1; shift
 case $verb in
   add) cmd_add "$@" ;;
+  add-agent) cmd_add_agent "$@" ;;
   list) cmd_list "$@" ;;
   status) cmd_status ;;
   cancel) cmd_cancel "$@" ;;
