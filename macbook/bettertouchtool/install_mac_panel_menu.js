@@ -25,8 +25,11 @@ function matches(actual, desired, common) {
         if (key === 'BTTAppBundleIdentifier') return true;
         // BTT saves this write-only key as the row's launch config but exports a 681 item's
         // copy as BTTAdditionalConfiguration (642 widgets echo the key itself).
+        // Every alias present must agree, so conflicting copies read as drift, not a match.
         if (key === 'BTTShellScriptWidgetGestureConfig') {
-            return [actual[key], actual.BTTAdditionalConfiguration].includes(desired[key]);
+            const present = [actual[key], actual.BTTAdditionalConfiguration]
+                .filter(value => value !== undefined && value !== null && value !== '');
+            return present.length > 0 && present.every(value => value === desired[key]);
         }
         if (key === 'BTTEnabled' || key === 'BTTEnabled2') {
             return Number(actual[key] === undefined ? 1 : actual[key]) === desired[key];

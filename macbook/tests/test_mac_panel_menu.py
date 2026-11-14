@@ -384,6 +384,8 @@ class InstallerTests(unittest.TestCase):
         live.update(BTTAdditionalConfiguration=panel.SHELL_LAUNCH_CONFIG, BTTBelongsToApp="Global")
         drifted = dict(live, BTTAdditionalConfiguration="/bin/zsh:::-c:::-:::")
         without = {k: v for k, v in live.items() if k != "BTTAdditionalConfiguration"}
+        conflicting = dict(live, BTTShellScriptWidgetGestureConfig="/bin/zsh:::-c:::-:::")
+        both_agree = dict(live, BTTShellScriptWidgetGestureConfig=panel.SHELL_LAUNCH_CONFIG)
         script = ("ObjC.import('Foundation');"
                   "function read(p){return ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError("
                   "p,$.NSUTF8StringEncoding,null));}"
@@ -392,10 +394,10 @@ class InstallerTests(unittest.TestCase):
         result = subprocess.run(
             ["/usr/bin/osascript", "-l", "JavaScript", "-e", script,
              str(panel.DIRECTORY / "install_mac_panel_menu.js"), str(panel.DIRECTORY / "btt_common.js"),
-             json.dumps(menu), json.dumps([live, drifted, without])],
+             json.dumps(menu), json.dumps([live, drifted, without, conflicting, both_agree])],
             capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), [True, False, False])
+        self.assertEqual(json.loads(result.stdout), [True, False, False, False, True])
 
     def test_saved_verification_tracks_the_legacy_item(self):
         saved, plan = installed_rows()

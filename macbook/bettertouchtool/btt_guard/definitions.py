@@ -289,6 +289,10 @@ def _validate_payload(expected: dict[str, Any], node: dict[str, Any], uuid: str)
         field = _payload_field(key, expected, uuid)
         if field == MENU_BAR_LAUNCH_FIELD:
             claimed.add("BTTAdditionalConfiguration")  # a 681 export carries its launch config here
+            aliases = {node[name] for name in (field, "BTTAdditionalConfiguration")
+                       if node.get(name) not in (None, "")}
+            if len(aliases) > 1:  # conflicting copies: trusting either one would hide drift
+                raise ValueError(f"Runtime payload has conflicting launch configs: {uuid}")
             if field not in node:
                 field = "BTTAdditionalConfiguration"
         claimed.add(field)

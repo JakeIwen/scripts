@@ -418,6 +418,15 @@ class GuardDefinitionTests(unittest.TestCase):
                         dict(node, BTTAdditionalConfiguration="/bin/zsh:::-c:::-:::")):
             with self.assertRaisesRegex(ValueError, "BTTShellScriptWidgetGestureConfig|BTTAdditionalConfiguration"):
                 build_definitions(exports + [runtime], snapshot, {PRESET: "Master"})
+        # Both aliases present with different values is drift, even when one matches.
+        for conflicting in (dict(live, BTTShellScriptWidgetGestureConfig="/bin/zsh:::-c:::-:::"),
+                            dict(node, BTTShellScriptWidgetGestureConfig=launch,
+                                 BTTAdditionalConfiguration="/bin/zsh:::-c:::-:::")):
+            with self.assertRaisesRegex(ValueError, "conflicting launch configs"):
+                build_definitions(exports + [conflicting], snapshot, {PRESET: "Master"})
+        agreeing = dict(live, BTTShellScriptWidgetGestureConfig=launch)
+        result = build_definitions(exports + [agreeing], snapshot, {PRESET: "Master"})
+        self.assertEqual(result["cpu-menu"]["BTTShellScriptWidgetGestureConfig"], launch)
         # Reverse mismatch: a runtime launch config with nothing saved is refused.
         unsaved, unsaved_exports = fixture()
         unsaved["records"]["cpu-menu"] = dict(snapshot["records"]["cpu-menu"], payload={
