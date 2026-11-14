@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from types import SimpleNamespace
 
@@ -55,8 +56,9 @@ def _clients(count):
     return '{"freq":2412,"clients":{%s}}\n' % entries
 
 
-def _ap(ifname, iw, clients=""):
-    return f"__VAN_DASH_AP__={ifname}\n{iw}OBJECT hostapd.{ifname}\n{clients}"
+def _ap(ifname, iw, clients="", iw_rc=0):
+    rc = f"__VAN_DASH_IW_RC__={iw_rc}\n" if iw_rc is not None else ""
+    return f"__VAN_DASH_AP__={ifname}\n{iw}{rc}OBJECT hostapd.{ifname}\n{clients}"
 
 
 def _radios(*blocks):
@@ -361,6 +363,76 @@ class ConnectivityParserTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual([r["band"] for r in router["radios"]], ["2.4 GHz", "5 GHz"])
         self.assertTrue(online)
+
+    def test_failed_or_skipped_iw_is_unknown_not_stuck(self):
+        cases = {
+            "iw failed": _ap("wl0-ap0", "", _clients(1), iw_rc=1),
+            "iw timed out": _ap("wl0-ap0", "", _clients(1), iw_rc=124),
+            "iw skipped": _ap("wl0-ap0", "", _clients(1), iw_rc=None),
+        }
+        for name, block in cases.items():
+            with self.subTest(name):
+                output = _radios("__VAN_DASH_RADIO__=radio0|2g|true\n", block)
+                (radio,) = connectivity.parse_router_radios(output)
+                self.assertIsNone(radio["broadcasting"])
+                self.assertIsNone(radio["txpower_dbm"])
+                self.assertEqual(radio["clients"], 1)
+
+    def test_unknown_ap_does_not_hide_a_broadcasting_one(self):
+        output = _radios(
+            "__VAN_DASH_RADIO__=radio0|2g|true\n",
+            _ap("wl0-ap0", "", _clients(0), iw_rc=1),
+            _ap("wl0-ap1", _iw_info("wl0-ap1", "guest"), _clients(0)),
+        )
+        (radio,) = connectivity.parse_router_radios(output)
+        self.assertTrue(radio["broadcasting"])
+        self.assertEqual(radio["interfaces"], ["wl0-ap0", "wl0-ap1"])
+
+    def test_hostapd_payload_without_a_clients_object_is_unknown(self):
+        for payload in ("{}\n", '{"freq":2412}\n', '{"clients":[]}\n', '{"clients":null}\n', "[]\n"):
+            with self.subTest(payload=payload):
+                output = _radios(
+                    "__VAN_DASH_RADIO__=radio0|2g|true\n",
+                    _ap("wl0-ap0", _iw_info("wl0-ap0", "van"), payload),
+                )
+                self.assertIsNone(connectivity.parse_router_radios(output)[0]["clients"])
+
+    def test_empty_clients_object_is_zero_clients(self):
+        output = _radios(
+            "__VAN_DASH_RADIO__=radio0|2g|true\n",
+            _ap("wl0-ap0", _iw_info("wl0-ap0", "van"), '{"freq":2412,"clients":{}}\n'),
+        )
+        self.assertEqual(connectivity.parse_router_radios(output)[0]["clients"], 0)
+
+    def test_radio_section_stall_keeps_completed_mwan_evidence(self):
+        partial = MWAN_SAMPLE + f"{connectivity.MWAN_END_MARKER}\n__VAN_DASH_RADIOS_BEGIN__\n"
+        for stdout in (partial, partial.encode()):
+            with self.subTest(type(stdout).__name__):
+                def command(args, timeout, stdout=stdout):
+                    raise subprocess.TimeoutExpired(args, timeout, output=stdout)
+
+                router, online = connectivity.collect_router(command)
+                self.assertTrue(router["reachable"])
+                self.assertIsNone(router["radios"])
+                self.assertEqual(router["mode"], "clientwan")
+                self.assertTrue(online)
+
+    def test_timeout_before_mwan_finished_is_unreachable(self):
+        def command(args, timeout):
+            raise subprocess.TimeoutExpired(args, timeout, output=MWAN_SAMPLE.encode())
+
+        router, online = connectivity.collect_router(command)
+        self.assertFalse(router["reachable"])
+        self.assertIsNone(online)
+
+    def test_remote_radio_calls_are_bounded(self):
+        script = connectivity.ROUTER_RADIO_STATUS_SCRIPT
+        self.assertEqual(script.count("/bin/ubus"), script.count("/bin/ubus -t "))
+        self.assertIn("/usr/bin/timeout", script)
+        worst = (
+            connectivity.RADIO_SECTION_BUDGET_SECS + 2 * connectivity.RADIO_CALL_SECS
+        )
+        self.assertLessEqual(worst, 5)
 
     def test_unreachable_ubnt_skips_radio_ssh(self):
         calls = []

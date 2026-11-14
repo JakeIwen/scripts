@@ -8,6 +8,11 @@ The optional ``--clients`` mode performs one bounded, read-only router query for
 the dashboard's OpenWrt sheet; it is not part of the recurring uplink poll.
 """
 
+# codeshape: allow-size one flat file on purpose: icloud_uplink.py imports it and
+# the backup deployers stage and hash only this file (deploy_icloud_backup.sh,
+# deploy_time_machine_icloud.sh, time_machine_deploy_checks.SUPPORT_SOURCES), so
+# a sibling module would need a coordinated change to all three.
+
 import ipaddress
 import json
 import os
@@ -32,14 +37,23 @@ STARLINK_SSID = "denlink"
 
 MWAN_PRIORITY = ("clientwan", "lifiwan", "wan")
 ROUTER_RADIOS = ("radio0", "radio1")
-# Per-radio AP state for the same ssh call as the mwan command. Every command is
-# guarded so a failure here never changes the mwan output; the END marker lets
-# the parser tell a complete section from a truncated one. `iw ... info` shows
-# an `ssid` line only while the AP is really beaconing (hostapd can say ENABLED
-# with the beacon stuck), and station interfaces are left out by config.mode.
+# Per-radio AP state for the same ssh call as the mwan command. Every command
+# is guarded and bounded (ubus -t, timeout) so a stalled hostapd cannot eat the
+# ssh deadline: the loop stops starting AP queries RADIO_SECTION_BUDGET_SECS
+# after the section began, and a call lasts at most RADIO_CALL_SECS, so the
+# section takes at most budget + 2 * call = 5 s. An AP whose iw call was
+# skipped or failed carries no success marker and the parser calls it unknown.
+# The END marker tells a complete section from a truncated one. `iw dev info`
+# shows an `ssid` line only while the AP really beacons (hostapd can say
+# ENABLED with the beacon stuck), and stations are left out by config.mode.
+RADIO_CALL_SECS = 1
+RADIO_SECTION_BUDGET_SECS = 3
+MWAN_END_MARKER = "__VAN_DASH_MWAN_END__"
 ROUTER_RADIO_STATUS_SCRIPT = (
+    f"printf '{MWAN_END_MARKER}\\n'; "
     "printf '__VAN_DASH_RADIOS_BEGIN__\\n'; "
-    "ws=$(/bin/ubus -S call network.wireless status 2>/dev/null || true); "
+    f"deadline=$(( $(/bin/date +%s) + {RADIO_SECTION_BUDGET_SECS} )); "
+    f"ws=$(/bin/ubus -t {RADIO_CALL_SECS} -S call network.wireless status 2>/dev/null || true); "
     f"for radio in {' '.join(ROUTER_RADIOS)}; do "
     "band=$(/sbin/uci -q get wireless.$radio.band 2>/dev/null || true); "
     '[ -n "$band" ] || continue; '
@@ -48,9 +62,11 @@ ROUTER_RADIO_STATUS_SCRIPT = (
     "for ifname in $(printf '%s\\n' \"$ws\" | /usr/bin/jsonfilter "
     "-e \"@.$radio.interfaces[@.config.mode='ap'].ifname\" 2>/dev/null); do "
     "printf '__VAN_DASH_AP__=%s\\n' \"$ifname\"; "
-    '/usr/sbin/iw dev "$ifname" info 2>/dev/null || true; '
+    '[ "$(/bin/date +%s)" -lt "$deadline" ] || continue; '
+    f'/usr/bin/timeout {RADIO_CALL_SECS} /usr/sbin/iw dev "$ifname" info 2>/dev/null; '
+    "printf '__VAN_DASH_IW_RC__=%s\\n' $?; "
     "printf 'OBJECT hostapd.%s\\n' \"$ifname\"; "
-    '/bin/ubus -S call "hostapd.$ifname" get_clients 2>/dev/null || true; '
+    f'/bin/ubus -t {RADIO_CALL_SECS} -S call "hostapd.$ifname" get_clients 2>/dev/null || true; '
     "done; done; "
     "printf '__VAN_DASH_RADIOS_END__\\n'; "
 )
@@ -499,27 +515,36 @@ RADIOS_SECTION = re.compile(
 )
 RADIO_HEADER = re.compile(r"^__VAN_DASH_RADIO__=(.*)$")
 AP_HEADER = re.compile(r"^__VAN_DASH_AP__=(.*)$")
+IW_OK_MARKER = re.compile(r"^__VAN_DASH_IW_RC__=0$", re.MULTILINE)
 IW_SSID_LINE = re.compile(r"^\s*ssid\b", re.MULTILINE)
 IW_TXPOWER_LINE = re.compile(
     r"^\s*txpower\s+(-?\d+(?:\.\d+)?)\s+dBm", re.MULTILINE
 )
 
 
-def _parse_ap_block(text):
-    """One AP interface: `iw dev info` text, then its hostapd get_clients."""
-    iw_text, _, hostapd_text = text.partition("OBJECT ")
+def _hostapd_client_count(hostapd_text):
+    """Client count from one `OBJECT hostapd.<if>` block, None if unreadable."""
     payload = hostapd_text.partition("\n")[2]
     try:
-        readable = isinstance(json.loads(payload), dict)
-    except ValueError:
-        readable = False
+        clients = json.loads(payload).get("clients")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(clients, dict):
+        return None
+    return len(parse_hostapd_clients("OBJECT " + hostapd_text))
+
+
+def _parse_ap_block(text):
+    """One AP interface: `iw dev info` text, its exit marker, then hostapd output."""
+    iw_text, _, hostapd_text = text.partition("OBJECT ")
+    iw_ok = IW_OK_MARKER.search(iw_text) is not None and "Interface " in iw_text
     power = IW_TXPOWER_LINE.search(iw_text)
     return {
-        "broadcasting": bool(IW_SSID_LINE.search(iw_text)),
-        "txpower_dbm": float(power.group(1)) if power else None,
-        "clients": (
-            len(parse_hostapd_clients("OBJECT " + hostapd_text)) if readable else None
-        ),
+        # Successful iw output with no ssid line is a stuck beacon (False); a
+        # failed, timed-out or skipped iw call is unknown (None), not negative.
+        "broadcasting": bool(IW_SSID_LINE.search(iw_text)) if iw_ok else None,
+        "txpower_dbm": float(power.group(1)) if iw_ok and power else None,
+        "clients": _hostapd_client_count(hostapd_text),
     }
 
 
@@ -539,11 +564,13 @@ def _radio_entry(header, ap_blocks):
     lit = next((ap for _, ap in aps if ap["broadcasting"]), None)
     shown = lit or (aps[0][1] if aps else None)
     counts = [ap["clients"] for _, ap in aps]
+    states = [ap["broadcasting"] for _, ap in aps]
     return {
         "radio": radio,
         "band": band,
         "up": up == "true",
-        "broadcasting": lit is not None,
+        # Unknown (None) unless some AP is seen beaconing or every AP is read.
+        "broadcasting": True if lit else (None if None in states else False),
         "txpower_dbm": shown["txpower_dbm"] if shown else None,
         "clients": None if None in counts else sum(counts),
         "interfaces": [ifname for ifname, _ in aps],
@@ -751,6 +778,34 @@ def _failure_detail(result):
     return detail[-300:] if detail else "command failed"
 
 
+def _apply_router_output(router, stdout):
+    """Fill the router record from the remote output; return internet_online."""
+    router["reachable"] = True
+    router["interfaces"] = parse_mwan3_interfaces(stdout)
+    apply_https_health(router["interfaces"], stdout)
+    router["online"] = [
+        item["name"] for item in router["interfaces"] if item["state"] in ("online", "degraded")
+    ]
+    router["mode"] = select_mode(router["interfaces"])
+    router["default_policy"], router["route_members"] = parse_mwan3_default_route(stdout)
+    router["wan_traffic"] = parse_wan_traffic(stdout)
+    router["radios"] = parse_router_radios(stdout)
+    if router["interfaces"]:
+        return selected_route_health(router)
+    router["error"] = "mwan3 returned no interface state"
+    return None
+
+
+def _timed_out_mwan_output(exc):
+    """The mwan part of a timed-out call's partial output, if it finished."""
+    partial = exc.stdout
+    if isinstance(partial, bytes):
+        partial = partial.decode("utf-8", errors="replace")
+    if not partial or f"\n{MWAN_END_MARKER}\n" not in f"\n{partial}":
+        return None
+    return partial
+
+
 def collect_router(command):
     """Return mwan3 route state and whether the selected route reaches the internet."""
     router = {
@@ -770,26 +825,18 @@ def collect_router(command):
         result = command(
             _ssh_args(ROUTER_TARGET) + [MWAN_STATUS_COMMAND], timeout=8
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        # A stalled radio query must not discard mwan evidence already printed.
+        partial = _timed_out_mwan_output(exc)
+        if partial is None:
+            router["error"] = str(exc)
+        else:
+            internet_online = _apply_router_output(router, partial)
+    except OSError as exc:
         router["error"] = str(exc)
     else:
         if result.returncode == 0:
-            router["reachable"] = True
-            router["interfaces"] = parse_mwan3_interfaces(result.stdout)
-            apply_https_health(router["interfaces"], result.stdout)
-            router["online"] = [
-                item["name"] for item in router["interfaces"] if item["state"] in ("online", "degraded")
-            ]
-            router["mode"] = select_mode(router["interfaces"])
-            router["default_policy"], router["route_members"] = (
-                parse_mwan3_default_route(result.stdout)
-            )
-            router["wan_traffic"] = parse_wan_traffic(result.stdout)
-            router["radios"] = parse_router_radios(result.stdout)
-            if router["interfaces"]:
-                internet_online = selected_route_health(router)
-            else:
-                router["error"] = "mwan3 returned no interface state"
+            internet_online = _apply_router_output(router, result.stdout)
         else:
             router["error"] = _failure_detail(result)
     return router, internet_online
