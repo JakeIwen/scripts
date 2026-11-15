@@ -129,20 +129,32 @@ if [[ -f "$CLONE_CARD_NOMINAL_GB_FILE" && ! -L "$CLONE_CARD_NOMINAL_GB_FILE" ]];
   unset configured_clone_card_nominal_gb
 fi
 ROOT_USED_MAX_GB=$((CLONE_CARD_NOMINAL_GB * 13 / 16))
-# Rootfs growth and path budgets used by backup_watchdog.sh. Budgets are MiB so
-# fractional-GiB limits stay exact; keep each entry in absolute-path:MiB form.
+# Rootfs growth, level alerts (70/80/90%) and path budgets used by
+# backup_watchdog.sh. Budgets are MiB so fractional-GiB limits stay exact; keep each entry in absolute-path:MiB form.
 ROOT_GROWTH_WARN_GIB_7D=4
 ROOTFS_HISTORY_FILE="$STAMP_DIR/rootfs_used_mib.history"
 ROOTFS_HISTORY_MAX_ENTRIES=120
 ROOTFS_DU_TIMEOUT_SECONDS=300
 ROOTFS_PATH_BUDGETS_MIB=(
-  /home/pi/dev/obd-things/tmp:8192
-  /var/lib/vanpi-monitor:1024
-  /var/lib/van-telemetry:3072
-  /home/pi/.codex:5120
+  /home/pi/dev/obd-things/tmp/compute:2560
+  /home/pi/dev/obd-things/tmp:5120
+  /home/pi/.codex:3072
+  /var/lib/van-telemetry:2560
+  /var/lib/vanpi-monitor:1229
+  /var/log:1024
   /var/cache/apt:1024
-  /var/log:1536
+  /home/pi/youtube-cast/releases:512
+  /home/pi/Documents/agent-shared:2048
 )
+# Per-day path sizes (one bounded line per day) and level/forecast alert state.
+ROOTFS_PATH_HISTORY_FILE="$STAMP_DIR/rootfs_paths.history"
+ROOTFS_PATH_HISTORY_DAYS=400
+ROOTFS_ALERT_STATE_FILE="$STAMP_DIR/rootfs_alert.state"
+ROOTFS_ALERT_HYSTERESIS=5          # points below a level before it re-arms
+ROOTFS_FORECAST_WINDOW_DAYS=30     # least-squares window over the daily history
+ROOTFS_FORECAST_MIN_POINTS=7
+ROOTFS_FORECAST_HORIZON_DAYS=30    # alert when 90% is projected sooner than this
+ROOTFS_FORECAST_CLEAR_DAYS=35      # re-arm once the projection is this far out
 UNMOUNT_AFTER=1        # when pi_backup mounted bigboi itself, unmount it afterward;
                        # preserve a mount that was already present when the job began
 

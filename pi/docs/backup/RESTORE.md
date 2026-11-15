@@ -254,16 +254,50 @@ watchdog problem. Every rootfs alert includes all successfully measured path
 sizes, largest first, plus explicit measurement failures.
 
 Edit the single `ROOTFS_PATH_BUDGETS_MIB` array in `backup_conf.sh`; values are
-MiB so the 1.5GiB log budget is exact:
+MiB so fractional-GiB limits are exact:
 
-| Path | Default budget |
+| Path | Budget |
 | --- | ---: |
-| `/home/pi/dev/obd-things/tmp` | 8GiB |
-| `/var/lib/vanpi-monitor` | 1GiB |
-| `/var/lib/van-telemetry` | 3GiB |
-| `/home/pi/.codex` | 5GiB |
+| `/home/pi/dev/obd-things/tmp/compute` | 2.5GiB |
+| `/home/pi/dev/obd-things/tmp` (whole) | 5GiB |
+| `/home/pi/.codex` | 3GiB |
+| `/var/lib/van-telemetry` | 2.5GiB |
+| `/var/lib/vanpi-monitor` | 1.2GiB |
+| `/var/log` | 1GiB |
 | `/var/cache/apt` | 1GiB |
-| `/var/log` | 1.5GiB |
+| `/home/pi/youtube-cast/releases` | 0.5GiB |
+| `/home/pi/Documents/agent-shared` | 2GiB |
+
+Each run also appends the measured sizes to
+`/home/pi/backups/stamps/rootfs_paths.history` (`<utc-day> <epoch>
+<path>:<MiB> ...`, one line per day, lines older than 400 days dropped).
+
+Level and forecast alerts (`rootfs_check_alerts`) are separate from the daily
+problem nag. The percent is `df`'s: used / (used + avail), rounded up. Crossing
+70, 80 or 90% sends one ntfy message (on the `NTFY_WARNING_URL` topic through the
+watchdog's notify; one message for the highest level when several are crossed at
+once) and is recorded in `/home/pi/backups/stamps/rootfs_alert.state`. A level
+alerts again only after usage falls 5 points below it (`ROOTFS_ALERT_HYSTERESIS`).
+The state is written only after a successful send, so a failed send retries on the
+next run. The forecast fits a least-squares line to the last 30 days of
+`rootfs_used_mib.history` (at least 7 points) and alerts once, with the projected
+date, when 90% is under 30 days away; it re-arms when the projection is 35 or more
+days out or the trend is flat. A reading already at 90% is covered by the level
+alert. `ROOTFS_TEST_PERCENT=91 backup_watchdog.sh`-style runs force the percent
+(label "forced by ROOTFS_TEST_PERCENT") to test delivery; the state file then
+shows the level as alerted and the next run is silent. The settings above live in
+`backup_conf.sh`.
+
+The watchdog log carries each problem's text on `  problem:` lines after its
+summary line. The context line (`rootfs paths, largest first: ...`) counts as one
+of the problems in the `problems: N` total.
+
+The absolute limit (`ROOT_USED_MAX_GB`, 13/16 of the nominal clone-card size, 52GiB
+for 64GB cards) keeps root usage inside what a bootable clone card holds, and the
+4GiB/7-day growth limit warns of a rate that would breach it within weeks; the
+percentage alerts are in addition to both, not a replacement. The system monitor's
+`root_disk_full` event (used/total, about 4 points lower than `df`) is
+record-only and never notifies; this watchdog is the notifying check.
 
 The tracked watchdog entries are in root's crontab. Running as root lets the
 bounded `du` commands traverse both root-owned cache/log paths and Pi-owned

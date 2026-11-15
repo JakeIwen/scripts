@@ -80,6 +80,13 @@ schema v5 and its index when the collector initializes. Read-only event readers
 inspect available columns to choose their v4/v5 projections without migrating;
 lock and I/O errors remain errors, never a reason to substitute unweighted counts.
 
+Threshold events (`root_disk_full` at 90% root usage, high memory, CPU and the
+like) are recorded to the database for the report and dashboard and never send a
+notification. They are record-only by design: root usage is measured here as
+used/total (about 4 points below `df`), and the notifying root-filesystem check is
+the backup watchdog's level and forecast alerts (see the Watchdog section of
+`../backup/RESTORE.md`).
+
 ### Journal storms and retention
 
 Live journal follow and current-boot backfill use the same ingestion path:

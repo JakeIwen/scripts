@@ -19,7 +19,7 @@ cat > "$fake_bin/df" <<'EOF'
 if (( ${TEST_DF_STATUS:-0} != 0 )); then
   exit "$TEST_DF_STATUS"
 fi
-printf 'Used\n%s\n' "${TEST_ROOT_USED_KIB:?}"
+printf 'Used Avail\n%s %s\n' "${TEST_ROOT_USED_KIB:?}" "${TEST_ROOT_AVAIL_KIB:-$((40 * 1024 * 1024))}"
 EOF
 cat > "$fake_bin/du" <<'EOF'
 #!/bin/bash
@@ -201,8 +201,10 @@ ROOTFS_DU_COMMAND="$fake_bin/du" \
 ROOTFS_TIMEOUT_COMMAND="$fake_bin/timeout" \
 ROOTFS_IONICE_COMMAND="$fake_bin/ionice" \
 ROOTFS_NICE_COMMAND="$fake_bin/nice" \
-bash "$repo_root/pi/scripts/backup/backup_watchdog.sh" >/dev/null
+bash "$repo_root/pi/scripts/backup/backup_watchdog.sh" > "$test_root/watchdog.log" 2>&1
 [[ -s "$message_file" ]] || fail "watchdog did not call the ntfy stub"
+grep -Fq "$TEST_PATH_A uses 1.5GiB (budget 1.0GiB)" "$test_root/watchdog.log" ||
+  fail "watchdog log omitted the problem text"
 grep -Fq "$expected_context" "$message_file" ||
   fail "watchdog alert omitted measured rootfs path context"
 

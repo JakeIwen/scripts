@@ -165,6 +165,8 @@ LIVE_DATA = (
     '/home/pi/secrets/', '/home/pi/hooks/', '/home/pi/backups/', '/home/pi/.ssh/',
     # Borg exclusion patterns and inputs named by backup_conf.sh.
     '/home/pi/.codex', '/home/pi/.local/share/claude/', '/home/pi/build/', '/home/pi/dev/obd-things/tmp',
+    # Rootfs path budgets measured by rootfs_budget.sh (read-only du targets).
+    '/home/pi/youtube-cast/', '/home/pi/Documents/agent-shared',
     '/home/pi/rsync-exclude-media.txt',
     '/etc/', '/var/lib/', '/run/', '/root/', '/mnt/',
 )

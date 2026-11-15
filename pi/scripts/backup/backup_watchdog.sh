@@ -116,6 +116,10 @@ fi
 [ -f "$IGNITION_FLAG" ] && status+=" (van running, disk checks skipped)"
 
 echo "[$(date '+%F %T')] $status problems: ${#problems[@]}"
+# The count alone told nobody what the problems were; keep their text in the log.
+for problem in "${problems[@]+"${problems[@]}"}"; do
+  printf '  problem: %s\n' "${problem//$'\n'/ }"
+done
 if [ ${#problems[@]} -gt 0 ]; then
   notify "vanpi backup watchdog" "$(printf '%s\n' "${problems[@]}")" high rotating_light
 fi
