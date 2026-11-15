@@ -53,6 +53,13 @@ class MacMeteredTests(unittest.TestCase):
         self.assertEqual(self.fixture.ssh_calls()[0][-3:], ['vanpi', '/home/pi/scripts/vanpi-metered', 'sync'])
         self.assertIn('BatchMode=yes', self.fixture.ssh_calls()[0])
 
+    def test_vpn_default_route_still_finds_the_wifi_gateway(self):
+        self.fixture.vpn = True
+        network = collect(self.fixture.run, self.fixture.wifi, lambda: self.fixture.now)
+        self.assertTrue(network.connected)
+        self.assertEqual(network.gateway, self.fixture.remote.load().home_network.gateway)
+        self.assertNotEqual(self.controller.tick().verdict.reason, 'Mac network is disconnected')
+
     def test_offline_add_restricts_without_inventing_revision(self):
         self.fixture.lan, self.fixture.ssid = False, 'Cafe'
         self.controller.tick()

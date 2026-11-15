@@ -29,9 +29,16 @@ def wifi_interface(run=command):
     return match[1] if match else None
 
 
-def gateway(run=command):
-    route = output(run, ['/sbin/route', '-n', 'get', 'default'])
-    match = re.search(r'^\s*gateway: (\S+)$', route, re.M)
+def gateway(run=command, interface=None):
+    # A VPN (ProtonVPN's utun) owns the plain default route and it names no
+    # gateway, so ask for the Wi-Fi interface's own default route first.
+    scopes = ([['-ifscope', interface]] if interface else []) + [[]]
+    match = None
+    for scope in scopes:
+        route = output(run, ['/sbin/route', '-n', 'get', *scope, 'default'])
+        match = re.search(r'^\s*gateway: (\S+)$', route, re.M)
+        if match:
+            break
     if not match:
         return None, None
     try:
@@ -49,7 +56,7 @@ def collect(run=command, wifi=read_wifi, clock=time.time):
     interface = reading.get('interface')
     if not isinstance(interface, str) or not INTERFACE.fullmatch(interface):
         interface = wifi_interface(run)
-    address, mac = gateway(run)
+    address, mac = gateway(run, interface)
     good = reading.get('status') == 'ok'
     return Network(interface, reading.get('ssid') if good else None,
                    reading.get('bssid') if good else None, address, mac,

@@ -27,6 +27,7 @@ class MacFixture:
         self.pi_evidence = None
         self.flag = False
         self.fail_sudo = False
+        self.vpn = False
         self.lose_reply = False
         self.calls = []
         self.reports = []
@@ -44,6 +45,8 @@ class MacFixture:
         text, code = '', 0
         if argv[0] == '/sbin/route':
             text = 'gateway: ' + (self.remote.load().home_network.gateway if self.lan else '10.0.0.1')
+            if self.vpn and '-ifscope' not in argv:
+                text = 'interface: utun9\n'
         elif argv[0] == '/usr/sbin/arp':
             mac = self.remote.load().home_network.gateway_mac if self.lan else 'aa:bb:cc:dd:ee:ff'
             text = '? (gateway) at ' + mac + ' on en0 ifscope [ethernet]'
