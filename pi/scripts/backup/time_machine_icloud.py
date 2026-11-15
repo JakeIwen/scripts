@@ -312,6 +312,14 @@ def check_remote_owner(cfg):
         raise RuntimeError('cloud store owner mismatch')
 
 
+def require_remote_owner(cfg):
+    """Read-only proof the store is ours; unlike ensure_remote it can never claim one."""
+    entries = json.loads(network(cfg, 'lsjson', cfg['remote'], '--max-depth', '1'))
+    if not any(e.get('Name') == 'OWNER.json' for e in entries):
+        raise RuntimeError('cloud store owner marker missing; cleanup refused')
+    check_remote_owner(cfg)
+
+
 def ensure_remote(cfg):
     remote = cfg['remote']
     network(cfg, 'mkdir', remote)
@@ -510,11 +518,7 @@ def resume_retention(cfg, state):
             raise ValueError('invalid pending capture manifest; cleanup refused')
         if staged['generation'] != last:
             return
-    # Read-only: a cleanup must never claim a store, which ensure_remote can.
-    entries = json.loads(network(cfg, 'lsjson', cfg['remote'], '--max-depth', '1'))
-    if not any(e.get('Name') == 'OWNER.json' for e in entries):
-        raise RuntimeError('cloud store owner marker missing; cleanup refused')
-    check_remote_owner(cfg)
+    require_remote_owner(cfg)
     run_retention(cfg, state, last)
 
 
