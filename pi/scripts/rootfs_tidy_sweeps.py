@@ -21,18 +21,27 @@ Every root is opened one component at a time from / with
 O_DIRECTORY|O_NOFOLLOW, so a root reached through a symlink is skipped, and
 every later open, lstat, unlink and rmdir is relative to a held directory
 descriptor: replacing a root or any directory with a symlink mid-run cannot
-redirect a delete. Nothing on another filesystem is entered or deleted: an
-entry whose st_dev differs from the home's, or whose path is a mount point in
-/proc/self/mountinfo (which also catches same-device bind mounts), is skipped,
-and a scratch directory with a mount point anywhere below it is kept whole.
+redirect a delete.
+
+Nothing on another mount is entered or deleted. On Linux every directory
+opened, roots included, must have the home's mount id (`mnt_id` in
+/proc/self/fdinfo), which is fixed for a held descriptor and also tells a
+same-device bind mount apart, wherever and whenever it appears. Everywhere,
+an entry whose st_dev differs from the home's is skipped, and mountinfo is
+re-read before each root and before each scratch directory is removed: a root
+with a mount point on its path below the home, and a scratch directory that
+is or contains a mount point, are left alone.
 
 Before each unlink the entry is lstat-ed again. A session or cache file is
-kept unless it is still the same inode with the same size and mtime; an entry
-in a scratch directory is kept when it is now newer than the cutoff, so that
-directory's rmdir fails and it stays. Residual window: an entry swapped, or
-appended to by a writer that already held it open, between that last lstat
-and the unlink. Every candidate has been idle for the whole cutoff, so that
-window is accepted.
+kept unless it is still the same inode with the same size and mtime. A
+scratch directory is rechecked right before removal (its own mtime, then each
+directory's before it is entered, each other entry's before it is unlinked);
+anything newer than the cutoff is kept, so its parents' rmdir fails and they
+stay. Residual windows: an entry swapped, or appended to by a writer that
+already held it open, between that last lstat and the unlink; and, only where
+there is no /proc (the Mac suite), a same-device bind mount made after the
+last mountinfo read. Every candidate has been idle for the whole cutoff, so
+those windows are accepted.
 """
 import argparse
 import errno
@@ -105,6 +114,24 @@ def read_mount_points(path):
     return frozenset(points)
 
 
+def mount_id(fd):
+    """The mount id of an open descriptor; None only where there is no /proc."""
+    try:
+        with open(f"/proc/self/fdinfo/{fd}", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("mnt_id:"):
+                    return int(line.split()[1])
+    except FileNotFoundError:
+        if sys.platform.startswith("linux"):
+            raise
+        return None
+    raise OSError(errno.EINVAL, "no mnt_id in fdinfo", fd)
+
+
+def within(path, point):
+    return path == point or path.startswith(point.rstrip("/") + "/")
+
+
 def unchanged(a, b):
     return ((a.st_dev, a.st_ino, a.st_size, a.st_mtime_ns)
             == (b.st_dev, b.st_ino, b.st_size, b.st_mtime_ns))
@@ -113,10 +140,13 @@ def unchanged(a, b):
 class Tidy:
     """Settings and outcome shared by every sweep of one run."""
 
-    def __init__(self, apply, device, mounts):
+    def __init__(self, apply, home, device, mount, mountinfo):
         self.apply = apply
+        self.home = home
         self.device = device
-        self.mounts = mounts
+        self.mount = mount
+        self.mountinfo = mountinfo
+        self.mounts = read_mount_points(mountinfo)
         self.now_ns = time.time_ns()
         self.hook = os.environ.get(TEST_HOOK)
         self.failed = False
@@ -127,9 +157,23 @@ class Tidy:
     def foreign(self, st, path):
         return st.st_dev != self.device or path in self.mounts
 
+    def refresh_mounts(self):
+        self.mounts = read_mount_points(self.mountinfo)
+
+    def same_mount(self, fd):
+        st = os.fstat(fd)
+        return st.st_dev == self.device and mount_id(fd) == self.mount
+
     def mounted_below(self, path):
         prefix = path.rstrip("/") + "/"
         return any(point.startswith(prefix) for point in self.mounts)
+
+    def mount_on_path(self, path):
+        """A mount point at `path` or on its ancestry below the home, if any."""
+        for point in self.mounts:
+            if within(path, point) and not within(self.home, point):
+                return point
+        return None
 
     def stage(self, name, rel):
         if self.hook:
@@ -143,6 +187,7 @@ class Walk:
         self.tidy = tidy
         self.label = label
         self.errors = 0
+        self.mounted = 0
 
     def problem(self, rel, message):
         report(self.label, f"skipped {shown(rel)}: {message}", error=True)
@@ -179,6 +224,11 @@ class Walk:
         if (opened.st_dev, opened.st_ino) != (scanned.st_dev, scanned.st_ino):
             os.close(fd)
             self.problem(rel, "it was replaced while being scanned")
+            return None
+        if not self.tidy.same_mount(fd):
+            os.close(fd)
+            self.note(rel, "another filesystem is mounted there")
+            self.mounted += 1
             return None
         return fd
 
@@ -217,6 +267,16 @@ class Walk:
 def open_root(tidy, label, path):
     """The root's fd, or None once a skip is reported; other errors fail the run."""
     try:
+        tidy.refresh_mounts()
+    except OSError as error:
+        report(label, f"failed: cannot read the mount table ({error})", error=True)
+        tidy.failed = True
+        return None
+    point = tidy.mount_on_path(path)
+    if point is not None:
+        report(label, f"skipped ({point} is a mount point on the way to {path})")
+        return None
+    try:
         fd = open_dir_path(path)
     except FileNotFoundError:
         report(label, f"skipped ({path} does not exist)")
@@ -228,9 +288,9 @@ def open_root(tidy, label, path):
             report(label, f"failed: cannot open {path} ({error.strerror})", error=True)
             tidy.failed = True
         return None
-    if tidy.foreign(os.fstat(fd), path):
+    if not tidy.same_mount(fd):
         os.close(fd)
-        report(label, f"skipped ({path} is on another filesystem)")
+        report(label, f"skipped ({path} is on another mount)")
         return None
     return fd
 
@@ -307,7 +367,7 @@ def scratch_days(name):
 
 def idle_state(tidy, walk, dir_fd, path, rel, cutoff):
     """'idle', 'recent', 'mounted' or 'unknown' (an entry could not be read)."""
-    errors = walk.errors
+    errors, mounted = walk.errors, walk.mounted
     names = walk.names(dir_fd, rel)
     for name in names or ():
         child, child_path = rel + (name,), os.path.join(path, name)
@@ -321,6 +381,8 @@ def idle_state(tidy, walk, dir_fd, path, rel, cutoff):
         if stat.S_ISDIR(st.st_mode):
             fd = walk.open_dir(dir_fd, name, st, child)
             if fd is None:
+                if walk.mounted > mounted:
+                    return "mounted"
                 continue
             try:
                 state = idle_state(tidy, walk, fd, child_path, child, cutoff)
@@ -340,10 +402,12 @@ def remove_contents(tidy, walk, dir_fd, path, rel, cutoff):
         st = walk.lstat(dir_fd, name, child)
         if st is None:
             continue
-        is_dir = stat.S_ISDIR(st.st_mode)
-        if tidy.foreign(st, child_path) or (not is_dir and st.st_mtime_ns >= cutoff):
+        # A directory is checked before it is entered (entering it changes
+        # nothing; the unlinks inside are what update its mtime).
+        if tidy.foreign(st, child_path) or st.st_mtime_ns >= cutoff:
             empty = False
             continue
+        is_dir = stat.S_ISDIR(st.st_mode)
         try:
             if is_dir:
                 fd = walk.open_dir(dir_fd, name, st, child)
@@ -369,6 +433,27 @@ def remove_contents(tidy, walk, dir_fd, path, rel, cutoff):
     return empty
 
 
+def remove_checked(tidy, walk, root_fd, fd, path, name, cutoff):
+    """Remove an idle candidate after rechecking mounts and its own freshness."""
+    label = walk.label
+    tidy.stage("before-remove", (name,))
+    try:
+        tidy.refresh_mounts()
+    except OSError as error:
+        report(label, f"kept {shown((name,))} (cannot read the mount table: {error})", error=True)
+        walk.errors += 1
+        return
+    if tidy.mount_on_path(path) or tidy.mounted_below(path):
+        report(label, f"kept {shown((name,))} (a filesystem is mounted there)")
+    elif os.fstat(fd).st_mtime_ns >= cutoff:
+        report(label, f"kept {shown((name,))} (recent writes inside)")
+    elif remove_contents(tidy, walk, fd, path, (name,), cutoff):
+        os.rmdir(name, dir_fd=root_fd)
+        report(label, f"removed {shown((name,))}")
+    else:
+        report(label, f"kept {shown((name,))} (it changed while being removed)")
+
+
 def remove_idle_dir(tidy, walk, root_fd, root, name, st, cutoff):
     label = walk.label
     path = os.path.join(root, name)
@@ -392,12 +477,7 @@ def remove_idle_dir(tidy, walk, root_fd, root, name, st, cutoff):
         elif not tidy.apply:
             report(label, f"would remove {shown((name,))}")
         else:
-            tidy.stage("before-remove", (name,))
-            if remove_contents(tidy, walk, fd, path, (name,), cutoff):
-                os.rmdir(name, dir_fd=root_fd)
-                report(label, f"removed {shown((name,))}")
-            else:
-                report(label, f"kept {shown((name,))} (it changed while being removed)")
+            remove_checked(tidy, walk, root_fd, fd, path, name, cutoff)
     except OSError as error:
         walk.problem((name,), error.strerror)
     finally:
@@ -445,8 +525,8 @@ def report_big_files(tidy, root, label="agent-shared"):
 
 # --- entry ------------------------------------------------------------------------
 
-def home_device(home):
-    """The home's st_dev, or None when the home is absent or symlinked."""
+def home_identity(home):
+    """The home's (st_dev, mount id), or None when it is absent or symlinked."""
     try:
         fd = open_dir_path(home)
     except FileNotFoundError:
@@ -456,7 +536,7 @@ def home_device(home):
             return None
         raise
     try:
-        return os.fstat(fd).st_dev
+        return os.fstat(fd).st_dev, mount_id(fd)
     finally:
         os.close(fd)
 
@@ -464,15 +544,16 @@ def home_device(home):
 def run(config):
     home = config.home
     try:
-        mounts = read_mount_points(os.environ.get("ROOTFS_TIDY_MOUNTINFO", DEFAULT_MOUNTINFO))
-        device = home_device(home)
+        identity = home_identity(home)
+        if identity is not None:
+            tidy = Tidy(config.apply, home, *identity,
+                        os.environ.get("ROOTFS_TIDY_MOUNTINFO", DEFAULT_MOUNTINFO))
     except OSError as error:
         report("sweeps", f"failed: {error}", error=True)
         return 1
-    if device is None:
+    if identity is None:
         report("sweeps", f"skipped ({home} is missing or reached through a symlink)")
         return 0
-    tidy = Tidy(config.apply, device, mounts)
     delete_old_files(tidy, "Codex sessions", os.path.join(home, ".codex", "archived_sessions"),
                      env_int("ROOTFS_TIDY_CODEX_DAYS", 30), prefix=("archived_sessions",))
     sweep_scratch(tidy, os.environ.get("ROOTFS_TIDY_OBD_TMP",

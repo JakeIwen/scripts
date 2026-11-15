@@ -268,7 +268,33 @@ class ScratchTests(SweepFixture):
 
         self.assert_status(result, 0)
         self.assertEqual((candidate / "late").read_text(), "new\n")
+        self.assertIn("kept suite-old (recent writes inside)", result.stdout)
+
+    def test_a_directory_made_after_the_idle_check_is_kept(self):
+        candidate = self.scratch("suite-old")
+        # An old file in a fresh directory, with the candidate's own mtime made
+        # old again: only the child directory's freshness tells.
+        hook = self.hook(f'[[ $stage == before-remove ]] || exit 0; c="{candidate}";'
+                         ' mkdir "$c/fresh"; echo input > "$c/fresh/old-input.txt";'
+                         ' touch -t 202001010000 "$c/fresh/old-input.txt" "$c"')
+
+        result = self.sweep("--apply", hook=hook)
+
+        self.assert_status(result, 0)
+        self.assertEqual((candidate / "fresh" / "old-input.txt").read_text(), "input\n")
         self.assertIn("kept suite-old (it changed while being removed)", result.stdout)
+
+    def test_a_mount_made_after_the_idle_check_keeps_the_directory(self):
+        candidate = self.scratch("suite-old")
+        hook = self.hook(f'[[ $stage == before-remove ]] || exit 0;'
+                         f' echo "405 26 0:51 / {candidate}/inner rw - tmpfs tmpfs rw"'
+                         f' >> "{self.mountinfo}"')
+
+        result = self.sweep("--apply", hook=hook)
+
+        self.assert_status(result, 0)
+        self.assertTrue((candidate / "inner" / "f").exists())
+        self.assertIn("kept suite-old (a filesystem is mounted there)", result.stdout)
 
     @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 directory anyway")
     def test_a_directory_that_cannot_be_inspected_is_kept_and_fails_the_run(self):
@@ -312,6 +338,17 @@ class CacheAndReportTests(SweepFixture):
         self.assert_status(result, 0)
         self.assertTrue(inside.exists())
 
+    def test_a_mount_on_a_cache_ancestor_is_skipped(self):
+        old = self.write(self.home / ".cache" / "pip" / "evidence.txt")
+        self.mount_at(self.home / ".cache")
+
+        result = self.sweep("--apply")
+
+        self.assert_status(result, 0)
+        self.assertTrue(old.exists())
+        self.assertIn("cache .cache/pip: skipped", result.stdout)
+        self.assertIn("is a mount point on the way to", result.stdout)
+
     def test_a_symlinked_cache_ancestor_is_skipped(self):
         victim = self.write(self.root / "outside" / "pip" / "victim")
         (self.home / ".cache").symlink_to(self.root / "outside")
@@ -340,6 +377,55 @@ class CacheAndReportTests(SweepFixture):
         self.assertIn("bigold.bin", result.stdout)
         self.assertNotIn("bignew.bin", result.stdout)
         self.assertNotIn("smallold.bin", result.stdout)
+
+
+def can_bind_mount():
+    if not sys.platform.startswith("linux") or not shutil.which("unshare"):
+        return False
+    probe = subprocess.run(["unshare", "--user", "--map-root-user", "--mount", "true"],
+                           capture_output=True, timeout=30, check=False)
+    return probe.returncode == 0
+
+
+@unittest.skipUnless(can_bind_mount(), "needs Linux with unprivileged user and mount namespaces")
+class BindMountTests(SweepFixture):
+    """Real same-device bind mounts, with a mountinfo fixture that never lists
+    them: only the per-descriptor mount id can catch them."""
+
+    def sweep_in_namespace(self, setup, hook=None):
+        script = self.root / "inside.sh"
+        script.write_text(f"set -eu\n{setup}\nexec \"$@\"\n")
+        environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                       "ROOTFS_TIDY_MOUNTINFO": str(self.mountinfo)}
+        if hook:
+            environment["ROOTFS_TIDY_TEST_HOOK"] = hook
+        return subprocess.run(
+            ["unshare", "--user", "--map-root-user", "--mount", "/bin/bash", str(script),
+             sys.executable, "-I", str(MODULE), "--apply", "--home", str(self.home)],
+            capture_output=True, text=True, env=environment, timeout=60)
+
+    def test_a_bind_mounted_cache_ancestor_is_not_entered(self):
+        evidence = self.write(self.root / "outside" / "pip" / "evidence.txt")
+        (self.home / ".cache").mkdir()
+
+        result = self.sweep_in_namespace(f'mount --bind "{self.root}/outside" "{self.home}/.cache"')
+
+        self.assert_status(result, 0)
+        self.assertTrue(evidence.exists(), result.stdout + result.stderr)
+
+    def test_a_bind_mount_made_before_removal_is_not_entered(self):
+        candidate = self.write(self.tmp / "suite-old" / "inner" / "f").parent.parent
+        age(candidate / "inner")
+        age(candidate)
+        evidence = self.write(self.root / "outside" / "evidence.txt")
+        age(evidence.parent)
+        hook = self.hook(f'[[ $stage == before-remove ]] || exit 0;'
+                         f' mount --bind "{evidence.parent}" "{candidate}/inner"')
+
+        result = self.sweep_in_namespace("", hook=hook)
+
+        self.assertTrue(evidence.exists(), result.stdout + result.stderr)
+        self.assertTrue(candidate.exists())
 
 
 class EntryTests(SweepFixture):

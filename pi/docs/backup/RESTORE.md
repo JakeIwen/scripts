@@ -361,15 +361,18 @@ without `--apply`:
 Every root is opened from `/` one component at a time without following symlinks, so a
 root reached through a symlink is skipped, and every later open, lstat, unlink and rmdir
 is relative to a held directory descriptor: swapping a directory for a symlink mid-run
-cannot redirect a delete. Nothing on another filesystem is entered or deleted (a
-different `st_dev`, or a mount point listed in `/proc/self/mountinfo`, which also
-catches bind mounts); a scratch directory with a mount anywhere below it is kept whole.
-Each file is lstat-ed again just before the unlink: a session or cache file must still
-be the same inode with the same size and mtime, and a scratch-directory entry must still
-be older than the cutoff (otherwise the directory stays). The one unchecked window is an
-entry swapped, or appended to by a writer that already held it open, between that check
-and the unlink; every candidate has been idle for the whole cutoff. A root that exists
-but cannot be opened fails the run.
+cannot redirect a delete. Nothing on another mount is entered or deleted: every
+directory opened must have the home's mount id (`mnt_id` in `/proc/self/fdinfo`, which
+also tells same-device bind mounts apart) and device, and `/proc/self/mountinfo` is
+re-read before each root and before each scratch directory is removed, so a root with a
+mount point on its path below the home, or a scratch directory that is or contains one,
+is left alone. Each file is lstat-ed again just before the unlink: a session or cache
+file must still be the same inode with the same size and mtime. A scratch directory is
+rechecked right before removal (its own mtime, each directory before it is entered, each
+other entry before it is unlinked), and anything newer than the cutoff stays, with its
+parents. The one unchecked window is an entry swapped, or appended to by a writer that
+already held it open, between that check and the unlink; every candidate has been idle
+for the whole cutoff. A root that exists but cannot be opened fails the run.
 
 Nothing in the sweep writes to EXFAT512. A one-time archive made on 2026-11-14 is kept at
 `/mnt/EXFAT512/vanpi-root-archive/`: `codex/`, `pcan/` and `agent-shared/`, each with a
