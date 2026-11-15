@@ -348,11 +348,26 @@ root, so a swapped symlink cannot redirect root; roots with a symlinked ancestor
 skipped) also, each as a dry run without `--apply`:
 
 - moves `~/.codex/archived_sessions/**` and `~/.codex/migration-backups/**` files
-  older than 30 days to `/mnt/EXFAT512/vanpi-root-archive/codex/<same path>` (plain
-  copy via `.tidy-tmp/`, no-clobber publish, sha256 verified; the source is deleted only
-  if its device/inode/size/mtime and hash still match and `findmnt` still shows the
-  exfat volume UUID `122C-A219` there; otherwise it is kept and the run exits nonzero;
-  live `sessions/` is never touched);
+  older than 30 days to `/mnt/EXFAT512/vanpi-root-archive/codex/<same path>`, through
+  `rootfs_tidy_archive.py` beside it (`/usr/bin/python3 -I`; preview with
+  `/usr/bin/python3 -I /home/pi/scripts/rootfs_tidy_archive.py`). Live `sessions/` is
+  never opened. The step is skipped unless the mount point (opened without following
+  any symlink) has the device that `/proc/self/mountinfo` and `findmnt -rn` both give
+  for `/mnt/EXFAT512`, fstype `exfat` and UUID `122C-A219`. Every operation goes
+  through held directory descriptors, so a renamed or symlink-swapped parent cannot
+  redirect it; symlinks are reported and skipped. Each file is copied from its open
+  descriptor into `.tidy-tmp/` (sha256 while reading, fsync, re-hash), published with
+  `renameat2(RENAME_NOREPLACE)` (an existing archive file is never replaced; the Pi's
+  exFAT driver honours the flag, case-insensitively), then the source is renamed to
+  `.tidy-moving-<name>`, checked to be the same inode with unchanged size, mtime and
+  hash, and only then unlinked. Any mismatch puts the name back, withdraws this run's
+  copy and makes the run exit nonzero; a `.tidy-moving-` entry left by an interrupted
+  run is renamed back on the next one. Names exFAT refuses get `%XX` for control
+  characters, `"*/:<>?\|%` and a trailing dot (`a\nb` is archived as `a%0Ab`). The
+  one unchecked window is a writer that already held the file open appending between
+  the last check and the unlink; Codex never writes a session after archiving it,
+  and only files idle for 30 days qualify. The run holds the volume busy, so an
+  unmount at that moment fails instead of racing it;
 - removes `obd-things/tmp/suite-*` directories idle for 2 days and `tmp/playwright?*`
   siblings idle for 14 days (`tmp/playwright`, `compute`, `vehicle_data`, `captures`
   are never matched);

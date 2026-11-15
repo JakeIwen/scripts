@@ -44,10 +44,10 @@ class BackupDeploymentTests(unittest.TestCase):
         for path in shipped:
             self.assertTrue(path.is_file(), path)
             self.assertTrue(path.stat().st_mode & stat.S_IXUSR, path)
-        # Sourced by rootfs_tidy.sh, so it ships beside it but needs no exec bit.
-        self.assertTrue(
-            (REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy_sweeps.sh").is_file()
-        )
+        # Run through bash and python3 by rootfs_tidy.sh, so they ship beside it
+        # but need no exec bit.
+        for name in ("rootfs_tidy_sweeps.sh", "rootfs_tidy_archive.py"):
+            self.assertTrue((REPOSITORY_ROOT / "pi" / "scripts" / name).is_file(), name)
 
 
 if __name__ == "__main__":

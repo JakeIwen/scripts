@@ -2,18 +2,16 @@
 # Age-based SD-root sweeps for rootfs_tidy.sh (it owns the dry-run/--apply
 # contract). As root, rootfs_tidy.sh runs this file as the data owner
 # (`bash rootfs_tidy_sweeps.sh <apply 0|1>` under setpriv), so a symlink swap
-# or racing writer can only reach that user's own files. Shell is enough for
-# the move step on that basis: every destructive step re-verifies identity.
+# or racing writer can only reach that user's own files. The Codex archive move
+# is rootfs_tidy_archive.py beside this file: it deletes after a cross-volume
+# copy, which needs descriptor-relative no-follow operations shell lacks.
 # Every failure sets failed=1, keeps the source, and the run exits nonzero.
 #
 # Roots and tools are overridable so tests run against a fixture tree.
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 tidy_home=${ROOTFS_TIDY_HOME:-/home/pi}
-archive_mount=${ROOTFS_TIDY_ARCHIVE_MOUNT:-/mnt/EXFAT512}
-# Expected identity of the archive volume (blkid/findmnt, read live 2026-11-14).
-archive_fstype=${ROOTFS_TIDY_ARCHIVE_FSTYPE:-exfat}
-archive_uuid=${ROOTFS_TIDY_ARCHIVE_UUID:-122C-A219}
-findmnt_command=${ROOTFS_TIDY_FINDMNT:-/usr/bin/findmnt}
-codex_archive_days=${ROOTFS_TIDY_CODEX_DAYS:-30}
+archive_python=${ROOTFS_TIDY_ARCHIVE_PYTHON:-/usr/bin/python3}
+archive_tool=${ROOTFS_TIDY_ARCHIVE_TOOL:-$script_dir/rootfs_tidy_archive.py}
 suite_days=${ROOTFS_TIDY_SUITE_DAYS:-2}
 playwright_days=${ROOTFS_TIDY_PLAYWRIGHT_DAYS:-14}
 cache_days=${ROOTFS_TIDY_CACHE_DAYS:-30}
@@ -24,7 +22,6 @@ physical_path() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
 
 # Resolve the home once; every default root hangs off the physical path.
 tidy_home=$(physical_path "$tidy_home") || tidy_home=/nonexistent-tidy-home
-archive_root=${ROOTFS_TIDY_ARCHIVE_ROOT:-$archive_mount/vanpi-root-archive}
 obd_tmp=${ROOTFS_TIDY_OBD_TMP:-$tidy_home/dev/obd-things/tmp}
 agent_shared=${ROOTFS_TIDY_AGENT_SHARED:-$tidy_home/Documents/agent-shared}
 
@@ -40,119 +37,13 @@ require_plain_dir() {
   return 1
 }
 
-if [[ -n ${ROOTFS_TIDY_SHA256:-} ]]; then
-  sha_command=("$ROOTFS_TIDY_SHA256")
-elif [[ -x /usr/bin/sha256sum ]]; then
-  sha_command=(/usr/bin/sha256sum)
-else
-  sha_command=(/usr/bin/shasum -a 256)
-fi
-
-sha256_of() {
-  "${sha_command[@]}" -- "$1" 2>/dev/null | cut -d' ' -f1
-}
-
-# device:inode:size:mtime to the sub-second, for "unchanged since" checks.
-if /usr/bin/stat -c %s /dev/null >/dev/null 2>&1; then
-  file_identity() { /usr/bin/stat -c '%d:%i:%s:%.9Y' -- "$1" 2>/dev/null; }
-else
-  file_identity() { /usr/bin/stat -f '%d:%i:%z:%Fm' -- "$1" 2>/dev/null; }
-fi
-
-# Succeeds only when path lives on the exact archive volume mounted at
-# archive_mount. findmnt errors and any other volume are both refusals.
-on_archive_volume() {
-  local line
-  line=$("$findmnt_command" -n -o TARGET,FSTYPE,UUID -T "$1" 2>/dev/null) || return 1
-  [[ "$line" == "$archive_mount $archive_fstype $archive_uuid" ]]
-}
-
-archive_ready() {
-  if ! on_archive_volume "$archive_mount"; then
-    echo "Codex archive: skipped ($archive_mount is not the expected $archive_fstype volume $archive_uuid)"
-    return 1
-  fi
-  require_plain_dir "$archive_mount" "Codex archive"
-}
-
-# Copy src to dest as a plain file (exFAT keeps no owner or links), verify,
-# publish without clobbering, and delete the source only while it is still the
-# file that was copied and the archive is still on the expected volume.
-archive_one_file() {
-  local src=$1 dest=$2 tmpdir=$archive_root/.tidy-tmp tmp ident want got
-  ident=$(file_identity "$src")
-  want=$(sha256_of "$src")
-  if [[ -z "$ident" || -z "$want" ]]; then
-    echo "Codex archive: cannot stat or hash $src; kept it" >&2
-    return 1
-  fi
-  if [[ -e "$dest" ]]; then
-    got=$(sha256_of "$dest")
-    if [[ "$got" != "$want" ]]; then
-      echo "Codex archive: $dest exists with different content; kept $src" >&2
-      return 1
-    fi
-  else
-    /bin/mkdir -p -- "$tmpdir" "$(dirname -- "$dest")" || return 1
-    tmp=$(/usr/bin/mktemp "$tmpdir/copy.XXXXXX") || return 1
-    if ! /bin/cp -- "$src" "$tmp" || ! /usr/bin/touch -r "$src" "$tmp"; then
-      /bin/rm -f -- "$tmp"
-      echo "Codex archive: copy of $src failed; kept it" >&2
-      return 1
-    fi
-    got=$(sha256_of "$tmp")
-    if [[ "$got" != "$want" ]]; then
-      /bin/rm -f -- "$tmp"
-      echo "Codex archive: checksum mismatch for $src; kept it" >&2
-      return 1
-    fi
-    # -n never replaces an existing file; a surviving temp means it refused.
-    /bin/mv -n -- "$tmp" "$dest"
-    if [[ -e "$tmp" ]]; then
-      /bin/rm -f -- "$tmp"
-      echo "Codex archive: $dest appeared during the copy; kept $src" >&2
-      return 1
-    fi
-  fi
-  on_archive_volume "$dest" || {
-    echo "Codex archive: $dest is no longer on the archive volume; kept $src" >&2
-    return 1
-  }
-  [[ "$(sha256_of "$dest")" == "$want" ]] || {
-    echo "Codex archive: archived copy of $src no longer verifies; kept it" >&2
-    return 1
-  }
-  if [[ "$(file_identity "$src")" != "$ident" || "$(sha256_of "$src")" != "$want" ]]; then
-    echo "Codex archive: $src changed while being archived; kept it" >&2
-    return 1
-  fi
-  /bin/rm -f -- "$src"
-}
-
+# Old Codex archive files to the exFAT archive volume (the module's docstring
+# has the identity checks and the move protocol). Its settings come from the
+# environment: ROOTFS_TIDY_ARCHIVE_MOUNT, _ARCHIVE_UUID, _CODEX_DAYS and so on.
 archive_old_codex_files() {
-  local root rel src count=0 moved=0 status
-  local codex_dir=$tidy_home/.codex
-  archive_ready || return 0
-  # Live sessions/ is deliberately absent from this list.
-  for root in "$codex_dir/archived_sessions" "$codex_dir/migration-backups"; do
-    require_plain_dir "$root" "Codex archive" || continue
-    while IFS= read -r -d '' src; do
-      rel=${src#"$codex_dir"/}
-      count=$((count + 1))
-      if (( ! apply )); then
-        echo "Codex archive: would move $rel"
-      elif archive_one_file "$src" "$archive_root/codex/$rel"; then
-        moved=$((moved + 1))
-      else
-        failed=1
-      fi
-    done < <(/usr/bin/find "$root" -type f -mmin +$((codex_archive_days * 1440)) -print0)
-    if (( apply )); then
-      /usr/bin/find "$root" -mindepth 1 -type d -empty \
-        -mmin +$((codex_archive_days * 1440)) -delete 2>/dev/null
-    fi
-  done
-  echo "Codex archive: $count file(s) older than $codex_archive_days days, $moved moved"
+  local mode=--dry-run
+  (( apply )) && mode=--apply
+  "$archive_python" -I "$archive_tool" "$mode" --home "$tidy_home" || failed=1
 }
 
 # Remove a throwaway directory only when a complete traversal finds nothing

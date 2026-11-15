@@ -46,7 +46,7 @@ run_tidy() {
   ROOTFS_TIDY_ID="$fake_bin/id" \
   ROOTFS_TIDY_SUDO="$fake_bin/sudo" \
   ROOTFS_TIDY_APT_GET="$fake_bin/apt-get" \
-  ROOTFS_TIDY_HOME="$test_root/nohome" \
+  ROOTFS_TIDY_HOME="$test_root/nohome" ROOTFS_TIDY_ARCHIVE_MOUNT="$test_root/nomount" \
   ROOTFS_TIDY_SETPRIV="$fake_bin/setpriv" \
   TEST_UID="${TEST_UID:-0}" \
   TEST_CLEANUP_STATUS="${TEST_CLEANUP_STATUS:-0}" \
