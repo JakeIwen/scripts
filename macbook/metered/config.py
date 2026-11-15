@@ -2,9 +2,10 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-# Shorter than the Pi verdict lease (30 s) so inherited home state never lapses between ticks.
 INTERVAL = 15
 STATE_TTL = 75.0
+# Tolerate Pi evidence age plus late launchd ticks; fresh evidence always wins.
+HOME_GRACE = 90.0
 REMOTE_INTERVAL = 900.0
 SSH_TIMEOUT = 20.0
 REMOTE_CLI = '/home/pi/scripts/vanpi-metered'

@@ -191,7 +191,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   its visible width (windows already there keep their order; `--dry-run` prints the
   plan). Add further Mac items to `install_mac_menu.py`.
 - `macbook/metered/`: Python 3.9+ Mac controller and stable `mac-metered` CLI;
-  `com.jacobr.metered` runs once per minute in the GUI login session, not as a
+  `com.jacobr.metered` runs every 15 seconds in the GUI login session, not as a
   daemon. `wifi_helper/reader.py` reads fresh Location-authorized CoreWLAN
   identities through its app; `network.py` reads gateway/ARP, `sync.py` owns
   bounded SSH and the restricting-only offline queue, `decisions.py` leases

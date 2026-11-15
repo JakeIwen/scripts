@@ -1,5 +1,7 @@
 """Serialize one-shot reconciliation, local edits and restricting config replay."""
 from dataclasses import replace
+import json
+import sys
 import time
 
 from shared.metered.policy import PolicyStore
@@ -67,19 +69,34 @@ class Controller:
         return state
 
     def tick(self, force_sync=False, enforce=True, restore=False):
+        started = time.monotonic()
         with self.state.locked():
             try:
-                previous = self.state.load()
-            except (OSError, ValueError):
-                previous = empty_state()
-            network = self.collector()
-            if force_sync or self.cache.due(network, self.clock()):
-                self.cache.sync(previous, self.clock())
-            state = self._evaluate(network, previous)
-            if enforce:
-                state = self._enforce(state, network, restore)
-            self.state.save_locked(state)
-            return state
+                try:
+                    previous = self.state.load()
+                except (OSError, ValueError):
+                    previous = empty_state()
+                network = self.collector()
+                if force_sync or self.cache.due(network, self.clock()):
+                    sync_started = time.monotonic()
+                    succeeded = self.cache.sync(previous, self.clock())
+                    sync_seconds = time.monotonic() - sync_started
+                    if not succeeded:
+                        status = self.cache.status.load()
+                        print(json.dumps({'event': 'metered_sync_failed', 'at': self.clock(),
+                                          'attempted_at': status.attempted_at,
+                                          'sync_seconds': sync_seconds, 'error': status.error}),
+                              file=sys.stderr)
+                state = self._evaluate(network, previous)
+                if enforce:
+                    state = self._enforce(state, network, restore)
+                self.state.save_locked(state)
+                return state
+            finally:
+                tick_seconds = time.monotonic() - started
+                if tick_seconds > 10:
+                    print(json.dumps({'event': 'metered_tick_slow', 'at': self.clock(),
+                                      'tick_seconds': tick_seconds}), file=sys.stderr)
 
     def _enforce(self, state, network, restore):
         settings = self.settings(SETTINGS_TOOL)

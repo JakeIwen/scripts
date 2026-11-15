@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 import io
 import json
@@ -126,22 +126,139 @@ class MacMeteredTests(unittest.TestCase):
         self.controller.tick()
         self.assertEqual(len(self.fixture.ssh_calls()), 2)
 
-    def test_stale_pi_state_becomes_unknown_without_extending_lease(self):
+    def test_failed_syncs_do_not_extend_home_evidence_deadline(self):
         self.fixture.pi_metered = False
+        evidence_at = self.fixture.now
         state = self.controller.tick()
         self.assertFalse(state.verdict.metered)
-        self.assertEqual(state.valid_until, self.fixture.now + 30)
-        self.fixture.advance(31)
-        self.assertEqual(self.cli('allows', 'mac.codex_update')[0], 1)
+        self.assertEqual(state.valid_until, evidence_at + 75)
         self.fixture.online = False
-        state = self.controller.tick()
-        self.assertIsNone(state.verdict.metered)
-        self.assertFalse(state.consumers['mac.codex_update'].permitted)
+        for age in (31, 60, 89, 90, 91):
+            with self.subTest(age=age):
+                self.fixture.now = evidence_at + age
+                state = self.controller.tick()
+                if age <= 90:
+                    self.assertFalse(state.verdict.metered)
+                    self.assertEqual(state.valid_until, evidence_at + 90)
+                    self.assertEqual(self.cli('allows', 'mac.codex_update')[0], int(age == 90))
+                else:
+                    self.assertIsNone(state.verdict.metered)
+                    self.assertFalse(state.consumers['mac.codex_update'].permitted)
         self.assertIsNotNone(self.controller.status()['sync']['error'])
 
-    def test_pi_expired_deadline_rejected_even_with_new_evaluation(self):
-        self.fixture.pi_metered, self.fixture.pi_deadline = False, self.fixture.now - 1
-        self.assertIsNone(self.controller.tick().verdict.metered)
+    def test_home_evidence_age_boundaries(self):
+        self.fixture.pi_metered = False
+        for age in (29, 30, 31, 89, 90, 91):
+            with self.subTest(age=age):
+                self.fixture.pi_evidence = self.fixture.now - age
+                state = self.controller.tick()
+                if age <= 90:
+                    self.assertFalse(state.verdict.metered)
+                    self.assertEqual(state.valid_until,
+                                     min(self.fixture.now + 75, self.fixture.pi_evidence + 90))
+                    self.assertEqual('within grace' in state.verdict.reason, age > 30)
+                else:
+                    self.assertIsNone(state.verdict.metered)
+                    self.assertEqual(state.verdict.reason, 'Pi uplink state is missing or stale')
+
+    def test_expired_pi_leases_are_accepted_only_within_evidence_grace(self):
+        self.fixture.pi_metered = False
+        self.controller.tick()
+        pi = self.controller.cache.pi.load()
+        self.fixture.online = False
+        cases = [(self.fixture.now, self.fixture.now - 1, 42, True),
+                 (self.fixture.now - 76, self.fixture.now + 30, 42, True),
+                 (self.fixture.now - 76, self.fixture.now - 1, 91, False)]
+        for evaluated, deadline, age, accepted in cases:
+            with self.subTest(evaluated=evaluated, deadline=deadline, age=age):
+                self.controller.cache.pi.save_locked(replace(
+                    pi, evaluated_at=evaluated, valid_until=deadline,
+                    verdict=replace(pi.verdict, evidence_at=self.fixture.now - age)))
+                state = self.controller.tick()
+                self.assertIs(state.verdict.metered, False if accepted else None)
+                if accepted:
+                    self.assertIn('within grace', state.verdict.reason)
+
+    def test_home_grace_does_not_override_invalid_pi_records(self):
+        self.fixture.pi_metered = False
+        self.controller.tick()
+        pi = self.controller.cache.pi.load()
+        pi = replace(pi, verdict=replace(pi.verdict, evidence_at=self.fixture.now - 42))
+        self.fixture.online = False
+        invalid = [replace(pi, host=Host.MAC),
+                   replace(pi, evaluated_at=self.fixture.now + 1),
+                   replace(pi, verdict=replace(pi.verdict, evidence_at=self.fixture.now + 1)),
+                   replace(pi, verdict=replace(pi.verdict, evidence_at=None)),
+                   replace(pi, valid_until=None),
+                   replace(pi, config_revision=pi.config_revision + 1),
+                   replace(pi, verdict=replace(pi.verdict, metered=None))]
+        for record in invalid:
+            with self.subTest(record=record):
+                self.controller.cache.pi.save_locked(record)
+                state = self.controller.tick()
+                self.assertIsNone(state.verdict.metered)
+                self.assertFalse(state.consumers['mac.codex_update'].permitted)
+        self.controller.cache.pi.save_locked(pi)
+        self.controller.add_ssid('New metered network')
+        self.assertEqual(self.controller.tick().verdict.reason,
+                         'Pi has not evaluated pending metered SSIDs')
+
+    def test_fresh_pi_response_replaces_graced_unmetered_state(self):
+        for replacement in (None, True):
+            with self.subTest(replacement=replacement):
+                self.fixture.online, self.fixture.pi_metered = True, False
+                self.fixture.pi_evidence = self.fixture.now - 42
+                self.assertFalse(self.controller.tick().verdict.metered)
+                self.fixture.pi_evidence, self.fixture.pi_metered = None, replacement
+                state = self.controller.tick()
+                self.assertIs(state.verdict.metered, replacement)
+                self.assertNotIn('within grace', state.verdict.reason)
+                self.assertFalse(state.consumers['mac.codex_update'].permitted)
+
+    def test_direct_metered_ssid_is_enforced_on_next_tick(self):
+        self.enable()
+        self.fixture.pi_metered = False
+        self.fixture.pi_evidence = self.fixture.now - 42
+        self.assertFalse(self.controller.tick().effective.metered)
+        self.fixture.online, self.fixture.lan, self.fixture.ssid = False, False, 'denlink'
+        state = self.controller.tick()
+        self.assertTrue(state.verdict.metered)
+        self.assertEqual(state.verdict.reason, 'Mac joined a metered SSID')
+        self.assertTrue(self.fixture.flag)
+
+    def test_local_policy_expiry_bounds_graced_home_admission(self):
+        self.fixture.pi_metered = False
+        self.fixture.pi_evidence = self.fixture.now - 42
+        self.controller.tick()
+        self.assertEqual(self.cli('mode', 'metered', '--for', '5s')[0], 0)
+        self.assertEqual(self.controller.tick().valid_until, self.fixture.now + 5)
+        self.cli('mode', 'auto')
+        self.assertEqual(self.cli('approve', 'mac.codex_update', '3s')[0], 0)
+        self.assertEqual(self.controller.tick().valid_until, self.fixture.now + 3)
+
+    def test_sync_failure_and_slow_tick_diagnostics_preserve_wire_output(self):
+        self.fixture.online = False
+        errors = io.StringIO()
+        with redirect_stderr(errors), patch('macbook.metered.controller.time.monotonic',
+                                             side_effect=[0, 1, 12, 13]):
+            code, output = self.cli('tick')
+        self.assertEqual(code, 0)
+        state = HostState.from_dict(json.loads(output))
+        self.assertEqual(state, HostState.from_dict(json.loads(self.controller.state.path.read_text())))
+        failed, slow = [json.loads(line) for line in errors.getvalue().splitlines()]
+        self.assertEqual(failed, {'event': 'metered_sync_failed', 'at': self.fixture.now,
+                                 'attempted_at': self.fixture.now, 'sync_seconds': 11,
+                                 'error': self.controller.cache.status.load().error})
+        self.assertEqual(slow, {'event': 'metered_tick_slow', 'at': self.fixture.now,
+                               'tick_seconds': 13})
+
+    def test_fast_successful_tick_has_no_stderr_diagnostics(self):
+        for elapsed in (1, 10):
+            errors = io.StringIO()
+            with redirect_stderr(errors), patch('macbook.metered.controller.time.monotonic',
+                                                 side_effect=[0, 0, 0, elapsed]):
+                self.controller.tick()
+            self.assertEqual(errors.getvalue(), '')
 
     def test_pi_mode_is_not_a_mac_override(self):
         self.fixture.pi_metered = True

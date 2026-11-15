@@ -178,14 +178,38 @@ operations live under `~/.local/state/metered/`; Mac permissions alone live
 in `~/.config/jacobr/metered.json`. Queueing an SSID add immediately invalidates
 cached admission; the next tick overlays it, without changing the Pi revision.
 Remove requires `--revision` and a live Pi acknowledgement after replay.
-Only confirmed gateway IP **and MAC** allow minute syncs; elsewhere attempts
+Only confirmed gateway IP **and MAC** allow syncs every tick; elsewhere attempts
 are at most once per 15 minutes (explicit `sync` bypasses this rate limit).
 
-Mac-local observations have a 75-second lease, bounded by mode/approval expiry.
-An inherited Pi verdict additionally expires at the Pi's `valid_until`
-and evidence deadline (30 seconds); the 15-second Mac timer keeps a fresh copy,
-and cached Pi evidence is never extended past that deadline. `sync` refreshes decisions but never changes interface flags;
-`tick` is the enforcing command. The Mac Panel shows Pi state read-only with age.
+Mac-local observations have a 75-second lease (`STATE_TTL`), bounded by local
+mode/approval expiry. On the home network, a known Pi verdict may outlive its Pi
+lease and 30-second evidence freshness window, but only until its original
+`evidence_at + 90 seconds` (`HOME_GRACE`). This tolerates evidence already aged
+when received plus late launchd ticks; a graced verdict reports its evidence age
+in the reason. Failed syncs never renew that evidence deadline. Missing/future
+timestamps, missing lease deadlines, foreign hosts, config revision mismatches
+and pending metered SSIDs remain rejected. The Pi's own unknown verdict is never
+overridden, and each fresh Pi response replaces the cached record immediately,
+including unknown or metered responses. Pi policy deadlines do not bound Mac
+admission: the Mac consumes the Pi verdict, not Pi approvals or mode overrides.
+
+The 90 seconds is an **admission deadline, not an enforcement guarantee**.
+CONSTRAINED changes only during ticks; a stalled controller can leave it as-is
+longer. Cached admission after a direct switch to a metered SSID lasts until the
+next tick, up to `STATE_TTL` (75 seconds); that tick detects the direct SSID
+regardless of home grace. If the Pi's own uplink fails over to metered while its
+evidence cannot be refreshed, the Mac can learn up to approximately 90 seconds
+late. `sync` refreshes decisions but never changes interface flags; `tick` is
+the enforcing command. The Mac Panel shows Pi state read-only with age.
+
+Ticks emit JSON lines to stderr for failed Pi syncs (`metered_sync_failed`, with
+attempt time, elapsed sync seconds and the stored sync error) and total durations
+over 10 seconds (`metered_tick_slow`, with `tick_seconds`). Stdout and state.json
+remain HostState records. Both `launchd.stdout.log` and `launchd.stderr.log` in
+`~/.local/state/metered/` are discovered by the existing hourly log rotator:
+by default each rotates above 10 MiB with five gzip archives retained. This is
+an hourly rotation threshold, not a hard instantaneous size cap; per-file
+policies can override it.
 
 Low Data Mode defaults **OFF** (`shared/settings/metered-mac.json`, separate
 from HostPolicy). Run `zsh macbook/metered/install_low_data_mode_sudoers.zsh`
