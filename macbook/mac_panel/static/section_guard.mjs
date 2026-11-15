@@ -54,9 +54,14 @@ function acceptanceStatus(acceptance, service) {
   }
   const accepted = acceptance.last_accepted;
   const refused = acceptance.last_refused;
-  if (refused && (!accepted || refused.at > accepted.at)) {
+  // A refusal warns only while its drift is still there; once a healthy audit clears it, it is history.
+  if (refused && acceptance.refusal_active) {
     return {level: Level.WARN, node: status(Level.WARN, 'last edit not accepted',
       eventDetail(refused, REFUSAL_TEXT[refused.reason] ?? refused.reason))};
+  }
+  if (refused && (!accepted || refused.at > accepted.at)) {
+    return {level: Level.OK, node: status(Level.OK, 'on',
+      eventDetail(refused, 'last refusal since resolved'))};
   }
   if (accepted) {
     return {level: Level.OK, node: status(Level.OK, 'on',

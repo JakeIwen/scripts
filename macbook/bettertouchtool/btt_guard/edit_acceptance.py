@@ -151,4 +151,7 @@ def status(state_dir) -> AcceptanceStatus:
                             pending_since=candidate['since'] if candidate else None,
                             accepts_at=candidate['since'] + SETTLE_SECONDS if candidate else None,
                             last_accepted=value['last_accepted'] if value else None,
-                            last_refused=value['last_refused'] if value else None)
+                            last_refused=value['last_refused'] if value else None,
+                            # A healthy audit clears refused_key, so a refusal whose drift was
+                            # since fixed or checkpointed stays in history without a warning.
+                            refusal_active=bool(value and value['refused_key']))

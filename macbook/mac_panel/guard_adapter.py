@@ -34,12 +34,13 @@ def decode_audit(value):
 
 def decode_acceptance(value):
     object_fields(value, ('state', 'settle_seconds', 'pending_since', 'accepts_at',
-                          'last_accepted', 'last_refused'), status=502)
+                          'last_accepted', 'last_refused', 'refusal_active'), status=502)
     if field(value, 'state', str) not in ACCEPTANCE_STATES:
         raise ApiError(502, 'Invalid guard acceptance state')
     field(value, 'settle_seconds', int)
     field(value, 'pending_since', float, nullable=True)
     field(value, 'accepts_at', float, nullable=True)
+    field(value, 'refusal_active', bool)
     for key in ('last_accepted', 'last_refused'):
         event = field(value, key, dict, nullable=True)
         if event is not None:

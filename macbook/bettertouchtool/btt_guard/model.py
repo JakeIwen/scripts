@@ -212,6 +212,7 @@ class AcceptanceStatus(TypedDict):
     accepts_at: Optional[float]
     last_accepted: Optional[AcceptanceEvent]
     last_refused: Optional[AcceptanceEvent]
+    refusal_active: bool
 
 
 class PruneResult(TypedDict):

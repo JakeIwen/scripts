@@ -61,7 +61,7 @@ class GuardTests(unittest.TestCase):
         acceptance = {'state': 'ok', 'settle_seconds': 600, 'pending_since': 1780000000.0,
                       'accepts_at': 1780000600.0, 'last_accepted': None,
                       'last_refused': {'at': 1779990000, 'checkpoint_id': None, 'reason': 'capture_refused',
-                                       'findings': 2}}
+                                       'findings': 2}, 'refusal_active': True}
         runner = FakeRunner([json_command([]), json_command(audit, 2), json_command(service, 2),
                              json_command(acceptance),
                              json_command(audit, 2), json_command({'btt_version': '5', 'records': 2,
@@ -84,7 +84,8 @@ class GuardTests(unittest.TestCase):
         service = {'installed': True, 'supervised': True, 'job': {}, 'heartbeat': {}, 'audit_status': 'healthy'}
         audit = {'status': 'healthy', 'checkpoint_id': 'cp-one', 'checked_at': 1.0, 'btt_version': '5', 'findings': []}
         for broken in ({'state': 'ok'}, {'state': 'odd', 'settle_seconds': 600, 'pending_since': None,
-                                         'accepts_at': None, 'last_accepted': None, 'last_refused': None}):
+                                         'accepts_at': None, 'last_accepted': None, 'last_refused': None,
+                                         'refusal_active': False}):
             runner = FakeRunner([json_command([]), json_command(audit), json_command(service), json_command(broken)])
             with self.assertRaises(ApiError):
                 GuardAdapter(runner, read_wait=0.01).read()

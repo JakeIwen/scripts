@@ -137,7 +137,20 @@ class ScheduledMonitorTests(unittest.TestCase):
         self.assertEqual(again['notification'], 'sent')
         capture.assert_called_once()
         self.assertEqual(edit_acceptance.status(self.state)['last_refused']['reason'], 'capture_refused')
+        self.assertTrue(edit_acceptance.status(self.state)['refusal_active'])
         self.assertEqual(self.active(), self.original)
+
+    def test_refusal_is_resolved_once_the_audit_is_healthy_again(self):
+        self.run_at(1000)
+        self.edit()
+        self.run_at(1060)
+        with patch.object(edit_acceptance, 'capture', side_effect=ValueError('empty active button')):
+            self.run_at(1060 + SETTLE_SECONDS)
+        checkpoint.capture(self.state, accept_current=True, replace=True)
+        self.assertEqual(self.run_at(2000)['acceptance'], 'not_needed')
+        status = edit_acceptance.status(self.state)
+        self.assertFalse(status['refusal_active'])
+        self.assertEqual(status['last_refused']['reason'], 'capture_refused')
 
     def test_manual_passes_never_accept_or_record_a_session(self):
         self.run_at(1000, managed=False)
