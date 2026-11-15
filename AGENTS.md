@@ -698,7 +698,19 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/sh/plus_commands.py` prints Jacob's + commands: the first sentence of
   each bullet in the global instructions' "+ commands" section. With `--hook`
   it is the UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a
-  bare `+cmd` without a model turn and passes every other prompt through.
+  bare `+cmd` without a model turn; no other prompt is blocked or rewritten.
+  Selected commands receive full procedures as context from the private
+  `~/config/shared/plus-commands/procedures.json` (version 1, exact host/engine
+  variants); never put that policy data in this public repo. `--procedure +id`
+  uses the same selector as an explicit fallback: missing/invalid data is quiet
+  in the hook and an error on the CLI. Darwin/Linux select Mac/Pi; `--file` under
+  `~/.codex` selects Codex, as for slash commands. Matching uses whitespace-only
+  tokens in leading adjacent commands or a trailing command-only suffix; command
+  mentions in focus, quoted/code mentions and prompts consumed by the glossary
+  hook do not trigger it.
+  Procedure output is ordered by first appearance and deduplicated, not executed.
+  Input/data/body/context limits are 1 MiB/256 KiB/16 KiB/64 KiB; tests use only
+  synthetic procedures in scratch homes (`shared/tests/test_plus_commands.py`).
   After the + commands it lists the user's slash commands, which
   `shared/sh/slash_commands.py` finds without running anything: Claude
   command files in `~/.claude/commands/` and each mod's literal
