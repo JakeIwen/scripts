@@ -38,13 +38,16 @@ class BackupDeploymentTests(unittest.TestCase):
         shipped = [
             BACKUP_DIR / "rootfs_budget.sh",
             REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh",
-            REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy_sweeps.sh",
             REPOSITORY_ROOT / "shared" / "sh" / "cleanup_codex_releases.py",
         ]
 
         for path in shipped:
             self.assertTrue(path.is_file(), path)
             self.assertTrue(path.stat().st_mode & stat.S_IXUSR, path)
+        # Sourced by rootfs_tidy.sh, so it ships beside it but needs no exec bit.
+        self.assertTrue(
+            (REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy_sweeps.sh").is_file()
+        )
 
 
 if __name__ == "__main__":
