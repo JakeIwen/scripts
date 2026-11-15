@@ -3,7 +3,7 @@
 # Codex release retention is the shared cleanup_codex_releases.py (the Mac runs
 # the same script). It needs root to see non-dumpable processes in /proc, and
 # acts on the owner's files with that account's effective IDs (--owner).
-# rootfs_tidy_sweeps.sh adds the age-based sweeps (old Codex archived
+# rootfs_tidy_sweeps.py adds the age-based sweeps (old Codex archived
 # sessions, scratch dirs, download caches) and the agent-shared report; run as root.
 set -u
 
@@ -31,7 +31,9 @@ apt_get_command=${ROOTFS_TIDY_APT_GET:-/usr/bin/apt-get}
 
 failed=0
 
-sweeps=${ROOTFS_TIDY_SWEEPS:-$script_dir/rootfs_tidy_sweeps.sh}
+sweeps=${ROOTFS_TIDY_SWEEPS:-$script_dir/rootfs_tidy_sweeps.py}
+sweeps_python=${ROOTFS_TIDY_SWEEPS_PYTHON:-/usr/bin/python3}
+tidy_home=${ROOTFS_TIDY_HOME:-/home/$codex_user}
 setpriv_command=${ROOTFS_TIDY_SETPRIV:-/usr/bin/setpriv}
 
 run_codex_cleanup() {
@@ -85,14 +87,15 @@ run_apt_clean() {
 # The sweeps touch only $codex_user's files, so as root they run as that user
 # (a symlink swap then cannot redirect root); a non-root run uses its own IDs.
 run_extra_sweeps() {
-  local uid
+  local uid mode=--dry-run
+  (( apply )) && mode=--apply
   [[ -r "$sweeps" ]] || { echo "sweeps: cannot read $sweeps" >&2; failed=1; return; }
   uid=$("$id_command" -u 2>/dev/null) || { echo "sweeps: cannot determine effective user" >&2; failed=1; return; }
   if [[ "$uid" == 0 ]]; then
     "$setpriv_command" --reuid="$codex_user" --regid="$codex_user" --init-groups -- \
-      /bin/bash "$sweeps" "$apply" || failed=1
+      "$sweeps_python" -I "$sweeps" "$mode" --home "$tidy_home" || failed=1
   else
-    /bin/bash "$sweeps" "$apply" || failed=1
+    "$sweeps_python" -I "$sweeps" "$mode" --home "$tidy_home" || failed=1
   fi
 }
 

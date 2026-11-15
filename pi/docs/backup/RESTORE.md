@@ -343,26 +343,33 @@ window:
 30 1 * * 0  "$scripts/rootfs_tidy.sh" --apply  >> "$cronlog/rootfs_tidy.log" 2>&1
 ```
 
-The same run (`rootfs_tidy_sweeps.sh` beside it, executed as `pi` through `setpriv` when
-root, so a swapped symlink cannot redirect root; roots with a symlinked ancestor are
-skipped) also, each as a dry run without `--apply`:
+The same run (`rootfs_tidy_sweeps.py` beside it, `/usr/bin/python3 -I`, executed as `pi`
+through `setpriv` when root; preview with
+`/usr/bin/python3 -I /home/pi/scripts/rootfs_tidy_sweeps.py`) also, each as a dry run
+without `--apply`:
 
-- deletes `~/.codex/archived_sessions/**` files older than 30 days, through
-  `rootfs_tidy_codex_sessions.py` beside it (`/usr/bin/python3 -I`; preview with
-  `/usr/bin/python3 -I /home/pi/scripts/rootfs_tidy_codex_sessions.py`), and logs each
-  file and the run's count and bytes. Live `sessions/` and `migration-backups/` are never
-  opened. The walk holds each directory's descriptor (opened without following symlinks)
-  and stays on one filesystem; symlinks and non-regular files are reported and skipped.
-  Each file is lstat-ed again just before `unlinkat` and kept unless it is the same inode
-  with the same size and mtime, still past the cutoff. The one unchecked window is an
-  entry swapped, or appended to by a writer that already held it open, between that
-  check and the unlink; Codex never writes a session after archiving it;
-- removes `obd-things/tmp/suite-*` directories idle for 2 days and `tmp/playwright?*`
-  siblings idle for 14 days (`tmp/playwright`, `compute`, `vehicle_data`, `captures`
-  are never matched);
+- deletes `~/.codex/archived_sessions/**` files older than 30 days, logging each file
+  and the run's count and bytes. Live `sessions/` and `migration-backups/` are never
+  opened;
+- removes `obd-things/tmp/suite-*` directories idle for 2 days and `tmp/playwright-*`
+  siblings idle for 14 days (idle: nothing inside newer than that; `tmp/playwright`,
+  `playwrightNotes`, `compute`, `vehicle_data`, `captures` are never matched);
 - deletes `~/.npm/_cacache` and `~/.cache/pip` files older than 30 days;
 - lists files over 200 MB and older than 14 days in `~/Documents/agent-shared`
   (report only; nothing is deleted).
+
+Every root is opened from `/` one component at a time without following symlinks, so a
+root reached through a symlink is skipped, and every later open, lstat, unlink and rmdir
+is relative to a held directory descriptor: swapping a directory for a symlink mid-run
+cannot redirect a delete. Nothing on another filesystem is entered or deleted (a
+different `st_dev`, or a mount point listed in `/proc/self/mountinfo`, which also
+catches bind mounts); a scratch directory with a mount anywhere below it is kept whole.
+Each file is lstat-ed again just before the unlink: a session or cache file must still
+be the same inode with the same size and mtime, and a scratch-directory entry must still
+be older than the cutoff (otherwise the directory stays). The one unchecked window is an
+entry swapped, or appended to by a writer that already held it open, between that check
+and the unlink; every candidate has been idle for the whole cutoff. A root that exists
+but cannot be opened fails the run.
 
 Nothing in the sweep writes to EXFAT512. A one-time archive made on 2026-11-14 is kept at
 `/mnt/EXFAT512/vanpi-root-archive/`: `codex/`, `pcan/` and `agent-shared/`, each with a
@@ -370,7 +377,8 @@ Nothing in the sweep writes to EXFAT512. A one-time archive made on 2026-11-14 i
 
 `/etc/logrotate.d/rsyslog` comes from `pi/configs/logrotate-rsyslog` (installed by
 `pi/sync_scripts.sh` through `install_logrotate_conf.sh`, which requires `logrotate -d`
-exit 0 on a root-owned copy of the effective config): syslog and auth.log rotate weekly
+exit 0 on a root-owned copy of the effective config, then stages a verified, fsynced
+copy in `/etc` and renames it into place, so a failed write leaves the old file): syslog and auth.log rotate weekly
 or at 50 MB, whichever first (logrotate runs daily), and compress immediately.
 
 Compute job history is pruned separately at Sunday 01:45 by van-compute's own

@@ -36,7 +36,7 @@ build_fixture() {
     "$home/dev/obd-things/tmp/suite-old/inner" "$home/dev/obd-things/tmp/suite-new" \
     "$home/dev/obd-things/tmp/suite-busy/inner" \
     "$home/dev/obd-things/tmp/playwright" "$home/dev/obd-things/tmp/playwright-old" \
-    "$home/dev/obd-things/tmp/compute/job" "$home/.npm/_cacache" "$home/.cache/pip" \
+    "$home/dev/obd-things/tmp/playwrightNotes" "$home/dev/obd-things/tmp/compute/job" "$home/.npm/_cacache" "$home/.cache/pip" \
     "$home/.cache/mozilla" "$home/Documents/agent-shared"
   echo old > "$home/.codex/archived_sessions/old.jsonl"
   echo nested > "$home/.codex/archived_sessions/sub/nested.jsonl"
@@ -53,7 +53,7 @@ build_fixture() {
     "$home/dev/obd-things/tmp/suite-old/inner" "$home/dev/obd-things/tmp/suite-old" \
     "$home/dev/obd-things/tmp/suite-busy" "$home/dev/obd-things/tmp/suite-busy/inner" \
     "$home/dev/obd-things/tmp/playwright-old" "$home/dev/obd-things/tmp/playwright" \
-    "$home/dev/obd-things/tmp/compute/job"
+    "$home/dev/obd-things/tmp/playwrightNotes" "$home/dev/obd-things/tmp/compute/job"
   echo x > "$home/dev/obd-things/tmp/suite-new/f"
   echo c > "$home/.npm/_cacache/oldfile"; echo c > "$home/.npm/_cacache/newfile"
   echo c > "$home/.cache/pip/oldfile"; echo c > "$home/.cache/mozilla/oldfile"
@@ -68,8 +68,7 @@ run_tidy() {
   ROOTFS_TIDY_CODEX_CLEANUP=/fixture/none ROOTFS_TIDY_PYTHON="$fake_bin/noop" \
   ROOTFS_TIDY_ID="$fake_bin/id" ROOTFS_TIDY_SUDO="$fake_bin/noop" \
   ROOTFS_TIDY_APT_GET="$fake_bin/noop" ROOTFS_TIDY_HOME="$home" \
-  ROOTFS_TIDY_CODEX_PYTHON="$python" \
-  ROOTFS_TIDY_CODEX_TOOL="${TEST_CODEX_TOOL:-$repo_root/pi/scripts/rootfs_tidy_codex_sessions.py}" \
+  ROOTFS_TIDY_SWEEPS_PYTHON="$python" \
   ROOTFS_TIDY_SETPRIV="$fake_bin/setpriv" TEST_SETPRIV_LOG="$test_root/setpriv.log" \
   ROOTFS_TIDY_BIG_BYTES=1000 \
     bash "$tidy" "$@"
@@ -101,6 +100,7 @@ exists "$tmp/suite-busy" || fail "suite dir with recent write inside was removed
 exists "$tmp/suite-new" || fail "recent suite dir removed"
 exists "$tmp/playwright-old" && fail "old playwright cache kept"
 exists "$tmp/playwright" || fail "tmp/playwright itself must never be swept"
+exists "$tmp/playwrightNotes" || fail "only playwright-* siblings are swept"
 exists "$tmp/compute/job" || fail "compute touched"
 exists "$home/.npm/_cacache/oldfile" && fail "old npm cache file kept"
 exists "$home/.npm/_cacache/newfile" || fail "new npm cache file removed"
@@ -111,13 +111,15 @@ grep -Fq "bigold.bin" "$test_root/out" || fail "big old file not reported"
 grep -Fq "bignew.bin" "$test_root/out" && fail "recent big file reported"
 grep -Fq "smallold.bin" "$test_root/out" && fail "small file reported"
 
-# A failed Codex step fails the whole run but not the other sweeps.
-build_fixture
-if TEST_CODEX_TOOL="$test_root/missing.py" run_tidy --apply > "$test_root/out" 2>&1; then
-  fail "a failed Codex step reported success"
+# A failed sweep fails the whole run but not the other sweeps.
+if [[ $(id -u) != 0 ]]; then
+  build_fixture
+  chmod 000 "$home/.codex/archived_sessions"
+  if run_tidy --apply > "$test_root/out" 2>&1; then fail "an unreadable Codex archive reported success"; fi
+  chmod 700 "$home/.codex/archived_sessions"
+  exists "$home/.codex/archived_sessions/old.jsonl" || fail "deleted by a failed sweep"
+  exists "$tmp/suite-old" && fail "other sweeps did not run after a Codex sweep failure"
 fi
-exists "$home/.codex/archived_sessions/old.jsonl" || fail "deleted by a failed step"
-exists "$tmp/suite-old" && fail "other sweeps did not run after a Codex step failure"
 
 # Root runs the sweeps as pi, not as root.
 build_fixture
