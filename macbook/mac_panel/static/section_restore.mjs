@@ -1,8 +1,10 @@
-// llm-restore: the CLI owns its crontab block; the page only flips the snapshot switch.
+// llm-restore: the CLI owns its crontab block and saved sets; the page flips the snapshot switch and relays
+// restore/save (restore_snapshots.mjs).
 import {card, info, kv, node, settingRow, tag, timeNode, toggle} from './panel_dom.mjs';
 import {action, refresh} from './panel_sections.mjs';
 import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
+import {AUTO_KEY, NAME_KEY, SNAPSHOT_ANCHOR, snapshotCard} from './restore_snapshots.mjs';
 import {Level, status} from './status_cell.mjs';
 
 const SECTION = 'llm-restore';
@@ -29,11 +31,22 @@ export function render(data) {
   }), kv([['Last snapshot', last], ['Open sessions', sessions]]));
   const level = restoreLevel(data);
   const summary = `${data.enabled ? 'on' : 'off'} · ${data.sessions_open ?? '?'} sessions`;
-  return {node: card({title: 'Session snapshots', level, body, anchor: SNAPSHOTS}), summary, level};
+  const root = node('div');
+  root.append(card({title: 'Session snapshots', level, body, anchor: SNAPSHOTS}), snapshotCard(data));
+  return {node: root, summary, level};
 }
 
 export function searchItems(data) {
+  const sets = data.saved.map(set => set.name);
   return [{
+    title: 'Restore a session snapshot', subtitle: `${sets.length} saved sets`, keywords: ['llmrestore', 'reopen', 'restore', 'snapshot', 'reboot', 'saved', ...sets],
+    anchor: SNAPSHOT_ANCHOR,
+    actions: [{label: 'Choose snapshot', run: () => stageAction(SECTION, SNAPSHOT_ANCHOR, AUTO_KEY)}],
+  }, {
+    title: 'Take a session snapshot', subtitle: 'save the open sessions as a named set', keywords: ['llmrestore', 'save', 'snapshot', 'take', 'sessions'],
+    anchor: SNAPSHOT_ANCHOR,
+    actions: [{label: 'Name snapshot', run: () => stageAction(SECTION, SNAPSHOT_ANCHOR, NAME_KEY)}],
+  }, {
     title: 'llm-restore snapshots', subtitle: data.enabled ? 'on' : 'off', keywords: ['llmrestore', 'sessions', 'claude', 'codex', 'snapshot'],
     anchor: SNAPSHOTS,
     actions: [{label: data.enabled ? 'Turn off' : 'Turn on', run: () => stageAction(SECTION, SNAPSHOTS, 'toggle')}],

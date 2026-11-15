@@ -183,12 +183,24 @@ class CrontabPayload(TypedDict):
     installable: bool
 
 
-class RestorePayload(TypedDict):
+class RestoreStatus(TypedDict):
     enabled: bool
     installed: bool
     up_to_date: bool
     last_snapshot: float | None
     sessions_open: int | None
+
+
+class SavedSet(TypedDict):
+    name: str
+    path: str
+    saved_at: float
+    sessions: int
+
+
+class RestorePayload(RestoreStatus):
+    # `llm_restore.py --saved --json`, newest first.
+    saved: list[SavedSet]
 
 
 class GuardPayload(TypedDict):

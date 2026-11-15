@@ -56,6 +56,7 @@ class PanelRoutes:
             '/api/services': self.services.mutate,
             '/api/services/restart': self.adapters[Section.SERVICES].restart,
             '/api/llm-restore': self.adapters[Section.RESTORE].toggle,
+            '/api/llm-restore/snapshots': self.adapters[Section.RESTORE].snapshots,
             '/api/guard': self.guard.action,
             '/api/logs': self.logs.mutate,
             '/api/ntfy/test': self.notify_test,

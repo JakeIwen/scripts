@@ -34,7 +34,7 @@ export const SECTION_COPY = {
   },
   'llm-restore': {
     title: 'llm-restore',
-    info: 'Every minute a snapshot records the open Claude Code and Codex sessions so llmrestore can reopen them after a reboot. The switch pauses and resumes the snapshot; the CLI owns its crontab block.',
+    info: 'Every minute a snapshot records the open Claude Code and Codex sessions so llmrestore can reopen them after a reboot. The switch pauses and resumes the snapshot; the CLI owns its crontab block. Pick the latest automatic snapshot or a saved set to preview and restore it, or save the open sessions as a new set.',
   },
   metered: {
     title: 'Metered',
@@ -263,6 +263,8 @@ export const JOBS_COPY = {
     toggleInfo: 'Pauses or resumes the every-minute snapshot. The CLI owns its crontab block, so this changes nothing else.',
     sessionsInfo: 'Claude Code and Codex sessions detected as open at the last snapshot.',
     lastInfo: 'When the snapshot last ran. It should be within a minute while snapshots are on.',
+    restoreInfo: 'Reopens the selected sessions as tabs in a new iTerm window; sessions already open are skipped. The text above is a dry run of exactly what will happen.',
+    takeInfo: 'Saves the sessions open now as a named set that stays until you delete it. Leave the name blank for a timestamp; an existing name is refused.',
   },
   overview: {
     quickTitle: 'Quick controls',

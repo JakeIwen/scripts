@@ -11,6 +11,7 @@ export class Element extends EventTarget {
     this.offsetWidth = 80;
     this.isConnected = true;
   }
+  setAttribute(name, value) { this.attributes = {...this.attributes, [name]: String(value)}; }
   replaceChildren(...children) { this.childNodes = children; }
   append(...children) { this.childNodes.push(...children); }
   set textContent(value) { this.childNodes = [String(value)]; }

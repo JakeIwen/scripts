@@ -99,6 +99,13 @@ button.refresh-one { font-size: var(--text-small); padding: 1px 8px; }
 .tag.level-warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 .tag.level-error { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
 
+/* ---- llm-restore snapshots ---- */
+.snapshot-list { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-1); max-width: 760px; }
+.snapshot-pick { width: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); text-align: left; }
+.snapshot-pick[aria-pressed="true"] { border-color: var(--accent); background: var(--soft); }
+.snapshot-pre { max-height: 300px; }
+.snapshot-stage { max-width: 760px; }
+
 /* ---- controls ---- */
 button, input, select, textarea { font: inherit; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--raised); color: var(--text); padding: 4px 10px; }
 input, select, textarea { background: var(--soft); }
