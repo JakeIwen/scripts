@@ -3,7 +3,7 @@ import {api} from './panel_api.mjs';
 import {card, emptyState, node, notice, settingRow, timeNode, toggle} from './panel_dom.mjs';
 import {refresh, sections, state} from './panel_sections.mjs';
 import {search, settingItems} from './search.mjs';
-import {JOBS_COPY} from './section_copy.mjs';
+import {JOBS_COPY, METERED_COPY} from './section_copy.mjs';
 import {sectionLink} from './shell.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 
@@ -67,7 +67,7 @@ const loadingRow = label => settingRow({label, control: node('span', 'loading…
 
 function lowDataRow() {
   const metered = state.metered?.payload;
-  if (!metered) return loadingRow('Low Data Mode');
+  if (!metered) return loadingRow('Automatic Low Data Mode');
   const {enabled, revision, error} = metered.low_data_mode;
   const control = node('div', null, 'actions');
   control.append(toggle({
@@ -75,7 +75,7 @@ function lowDataRow() {
     onChange: next => flip('/api/metered', {action: 'low-data-mode', enabled: next, revision, confirmed: true}, ['metered']),
   }));
   if (error) control.append(node('span', error, 'error small'));
-  return settingRow({label: 'Low Data Mode', info: COPY.lowDataInfo, control, anchor: 'low-data'});
+  return settingRow({label: 'Automatic Low Data Mode', info: METERED_COPY.lowDataInfo, control, anchor: 'low-data'});
 }
 
 function restoreRow() {

@@ -82,7 +82,7 @@ export const METERED_COPY = {
   ssidsInfo: 'Exact, case-sensitive Wi-Fi names that count as metered. Additions work offline and sync to the Pi later; removal needs the Pi and its current revision.',
   ssidsEmpty: 'No SSIDs are metered',
   lowDataTitle: 'Low Data Mode',
-  lowDataInfo: 'Enable only after the sudoers / LAN Time Machine test passes. Wi-Fi is marked constrained while metered and cleared when unmetered or approved. A flag this control did not set (native per-network Low Data Mode) is left alone.',
+  lowDataInfo: 'Only this Mac’s Wi-Fi interface (en0) is affected. The controller sets the macOS CONSTRAINED interface flag, the same flag as System Settings › Wi-Fi › Details › Low Data Mode, but does not save it per network. Ethernet, other interfaces, the Pi and other devices are unaffected. macOS and apps that honor Low Data Mode defer background network use, such as iCloud sync (including Photos), automatic App Store and macOS updates, and background app refresh. Apps decide for themselves; iCloud treats it as advisory. Foreground browsing, SSH, Tailscale and streaming you start are not blocked. LAN Time Machine to the Pi is unaffected, as verified by the setup test. The flag is set while the network is metered or its state is unknown, and cleared on the next tick when unmetered or while Full-speed Wi-Fi is approved. On lets the controller set and clear the flag. Off stops it acting and does not clear a flag it already set. It never clears a flag it did not set. Requires the one-time sudoers / LAN Time Machine test, which must pass before enabling.',
   macConsumersTitle: 'Mac consumers',
   piConsumersTitle: 'Pi consumers',
   piConsumersInfo: 'Pi consumers are approved on the Pi with its own revision; this page only shows what the Pi reported.',
@@ -269,7 +269,6 @@ export const JOBS_COPY = {
   },
   overview: {
     quickTitle: 'Quick controls',
-    lowDataInfo: 'Constrains Wi-Fi while the network is metered and clears it when unmetered or approved. Turn it on only after the sudoers / LAN Time Machine test in Metered has passed.',
     restoreInfo: 'The every-minute snapshot of open Claude Code and Codex sessions that llmrestore reopens after a reboot.',
     allSettings: 'All settings',
   },

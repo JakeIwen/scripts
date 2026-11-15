@@ -89,16 +89,27 @@ function ssidsCard(data) {
 
 // ---- Low Data Mode ----
 
+const LOW_DATA_ACTUAL = {
+  held: {text: 'Wi-Fi now: constrained (Low Data Mode on)', level: Level.IDLE},
+  running: {text: 'Wi-Fi now: not constrained', level: Level.OK},
+  stopped_manually: {text: 'Wi-Fi now: constrained (native or unowned Low Data Mode)', level: Level.IDLE},
+  'n/a': {text: 'Wi-Fi now: unknown (automatic control off)', level: Level.UNKNOWN},
+  unknown: {text: 'Wi-Fi now: unknown', level: Level.UNKNOWN},
+};
+
 function lowDataCard(data) {
   const enabled = data.low_data_mode.enabled;
   const control = toggle({
     label: enabled ? 'On' : 'Off', on: enabled, key: 'ldm-enable',
-    confirm: enabled ? 'turn Low Data Mode off' : 'turn Low Data Mode on',
+    confirm: enabled ? 'turn automatic Low Data Mode off' : 'turn automatic Low Data Mode on',
     onChange: next => send({action: 'low-data-mode', enabled: next, revision: data.low_data_mode.revision, confirmed: true}),
   });
   control.id = 'ldm-switch';
   const body = node('div');
-  body.append(settingRow({label: 'Low Data Mode control', info: COPY.lowDataInfo, control, anchor: 'low-data-mode'}));
+  body.append(settingRow({label: 'Automatic Low Data Mode', info: COPY.lowDataInfo, control, anchor: 'low-data-mode'}));
+  const current = data.fresh ? data.state?.consumers?.['mac.low_data_mode'] : null;
+  const shown = Object.hasOwn(LOW_DATA_ACTUAL, current?.actual) ? LOW_DATA_ACTUAL[current.actual] : LOW_DATA_ACTUAL.unknown;
+  body.append(status(shown.level, shown.text, current?.actual === 'n/a' ? null : current?.reason));
   if (data.low_data_mode.error) body.append(fieldError(data.low_data_mode.error));
   return card({title: COPY.lowDataTitle, body});
 }
