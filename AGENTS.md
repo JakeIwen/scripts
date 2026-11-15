@@ -636,7 +636,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   120-second grace period and `--force` semantics as agents. Mixed saved sets use
   one recency-ordered `--last N` budget across local agents, Pi agents and shells;
   open, missing or guarded items do not consume it. Local preview uses
-  `--apply - --emit --dry-run` (JSON choices without launch-guard writes).
+  `--apply - --emit preview --dry-run` (version-marked JSON choices without
+  launch-guard writes). Legacy `--emit --dry-run` keeps stdout empty so older
+  Macs cannot mistake a dry run for permission to open tabs. Unsupported Pi
+  previews warn and stop mixed `--last` dry-run selection rather than assuming
+  zero remote choices; real restores keep the legacy emit protocol.
   `--dry-run` opens no tabs; an
   unreachable Pi warns without blocking local sessions. The helper uses the
   shared script's `PI_HOST`/`LLM_RESTORE_PI_HOST` and `PI_LLM_RESTORE` settings.

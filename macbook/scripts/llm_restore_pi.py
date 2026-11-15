@@ -230,6 +230,34 @@ def shell_commands(host, shells, live, flags, config):
     return commands
 
 
+class PreviewUnavailable(RuntimeError):
+    """An older peer cannot safely report dry-run choices to a new consumer."""
+
+
+def emitted_sessions(argv, payload, preview, peer, timeout=None, report=True):
+    """Explicit previews carry a version marker, including when no item is chosen."""
+    message = f"preview unavailable on {peer}; update llm_restore.py there; preview stopped before counting further selections"
+    try:
+        result = subprocess.run(argv, input=payload, capture_output=True, text=True, check=True, timeout=timeout)
+    except subprocess.CalledProcessError as error:
+        if preview:
+            raise PreviewUnavailable(message) from error
+        raise
+    try:
+        records = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    except ValueError as error:
+        if preview:
+            raise PreviewUnavailable(message) from error
+        raise
+    if preview:
+        if not records or records[0] != {"llmrestore_preview": 1}:
+            raise PreviewUnavailable(message)
+        records = records[1:]
+    if result.stderr and (report or not records):
+        print(result.stderr.rstrip(), file=sys.stderr)
+    return records
+
+
 def apply_host(host, pi_restore, transport, flags, items, config):
     agents = [i for i in items if i["session"]["tool"] != "shell"]
     shells = [i["session"] for i in items if i["session"]["tool"] == "shell"]
@@ -242,13 +270,11 @@ def apply_host(host, pi_restore, transport, flags, items, config):
         # The remote chooser owns transcript checks, live detection and its
         # launch guard. Strip host so these are local records on the Pi.
         payload = [{**i, "session": {**i["session"], "host": None}} for i in agents]
-        result = subprocess.run([*ssh_args(host), " ".join([pi_restore, "--apply - --emit", *flags])],
-                                input="".join(json.dumps(i) + "\n" for i in payload),
-                                capture_output=True, text=True, check=True, timeout=60)
-        if result.stderr:
-            print(result.stderr.rstrip(), file=sys.stderr)
-        commands += [pi_tab_command(json.loads(line)["command"], host)
-                     for line in result.stdout.splitlines() if line.strip()]
+        preview = "--dry-run" in flags
+        emit = "--emit preview" if preview else "--emit"
+        records = emitted_sessions([*ssh_args(host), " ".join([pi_restore, "--apply -", emit, *flags])],
+                                   "".join(json.dumps(i) + "\n" for i in payload), preview, f"Pi {host}", timeout=60)
+        commands += [pi_tab_command(record["command"], host) for record in records]
     commands += shell_tabs
     if commands and "--dry-run" not in flags:
         print(open_tabs(commands, transport) + f" (ssh {host})")
@@ -259,12 +285,9 @@ def apply_local(items, flags, config):
     """Preview one local candidate without consuming its launch guard."""
     payload = "".join(json.dumps(i) + "\n" for i in items)
     argv = ["/usr/bin/python3", "-I", "-B", config["local_restore"], "--apply", "-", *flags]
-    result = subprocess.run([*argv, "--emit", "--dry-run"], input=payload,
-                            capture_output=True, text=True, check=True)
-    selected = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    selected = emitted_sessions([*argv, "--emit", "preview", "--dry-run"], payload, True, "Mac",
+                                report="--dry-run" in flags)
     if not selected or "--dry-run" in flags:
-        if result.stderr:
-            print(result.stderr.rstrip(), file=sys.stderr)
         return len(selected)
     # The normal local apply preserves transcript-derived iTerm titles and
     # rechecks live/guard state in case it changed after the preview.
@@ -295,6 +318,9 @@ def apply_last(pi_restore, transport, flags, config):
             count = (apply_host(host, pi_restore, transport, flags, [item], config) if host
                      else apply_local([item], flags, config))
             remaining -= count
+        except PreviewUnavailable as error:
+            print("warning: " + str(error), file=sys.stderr)
+            break
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             print("warning: " + warning(host or "local", error), file=sys.stderr)
     return 0
@@ -307,6 +333,8 @@ def apply_saved(pi_restore, transport, flags, config):
         try:
             apply_host(host, pi_restore, transport, flags,
                        [i for i in items if i["session"]["host"] == host], config)
+        except PreviewUnavailable as error:
+            print("warning: " + str(error), file=sys.stderr)
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             print("warning: " + warning(host, error), file=sys.stderr)
     return 0

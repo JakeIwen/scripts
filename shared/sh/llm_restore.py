@@ -842,11 +842,11 @@ def open_terminals(sessions: list[Session], *, titles: list | None = None) -> st
     return f"Attach with: tmux attach -t {TMUX_SESSION}"
 
 
-def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
+def apply(sources: str, opts: RestoreOptions, emit: bool | str) -> int:
     """Reopen the sessions the generated restore script feeds on stdin.
 
-    With `emit` (used by the Mac's --pi over SSH) the sessions to open are
-    printed as JSON lines instead, and the report goes to stderr.
+    `emit` sends choices as JSON and reports to stderr; legacy dry runs emit nothing.
+    `emit="preview"` opts into version-marked JSON choices, including dry runs.
     """
     items = [PlanItem.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
     if IS_MAC and not emit and opts.last is not None and any(i.session.host for i in items):
@@ -883,8 +883,8 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
             # Recorded first, so a launch that fails part-way can't be doubled
             # by an immediate rerun before its sessions register.
             _write_private(LAUNCHED, json.dumps({**launched, **{s.key: now for s in todo}}))
-        if emit and todo:
-            print("\n".join(json.dumps(asdict(s)) for s in todo))
+        if emit and (todo or emit == "preview") and (not opts.dry_run or emit == "preview"):
+            print("\n".join(([json.dumps({"llmrestore_preview": 1})] if emit == "preview" else []) + [json.dumps(asdict(s)) for s in todo]))
         if opts.dry_run:
             return 0
         if todo and not emit:
@@ -1060,7 +1060,7 @@ def main() -> int:
                         help=f"instead reopen the N most recently closed sessions (from the last {RETAIN_S // 3600}h)")
     ap.add_argument("--pi", action="store_true", help="on the Mac: reopen the Pi's sessions as iTerm tabs over SSH")
     ap.add_argument("--apply", metavar="BOOTS", help=argparse.SUPPRESS)  # used by the generated script
-    ap.add_argument("--emit", action="store_true", help=argparse.SUPPRESS)  # used by --pi over SSH
+    ap.add_argument("--emit", nargs="?", const="legacy", choices=["legacy", "preview"], help=argparse.SUPPRESS)  # used by --pi over SSH
     args = ap.parse_args()
     if args.json and not (args.cron or args.list or args.saved):
         ap.error("--json requires --cron, --list or --saved")

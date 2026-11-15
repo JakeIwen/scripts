@@ -150,7 +150,7 @@ class PiSavedTabs(unittest.TestCase):
     def test_dry_run_opens_nothing_and_remote_apply_is_dry(self):
         results = [subprocess.CompletedProcess([], 0, json.dumps({"records": []}), ""),
                    subprocess.CompletedProcess([], 1, "", ""),
-                   subprocess.CompletedProcess([], 0, "", "would open claude agent\n")]
+                   subprocess.CompletedProcess([], 0, json.dumps({"llmrestore_preview": 1}) + "\n", "would open claude agent\n")]
         with patch.object(pi.subprocess, "run", side_effect=results) as run:
             _, out, err = self.entry("apply", [item(session()), item(session("shell", "s"))], ["--dry-run"])
         self.assertIn("--dry-run", run.call_args.args[0][-1])
@@ -183,13 +183,59 @@ class PiSavedTabs(unittest.TestCase):
         def run(cmd, **kwargs):
             if cmd[0] == "/usr/bin/ssh":
                 raise subprocess.CalledProcessError(255, cmd, stderr="offline")
-            return subprocess.CompletedProcess(cmd, 0, json.dumps(local["session"]) + "\n" if "--emit" in cmd else "opened local\n", "")
+            preview = json.dumps({"llmrestore_preview": 1}) + "\n" + json.dumps(local["session"]) + "\n"
+            return subprocess.CompletedProcess(cmd, 0, preview if "--emit" in cmd else "opened local\n", "")
         with patch.object(pi.subprocess, "run", side_effect=run) as run, patch.object(pi, "open_tabs") as opened:
             code, out, err = self.entry("last", [remote, local], ["--last", "1"])
         self.assertEqual(code, 0)
         self.assertIn("offline", err)
         self.assertIn("opened local", out)
         self.assertEqual(run.call_count, 3)
+        opened.assert_not_called()
+
+    def test_unsupported_remote_preview_warns_and_stops_instead_of_spending_unknown_budget(self):
+        remote, local = item(session()), item(session(sid="local", host=None))
+        remote["session"]["last_seen"], local["session"]["last_seen"] = 20, 10
+        peers = [subprocess.CalledProcessError(2, ["ssh"], stderr="usage: old peer rejects preview"),
+                 subprocess.CompletedProcess([], 0, "", "would open on old peer\n"),
+                 subprocess.CompletedProcess([], 0, json.dumps(remote["session"]) + "\n", "")]
+        for peer in peers:
+            with self.subTest(peer=peer), patch.object(pi.subprocess, "run", side_effect=[peer]) as run, \
+                    patch.object(pi, "open_tabs") as opened:
+                code, out, err = self.entry("last", [local, remote], ["--last", "1", "--dry-run"])
+            self.assertEqual(code, 0)
+            self.assertIn("--emit preview", run.call_args.args[0][-1])
+            self.assertIn("preview unavailable on Pi vanpi", err)
+            self.assertIn("preview stopped", err)
+            self.assertNotIn("opened local", out)
+            self.assertEqual(run.call_count, 1)
+            opened.assert_not_called()
+
+    def test_real_last_restore_uses_legacy_protocol_with_old_pi(self):
+        remote, local = item(session()), item(session(sid="local", host=None))
+        remote["session"]["last_seen"], local["session"]["last_seen"] = 20, 10
+        result = subprocess.CompletedProcess([], 0, json.dumps(remote["session"]) + "\n", "open old Pi agent\n")
+        with patch.object(pi.subprocess, "run", return_value=result) as run, \
+                patch.object(pi, "open_tabs", return_value="opened") as opened:
+            code, out, err = self.entry("last", [local, remote], ["--last", "1"])
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_count, 1)
+        self.assertNotIn("preview", run.call_args.args[0][-1])
+        opened.assert_called_once()
+        self.assertNotIn("unavailable", err)
+
+    def test_supported_empty_preview_is_distinct_from_unsupported_peer(self):
+        remote, local = item(session()), item(session(sid="local", host=None))
+        remote["session"]["last_seen"], local["session"]["last_seen"] = 20, 10
+        marker = json.dumps({"llmrestore_preview": 1}) + "\n"
+        results = [subprocess.CompletedProcess([], 0, marker, "skip open Pi agent\n"),
+                   subprocess.CompletedProcess([], 0, marker + json.dumps(local["session"]) + "\n", "would open local\n")]
+        with patch.object(pi.subprocess, "run", side_effect=results) as run, patch.object(pi, "open_tabs") as opened:
+            code, out, err = self.entry("last", [local, remote], ["--last", "1", "--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("would open local", err)
+        self.assertNotIn("unavailable", err)
         opened.assert_not_called()
 
     def test_pending_shell_launches_share_agent_ledger_and_honor_force_expiry_and_dry_run(self):
@@ -234,12 +280,14 @@ class PiSavedTabs(unittest.TestCase):
                     row = json.loads(kwargs["input"].splitlines()[0])["session"]
                     visited.append(row["id"])
                     self.assertIn("--last 1", cmd[-1] if cmd[0] == "/usr/bin/ssh" else " ".join(cmd))
+                    preview = "preview" in cmd[-1] if cmd[0] == "/usr/bin/ssh" else "preview" in cmd
+                    marker = json.dumps({"llmrestore_preview": 1}) + "\n" if preview else ""
                     if row["id"].startswith("open-"):
-                        return subprocess.CompletedProcess(cmd, 0, "", "skip already open\n")
+                        return subprocess.CompletedProcess(cmd, 0, marker, "skip already open\n")
                     if cmd[0] != "/usr/bin/ssh" and "--emit" not in cmd:
                         local_opened.append(row["id"])
                         return subprocess.CompletedProcess(cmd, 0, "opened local\n", "")
-                    return subprocess.CompletedProcess(cmd, 0, json.dumps(row) + "\n", "would open agent\n")
+                    return subprocess.CompletedProcess(cmd, 0, marker + json.dumps(row) + "\n", "would open agent\n")
                 def tabs(commands, transport):
                     opened_ids.extend(commands)
                     return "opened"
@@ -323,14 +371,44 @@ class SharedSavedTabs(unittest.TestCase):
         helper.assert_called_once_with("last", opts, [lr.PlanItem.from_json(i) for i in records])
         choose.assert_not_called()
 
+    def test_legacy_emit_dry_run_keeps_old_mac_consumer_from_opening_tabs(self):
+        record = item(session(host=None))
+        with patch("sys.stdin", io.StringIO(json.dumps(record))), patch("sys.stdout", io.StringIO()) as out, \
+                patch("sys.stderr", io.StringIO()) as err, \
+                patch.object(sys, "argv", ["llmrestore", "--apply", "-", "--emit", "--dry-run"]), \
+                patch.object(lr, "live_sessions", return_value=([], [])), \
+                patch.object(lr, "_session_exists", return_value=True), patch.object(lr, "session_name", return_value=""), \
+                patch.object(lr, "_switchboard_kept", return_value=set()), patch.object(pi, "open_tabs") as opened:
+            self.assertEqual(lr.main(), 0)
+            # Master's consumer treats any emitted session as a real launch.
+            legacy_choices = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+            if legacy_choices:
+                pi.open_tabs([pi.pi_tab_command(s["command"], "vanpi") for s in legacy_choices], "transport.py")
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("would open", err.getvalue())
+        self.assertFalse((self.root / "launched.json").exists())
+        opened.assert_not_called()
+
+    def test_cli_preview_marker_is_present_even_when_no_sessions_are_selected(self):
+        record = item(session(host=None))
+        with patch("sys.stdin", io.StringIO(json.dumps(record))), patch("sys.stdout", io.StringIO()) as out, \
+                patch("sys.stderr", io.StringIO()), \
+                patch.object(sys, "argv", ["llmrestore", "--apply", "-", "--emit", "preview", "--dry-run"]), \
+                patch.object(lr, "live_sessions", return_value=([session(host=None)], [])), \
+                patch.object(lr, "_switchboard_kept", return_value=set()):
+            self.assertEqual(lr.main(), 0)
+        self.assertEqual(json.loads(out.getvalue()), {"llmrestore_preview": 1})
+        self.assertFalse((self.root / "launched.json").exists())
+
     def test_emit_dry_run_reports_selected_records_without_launching_or_recording(self):
         record = item(session(host=None))
         with patch("sys.stdin", io.StringIO(json.dumps(record))), patch("sys.stdout", io.StringIO()) as out, \
                 patch("sys.stderr", io.StringIO()), patch.object(lr, "live_sessions", return_value=([], [])), \
                 patch.object(lr, "_session_exists", return_value=True), patch.object(lr, "session_name", return_value=""), \
                 patch.object(lr, "_switchboard_kept", return_value=set()), patch.object(lr, "open_terminals") as opened:
-            self.assertEqual(lr.apply("-", lr.RestoreOptions(dry_run=True), True), 0)
-        self.assertEqual(json.loads(out.getvalue()), record["session"])
+            self.assertEqual(lr.apply("-", lr.RestoreOptions(dry_run=True), "preview"), 0)
+        self.assertEqual([json.loads(line) for line in out.getvalue().splitlines()],
+                         [{"llmrestore_preview": 1}, record["session"]])
         self.assertFalse((self.root / "launched.json").exists())
         opened.assert_not_called()
 
