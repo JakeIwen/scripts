@@ -62,6 +62,7 @@ class PublicSyncTests(unittest.TestCase):
                 self.assertIn('publication-blocked', events)
                 self.assertIn('packages\n', events)
                 self.assertIn('compute\n', events)
+                self.assertIn('logrotate\n', events)
                 self.assertIn('systemctl enable --now new.service', fixture.log.read_text())
 
     def test_unready_or_corrupt_hosts_refuse_before_unrelated_upload(self):

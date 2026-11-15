@@ -49,6 +49,9 @@ if len(command) == 1: command = shlex.split(command[0])
 if command[:2] == ['/usr/bin/mktemp', '-d']:
     stage = pathlib.Path('/tmp/vanpi-sync-check.' + uuid.uuid4().hex[:6])
     stage.mkdir(mode=0o700); track(stage); print(stage)
+elif command[:2] == ['mktemp', '-d']:
+    stage = pathlib.Path(command[2].rstrip('X') + uuid.uuid4().hex[:6])
+    stage.mkdir(mode=0o700); track(stage); print(stage)
 elif command[0] == '/bin/tar':
     raise SystemExit(subprocess.call(command))
 elif command[0] == '/usr/bin/sudo':
@@ -115,11 +118,16 @@ def make(case, healthy=True):
         shutil.copyfile(fixture.stage / 'services' / name, repo / 'pi/services' / name)
     extras = ['pi/.bashrc', 'pi/canbus_funcs.sh', 'pi/sns.sh', 'pi/keepalive.txt', 'pi/configs/.bash_defaults',
               'pi/configs/rsync-exclude-media.txt', 'pi/configs/smb.conf', 'pi/configs/labwc/autostart',
-              'pi/configs/labwc/blank-when-idle.sh', 'pi/hooks/fixture', 'pi/secrets/fixture', 'shared/sh/fixture.sh', 'shared/sh/mount_disks.sh']
+              'pi/configs/labwc/blank-when-idle.sh', 'pi/configs/logrotate-rsyslog', 'pi/hooks/fixture', 'pi/secrets/fixture',
+              'shared/sh/fixture.sh', 'shared/sh/mount_disks.sh']
     for name in extras:
         path = repo / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('fixture ' + name + '\n')
+    # sync_scripts.sh uploads this installer and runs it with bash on the Pi;
+    # the double records that it ran instead of touching /etc/logrotate.d.
+    installer = repo / 'pi/scripts/install_logrotate_conf.sh'
+    installer.write_text('[[ -f "$1" ]] || exit 1\nprintf "logrotate\\n" >> "$SYNC_TEST_ROOT/transport-events"\n')
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
     host = fixture.bootstrap_ready() if healthy else None
     for path in protected:
