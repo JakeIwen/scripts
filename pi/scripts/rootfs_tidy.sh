@@ -3,8 +3,8 @@
 # Codex release retention is the shared cleanup_codex_releases.py (the Mac runs
 # the same script). It needs root to see non-dumpable processes in /proc, and
 # acts on the owner's files with that account's effective IDs (--owner).
-# rootfs_tidy_sweeps.sh adds the age-based sweeps (Codex archive move, scratch
-# dirs, download caches) and the agent-shared report; run as root.
+# rootfs_tidy_sweeps.sh adds the age-based sweeps (old Codex archived
+# sessions, scratch dirs, download caches) and the agent-shared report; run as root.
 set -u
 
 apply=0

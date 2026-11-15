@@ -347,33 +347,26 @@ The same run (`rootfs_tidy_sweeps.sh` beside it, executed as `pi` through `setpr
 root, so a swapped symlink cannot redirect root; roots with a symlinked ancestor are
 skipped) also, each as a dry run without `--apply`:
 
-- moves `~/.codex/archived_sessions/**` and `~/.codex/migration-backups/**` files
-  older than 30 days to `/mnt/EXFAT512/vanpi-root-archive/codex/<same path>`, through
-  `rootfs_tidy_archive.py` beside it (`/usr/bin/python3 -I`; preview with
-  `/usr/bin/python3 -I /home/pi/scripts/rootfs_tidy_archive.py`). Live `sessions/` is
-  never opened. The step is skipped unless the mount point (opened without following
-  any symlink) has the device that `/proc/self/mountinfo` and `findmnt -rn` both give
-  for `/mnt/EXFAT512`, fstype `exfat` and UUID `122C-A219`. Every operation goes
-  through held directory descriptors, so a renamed or symlink-swapped parent cannot
-  redirect it; symlinks are reported and skipped. Each file is copied from its open
-  descriptor into `.tidy-tmp/` (sha256 while reading, fsync, re-hash), published with
-  `renameat2(RENAME_NOREPLACE)` (an existing archive file is never replaced; the Pi's
-  exFAT driver honours the flag, case-insensitively), then the source is renamed to
-  `.tidy-moving-<name>`, checked to be the same inode with unchanged size, mtime and
-  hash, and only then unlinked. Any mismatch puts the name back, withdraws this run's
-  copy and makes the run exit nonzero; a `.tidy-moving-` entry left by an interrupted
-  run is renamed back on the next one. Names exFAT refuses get `%XX` for control
-  characters, `"*/:<>?\|%` and a trailing dot (`a\nb` is archived as `a%0Ab`). The
-  one unchecked window is a writer that already held the file open appending between
-  the last check and the unlink; Codex never writes a session after archiving it,
-  and only files idle for 30 days qualify. The run holds the volume busy, so an
-  unmount at that moment fails instead of racing it;
+- deletes `~/.codex/archived_sessions/**` files older than 30 days, through
+  `rootfs_tidy_codex_sessions.py` beside it (`/usr/bin/python3 -I`; preview with
+  `/usr/bin/python3 -I /home/pi/scripts/rootfs_tidy_codex_sessions.py`), and logs each
+  file and the run's count and bytes. Live `sessions/` and `migration-backups/` are never
+  opened. The walk holds each directory's descriptor (opened without following symlinks)
+  and stays on one filesystem; symlinks and non-regular files are reported and skipped.
+  Each file is lstat-ed again just before `unlinkat` and kept unless it is the same inode
+  with the same size and mtime, still past the cutoff. The one unchecked window is an
+  entry swapped, or appended to by a writer that already held it open, between that
+  check and the unlink; Codex never writes a session after archiving it;
 - removes `obd-things/tmp/suite-*` directories idle for 2 days and `tmp/playwright?*`
   siblings idle for 14 days (`tmp/playwright`, `compute`, `vehicle_data`, `captures`
   are never matched);
 - deletes `~/.npm/_cacache` and `~/.cache/pip` files older than 30 days;
 - lists files over 200 MB and older than 14 days in `~/Documents/agent-shared`
   (report only; nothing is deleted).
+
+Nothing in the sweep writes to EXFAT512. A one-time archive made on 2026-11-14 is kept at
+`/mnt/EXFAT512/vanpi-root-archive/`: `codex/`, `pcan/` and `agent-shared/`, each with a
+`MANIFEST.sha256`.
 
 `/etc/logrotate.d/rsyslog` comes from `pi/configs/logrotate-rsyslog` (installed by
 `pi/sync_scripts.sh` through `install_logrotate_conf.sh`, which requires `logrotate -d`

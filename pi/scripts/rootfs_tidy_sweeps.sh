@@ -2,16 +2,17 @@
 # Age-based SD-root sweeps for rootfs_tidy.sh (it owns the dry-run/--apply
 # contract). As root, rootfs_tidy.sh runs this file as the data owner
 # (`bash rootfs_tidy_sweeps.sh <apply 0|1>` under setpriv), so a symlink swap
-# or racing writer can only reach that user's own files. The Codex archive move
-# is rootfs_tidy_archive.py beside this file: it deletes after a cross-volume
-# copy, which needs descriptor-relative no-follow operations shell lacks.
+# or racing writer can only reach that user's own files. The Codex session
+# delete is rootfs_tidy_codex_sessions.py beside this file: re-checking each
+# file's identity right before unlinkat needs descriptor-relative no-follow
+# operations shell lacks.
 # Every failure sets failed=1, keeps the source, and the run exits nonzero.
 #
 # Roots and tools are overridable so tests run against a fixture tree.
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 tidy_home=${ROOTFS_TIDY_HOME:-/home/pi}
-archive_python=${ROOTFS_TIDY_ARCHIVE_PYTHON:-/usr/bin/python3}
-archive_tool=${ROOTFS_TIDY_ARCHIVE_TOOL:-$script_dir/rootfs_tidy_archive.py}
+codex_python=${ROOTFS_TIDY_CODEX_PYTHON:-/usr/bin/python3}
+codex_tool=${ROOTFS_TIDY_CODEX_TOOL:-$script_dir/rootfs_tidy_codex_sessions.py}
 suite_days=${ROOTFS_TIDY_SUITE_DAYS:-2}
 playwright_days=${ROOTFS_TIDY_PLAYWRIGHT_DAYS:-14}
 cache_days=${ROOTFS_TIDY_CACHE_DAYS:-30}
@@ -37,13 +38,12 @@ require_plain_dir() {
   return 1
 }
 
-# Old Codex archive files to the exFAT archive volume (the module's docstring
-# has the identity checks and the move protocol). Its settings come from the
-# environment: ROOTFS_TIDY_ARCHIVE_MOUNT, _ARCHIVE_UUID, _CODEX_DAYS and so on.
-archive_old_codex_files() {
+# Codex archived sessions older than ROOTFS_TIDY_CODEX_DAYS (default 30); the
+# module's docstring has the race checks.
+delete_old_codex_sessions() {
   local mode=--dry-run
   (( apply )) && mode=--apply
-  "$archive_python" -I "$archive_tool" "$mode" --home "$tidy_home" || failed=1
+  "$codex_python" -I "$codex_tool" "$mode" --home "$tidy_home" || failed=1
 }
 
 # Remove a throwaway directory only when a complete traversal finds nothing
@@ -115,7 +115,7 @@ report_big_agent_shared() {
 }
 
 run_extra_sweeps() {
-  archive_old_codex_files
+  delete_old_codex_sessions
   sweep_obd_tmp
   sweep_old_cache_files
   report_big_agent_shared
