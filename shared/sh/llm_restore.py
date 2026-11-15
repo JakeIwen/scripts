@@ -30,6 +30,7 @@ machine-readable status object.
 (~/.local/state/llm-restore/saved/NAME.sh, kept until deleted, unlike the 24-hour
 snapshots), so most can be closed to focus on one. `llmrestore NAME` (or a path to
 such a file) reopens that set, skipping any already open; `--saved` lists the sets.
+Mac sets also include this Mac's Pi SSH agent/shell tabs (not tmux); Pi failures only warn.
 
 Standard library only; runs on the MacBook
 (/usr/bin/python3 3.9) and the Pi.
@@ -114,6 +115,7 @@ class Session:
     command: str  # shell line that resumes it from any shell
     managed: str | None = None  # owner that relaunches it itself (llm-switchboard)
     last_seen: float = 0.0  # time of the last snapshot that found it open
+    host: str | None = None  # saved Mac-originated SSH tab; None means local
 
     def __post_init__(self) -> None:
         # A Codex title defaults to the first prompt, which can span lines; the
@@ -498,7 +500,7 @@ def live_sessions() -> tuple[list[Session], list[str]]:
 def list_open_sessions(json_output: bool) -> int:
     """Print a read-only view of sessions detected by the restore logic."""
     located, warnings = located_live_sessions()
-    records = [{"tool": s.tool, "id": s.id, "cwd": s.cwd, "title": s.title, "pid": pid}
+    records = [{"tool": s.tool, "id": s.id, "cwd": s.cwd, "title": s.title, "pid": pid, "command": s.command}
                for s, pid in located]
     if json_output:
         print(json.dumps({"sessions": records, "warnings": warnings}, sort_keys=True))
@@ -618,7 +620,7 @@ def write_restore_script(plan: list[PlanItem], sources: list[str], warnings: lis
             "# --dry-run shows what would happen, --force ignores the 2-minute guard",
             "# against reopening a session that was just launched."]),
     ]
-    lines += [f"#   {i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})\n#     {display_command(i.session.command)}"
+    lines += [f"#   {i.session.host + ' ' if i.session.host else ''}{i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})\n#     {display_command(i.session.command)}"
               for i in plan]
     lines += [f"# warning: {w}" for w in warnings]
     if not plan:
@@ -684,6 +686,10 @@ def save_set(name: str, force: bool) -> int:
         if path.exists() and not force:
             raise SystemExit(f"saved set {name!r} already exists ({path}); --force overwrites it")
         live, warnings = live_sessions()
+        if IS_MAC:
+            remote = pi_request("save")
+            live += [Session.from_json(s) for s in remote["sessions"]]
+            warnings += remote["warnings"]
         now = time.time()
         write_restore_script([PlanItem(replace(s, last_seen=now), 0.0) for s in live], [], warnings, path, [
             f"# Saved by `llmrestore --save {name}` on {os.uname().nodename}, {time.strftime('%Y-%m-%d %H:%M:%S')}.",
@@ -842,6 +848,11 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
     printed as JSON lines instead, and the report goes to stderr.
     """
     items = [PlanItem.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
+    host_items, items = [i for i in items if i.session.host], [i for i in items if not i.session.host]
+    if host_items and IS_MAC and not emit:
+        pi_request("apply", opts, host_items)
+    elif host_items:
+        print("warning: saved SSH tabs can only be restored on the Mac", file=sys.stderr)
     report = sys.stderr if emit else sys.stdout
     # Keyed by session, so one listed by both boots' snapshots opens once.
     in_window = {i.session.key: i for i in items
@@ -876,7 +887,7 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
             else:
                 print(open_terminals(todo, titles=titles))
         else:
-            print("Nothing to reopen." if items else "No sessions recorded. Turn on recording with: llmrestore --cron on",
+            print("Nothing local to reopen." if host_items else "Nothing to reopen." if items else "No sessions recorded. Turn on recording with: llmrestore --cron on",
                   file=report)
         if opts.last is not None:
             return 0  # a few picked out; a full restore can still reopen the rest
@@ -886,6 +897,22 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
         _write_private(CONSUMED, json.dumps(consumed[-20:]))
         regenerate()
     return 0
+
+
+def pi_request(action, opts=RestoreOptions(), items=()):
+    """Best-effort saved SSH tabs; keep local saving/restoration independent."""
+    try:
+        result = subprocess.run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT.with_name("llm_restore_pi.py")),
+                                 action, PI_HOST, PI_LLM_RESTORE, str(ITERM_TRANSPORT), *opts.flags()],
+                                input=json.dumps([asdict(i) for i in items]), capture_output=True, text=True, check=True)
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        if action == "save":
+            return json.loads(result.stdout)
+        print(result.stdout, end="")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"warning: Pi SSH tabs unavailable: {error}", file=sys.stderr)
+    return {"sessions": [], "warnings": []}
 
 
 def restore_pi(opts: RestoreOptions) -> int:
@@ -1015,7 +1042,7 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="list the sessions detected as open, without changing state")
     ap.add_argument("--json", action="store_true", help="with --cron, --list or --saved, print machine-readable JSON")
     ap.add_argument("--save", nargs="?", const="", type=_set_name, metavar="NAME",
-                    help="save the sessions open now as a named set (default: a timestamp); --force overwrites one")
+                    help="save open sessions (Mac: also Pi SSH agents/shells) as a named set; --force overwrites one")
     ap.add_argument("--saved", action="store_true", help="list the saved sets, newest first")
     ap.add_argument("set", nargs="?", metavar="SET", help="reopen a saved set, by name or a path with a /")
     ap.add_argument("--snapshot", action="store_true", help="record the sessions open now")

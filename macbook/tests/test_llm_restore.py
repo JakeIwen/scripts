@@ -383,8 +383,8 @@ class OpenListing(unittest.TestCase):
             self.assertEqual(lr.list_open_sessions(json_output=True), 0)
         self.assertEqual(json.loads(output.getvalue()), {
             "sessions": [
-                {"tool": "claude", "id": A, "cwd": "/w", "title": "one", "pid": 123},
-                {"tool": "codex", "id": B, "cwd": "/w", "title": "two", "pid": 456},
+                {"tool": "claude", "id": A, "cwd": "/w", "title": "one", "pid": 123, "command": f"cmd {A}"},
+                {"tool": "codex", "id": B, "cwd": "/w", "title": "two", "pid": 456, "command": f"cmd {B}"},
             ],
             "warnings": ["warning"],
         })
@@ -636,7 +636,8 @@ class State(unittest.TestCase):
         live = [session("claude", A)] if live is None else live
         with patch.object(lr, "live_sessions", return_value=(live, ["codex pid 1: unknown"])), \
                 patch.object(sys, "argv", ["llm_restore.py", *argv]), patch("sys.stdout", out), \
-                patch("sys.stderr", err), patch.object(lr.os, "execv") as execv:
+                patch("sys.stderr", err), patch.object(lr, "pi_request", return_value={"sessions": [], "warnings": []}), \
+                patch.object(lr.os, "execv") as execv:
             try:
                 code = lr.main()
             except SystemExit as exit_:

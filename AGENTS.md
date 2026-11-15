@@ -623,10 +623,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   and does not follow later `/rename` changes. iTerm's Edit Tab Title can still
   replace it. Profiles, workgroups and global settings are never modified.
 - `macbook/scripts/llm_restore_pi.py` owns llmrestore's Mac-only SSH-to-Pi
-  restore and iTerm command construction. The shared script invokes it by path
+  restore, saved Mac-originated Pi SSH agent/plain-shell tabs and iTerm command construction. The shared script invokes it by path
   with `/usr/bin/python3 -I -B` (stdlib, Python 3.9+); it delegates tab creation
   to `iterm_restore_tabs.py`. Keep both Mac helpers in the checkout, not the
-  flat Pi deployment.
+  flat Pi deployment. Saving probes `/proc` in one read-only SSH call and matches
+  each `SSH_CONNECTION` client endpoint against this Mac's established SSH sockets
+  (`lsof`), excluding tmux and other clients. Restore sends saved agents through
+  the Pi's `--apply - --emit` chooser/launch guard, and skips plain login shells
+  already open from this Mac in the same cwd. `--dry-run` opens no tabs; an
+  unreachable Pi warns without blocking local sessions. The helper uses the
+  shared script's `PI_HOST`/`LLM_RESTORE_PI_HOST` and `PI_LLM_RESTORE` settings.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
@@ -636,7 +642,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/crontab_pi` (its test keeps both equal to `cron_block()`); `--cron off|on`
   pauses and resumes it with a flag file instead of editing the crontab;
   `--cron [on|off] --json` prints one status object for the Mac Panel, while
-  read-only `--list --json` exposes the currently detected sessions and TUI pids.
+  read-only `--list --json` exposes detected sessions, TUI pids and resume commands.
   Resume commands start as `codexp`/`claudep` would: Codex under the
   `codex_autocontinue` wrapper when installed, and `env -u DISPLAY` on the Pi.
   State and the generated restore script live in `~/.local/state/llm-restore/`.
@@ -650,7 +656,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   `--save [NAME]` writes the sessions open now as a named self-contained script
   in `saved/` (`write_restore_script` with `--apply -`, so no boot snapshot is
   consumed; kept indefinitely); `llmrestore NAME|PATH` runs it through `/bin/sh`
-  with the usual flags and `--saved [--json]` lists the sets.
+  with the usual flags and `--saved [--json]` lists the sets. Mac saved sets also
+  include Pi SSH agents and plain login-shell tabs from this Mac, not tmux or
+  other SSH clients. Their optional `host` field distinguishes them from local
+  records; old sets without it still load. Host records bypass local transcript
+  checks. Only saved sets gain these records: boot snapshots/cron are unchanged.
+  Deploy the shared script alone, flat at `/home/pi/scripts/llm_restore.py`;
+  the Mac-only helpers stay in the checkout.
 - `shared/sh/uncommitted_owners.py` implements `+id`: it attributes dirty Git
   paths to recent Claude Code and Codex tool calls, rolls subagents up to their
   resumable parent, names open sessions' terminal location (and, for Claude,
