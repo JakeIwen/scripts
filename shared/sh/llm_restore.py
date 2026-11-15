@@ -888,28 +888,12 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
     return 0
 
 
-def pi_tab_command(command: str) -> str:
-    """Local shell line that runs a Pi session's command over SSH, leaving a
-    Pi shell open afterwards like the SSH tab it originally ran in."""
-    remote = f"bash -lic {shlex.quote(command + '; exec bash -il')}"
-    return f"ssh -t {shlex.quote(PI_HOST)} {shlex.quote(remote)}"
-
-
 def restore_pi(opts: RestoreOptions) -> int:
     """Ask the Pi which of its sessions to reopen, then open them as iTerm tabs."""
     if not IS_MAC:
         raise SystemExit("--pi opens iTerm tabs on the Mac; on the Pi, run llmrestore without it")
-    flags = ["--emit", *opts.flags()]
-    # stderr (the Pi's report) passes straight through to this terminal.
-    res = subprocess.run(["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", PI_HOST,
-                          " ".join([PI_LLM_RESTORE, *flags])], stdout=subprocess.PIPE, text=True)
-    if res.returncode != 0:
-        print(f"Pi restore failed (ssh {PI_HOST} exited {res.returncode}); nothing opened", file=sys.stderr)
-        return res.returncode
-    sessions = [Session.from_json(json.loads(line)) for line in res.stdout.splitlines() if line.strip()]
-    if sessions:
-        print(open_iterm_tabs([pi_tab_command(s.command) for s in sessions]) + f" (ssh {PI_HOST})")
-    return 0
+    return subprocess.run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT.with_name("llm_restore_pi.py")),
+                           "restore", PI_HOST, PI_LLM_RESTORE, str(ITERM_TRANSPORT), *opts.flags()]).returncode
 
 
 def run_restore(opts: RestoreOptions, emit: bool) -> int:

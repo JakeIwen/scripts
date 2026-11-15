@@ -622,6 +622,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   outranks iTerm's Claude workgroup name; it remains pinned after Claude exits
   and does not follow later `/rename` changes. iTerm's Edit Tab Title can still
   replace it. Profiles, workgroups and global settings are never modified.
+- `macbook/scripts/llm_restore_pi.py` owns llmrestore's Mac-only SSH-to-Pi
+  restore and iTerm command construction. The shared script invokes it by path
+  with `/usr/bin/python3 -I -B` (stdlib, Python 3.9+); it delegates tab creation
+  to `iterm_restore_tabs.py`. Keep both Mac helpers in the checkout, not the
+  flat Pi deployment.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on

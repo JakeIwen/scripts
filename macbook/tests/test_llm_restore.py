@@ -21,6 +21,10 @@ lr = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = lr  # dataclasses resolve annotations through it
 spec.loader.exec_module(lr)
 
+pi_spec = importlib.util.spec_from_file_location("llm_restore_pi", SCRIPT.parents[2] / "macbook/scripts/llm_restore_pi.py")
+pi = importlib.util.module_from_spec(pi_spec)
+pi_spec.loader.exec_module(pi)
+
 A, B, C = (f"0000000{i}-0000-0000-0000-000000000000" for i in "abc")
 
 
@@ -308,7 +312,7 @@ class Choose(unittest.TestCase):
 class PiTabs(unittest.TestCase):
     def test_command_survives_local_and_remote_shell_parsing(self):
         command = """cd -- '/home/pi/it'"'"'s' && command claude --settings '{"env":{"A":"b c"}}' --resume x"""
-        local = shlex.split(lr.pi_tab_command(command))
+        local = shlex.split(pi.pi_tab_command(command, lr.PI_HOST))
         self.assertEqual(local[:3], ["ssh", "-t", lr.PI_HOST])
         remote = shlex.split(local[3])
         self.assertEqual(remote[:2], ["bash", "-lic"])
@@ -346,12 +350,13 @@ class TerminalTitles(unittest.TestCase):
 
     def test_pi_restore_passes_no_title_override(self):
         saved = session("claude", A, title="Pi saved title")
-        result = subprocess.CompletedProcess([], 0, json.dumps(asdict(saved)) + "\n", "")
-        with patch.object(lr, "IS_MAC", True), patch.object(lr.subprocess, "run", return_value=result), \
-                patch.object(lr, "open_iterm_tabs", return_value="opened") as opened, \
-                patch("sys.stdout", io.StringIO()):
-            self.assertEqual(lr.restore_pi(lr.RestoreOptions()), 0)
-        opened.assert_called_once_with([lr.pi_tab_command(saved.command)])
+        results = [subprocess.CompletedProcess([], 0, json.dumps(asdict(saved)) + "\n", ""),
+                   subprocess.CompletedProcess([], 0, "", "")]
+        with patch.object(pi.subprocess, "run", side_effect=results) as run, patch("sys.stdout", io.StringIO()):
+            self.assertEqual(pi.main(["restore", lr.PI_HOST, lr.PI_LLM_RESTORE,
+                                      str(lr.ITERM_TRANSPORT), *lr.RestoreOptions().flags()]), 0)
+        self.assertEqual(run.call_args.args[0][-1], pi.pi_tab_command(saved.command, lr.PI_HOST))
+        self.assertEqual(run.call_args.kwargs["input"], "")
 
     def test_linux_ignores_title_override_and_preserves_tmux_commands(self):
         saved = session("claude", A, title="Snapshot name")
