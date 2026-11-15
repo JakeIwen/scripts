@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -314,6 +315,59 @@ class PiTabs(unittest.TestCase):
         self.assertEqual(remote[2], command + "; exec bash -il")
 
 
+class TerminalTitles(unittest.TestCase):
+    def test_no_titles_send_empty_stdin_to_the_transport(self):
+        result = subprocess.CompletedProcess([], 0, "", "")
+        for titles in (None, []):
+            with patch.object(lr.subprocess, "run", return_value=result) as run:
+                lr.open_iterm_tabs(["command one"], titles=titles)
+            self.assertEqual(run.call_args.kwargs["input"], "")
+
+    def test_standalone_linux_script_imports_from_a_shallow_path(self):
+        standalone = types.ModuleType("shallow_restore")
+        standalone.__file__ = "/llm_restore.py"
+        with patch.dict(sys.modules, {standalone.__name__: standalone}), patch.object(sys, "platform", "linux"):
+            exec(compile(SCRIPT.read_text(), standalone.__file__, "exec"), standalone.__dict__)
+        self.assertFalse(standalone.IS_MAC)
+        self.assertIsNone(standalone.ITERM_TRANSPORT)
+        self.assertEqual(standalone.TMUX_SESSION, "llmrestore")
+
+    def test_mac_transport_passes_titles_as_json_and_relays_warning(self):
+        warning = "warning: title API unavailable\n"
+        result = subprocess.CompletedProcess([], 0, "", warning)
+        with patch.object(lr.subprocess, "run", return_value=result) as run, \
+                patch("sys.stderr", io.StringIO()) as stderr:
+            hint = lr.open_iterm_tabs(["command one"], titles=[[0, '" \\(session.name)']])
+        self.assertEqual(json.loads(run.call_args.kwargs["input"]), [[0, '" \\(session.name)']])
+        self.assertEqual(run.call_args.args[0], ["/usr/bin/python3", "-I", "-B", str(lr.ITERM_TRANSPORT), "command one"])
+        self.assertTrue(run.call_args.kwargs["check"])
+        self.assertEqual(stderr.getvalue(), warning)
+        self.assertIn("Opened", hint)
+
+    def test_pi_restore_passes_no_title_override(self):
+        saved = session("claude", A, title="Pi saved title")
+        result = subprocess.CompletedProcess([], 0, json.dumps(asdict(saved)) + "\n", "")
+        with patch.object(lr, "IS_MAC", True), patch.object(lr.subprocess, "run", return_value=result), \
+                patch.object(lr, "open_iterm_tabs", return_value="opened") as opened, \
+                patch("sys.stdout", io.StringIO()):
+            self.assertEqual(lr.restore_pi(lr.RestoreOptions()), 0)
+        opened.assert_called_once_with([lr.pi_tab_command(saved.command)])
+
+    def test_linux_ignores_title_override_and_preserves_tmux_commands(self):
+        saved = session("claude", A, title="Snapshot name")
+        result = subprocess.CompletedProcess([], 0, "%7\n", "")
+        with patch.object(lr, "IS_MAC", False), patch.object(lr, "_run", return_value=result) as run, \
+                patch.object(lr, "open_iterm_tabs") as iterm:
+            hint = lr.open_terminals([saved], titles=[[0, "Do not use"]])
+        iterm.assert_not_called()
+        self.assertEqual([c.args[0] for c in run.call_args_list], [
+            ["tmux", "has-session", "-t", "=llmrestore"],
+            ["tmux", "new-window", "-d", "-t", "=llmrestore:", "-n", "Snapshot name", "-c", "/w", "-P", "-F", "#{pane_id}"],
+            ["tmux", "send-keys", "-t", "%7", "-l", saved.command],
+            ["tmux", "send-keys", "-t", "%7", "Enter"]])
+        self.assertIn("tmux attach", hint)
+
+
 class OpenListing(unittest.TestCase):
     def test_json_lists_detected_sessions_with_their_pids(self):
         detected = [(session("claude", A, title="one"), 123),
@@ -453,7 +507,7 @@ class State(unittest.TestCase):
             run()
             snap.assert_called_with(quiet=False)
 
-    def apply(self, items, opts, emit=True, sources="prev"):
+    def apply(self, items, opts, emit=True, sources="prev", opener=None):
         stdin = "\n".join(json.dumps(lr.asdict(i)) for i in items) + "\n"
         out, err = io.StringIO(), io.StringIO()
         with patch.object(lr, "live_sessions", return_value=([session("claude", A)], [])), \
@@ -464,7 +518,7 @@ class State(unittest.TestCase):
                 patch.object(lr, "CONSUMED", self.root / "consumed.json"), \
                 patch.object(lr, "BOOTS", self.root / "boots"), \
                 patch.object(lr, "boot_id", return_value="now"), \
-                patch.object(lr, "open_terminals") as opened, \
+                patch.object(lr, "open_terminals", side_effect=opener) as opened, \
                 patch("sys.stdin", io.StringIO(stdin)), patch("sys.stdout", out), patch("sys.stderr", err):
             lr.apply(sources, opts, emit)
         return out.getvalue(), err.getvalue(), opened
@@ -478,6 +532,46 @@ class State(unittest.TestCase):
         self.assertIn(f"would open  claude w-1  (Tabs, last seen {lr._clock(1000.0)})\n"
                       f"      cd -- /w && claudepr {B}\n", out)
         self.assertNotIn("before the last snapshot", out)
+
+    def test_local_mac_titles_reuse_custom_then_generated_then_snapshot(self):
+        folder = self.root / "projects/-w"
+        folder.mkdir(parents=True)
+        transcript = folder / f"{B}.jsonl"
+        item = lr.PlanItem(session("claude", B, title="Snapshot"), 0)
+        cases = [([], "Snapshot"),
+                 ([{"type": "ai-title", "aiTitle": "Generated"}], "Generated"),
+                 ([{"type": "custom-title", "customTitle": "Custom"},
+                   {"type": "ai-title", "aiTitle": "Later generated"}], "Custom")]
+        for events, expected in cases:
+            transcript.write_text("".join(json.dumps(e) + "\n" for e in events))
+            with patch.object(lr, "IS_MAC", True), patch.object(lr, "session_name", wraps=lr.session_name) as name:
+                _, _, opened = self.apply([item], lr.RestoreOptions(force=True), emit=False)
+            name.assert_called_once_with(item.session)
+            self.assertEqual(opened.call_args.kwargs, {"titles": [[0, expected]]})
+
+    def test_blank_claude_and_all_codex_names_do_not_override(self):
+        items = [lr.PlanItem(session("codex", B, title="Codex retry title"), 0),
+                 lr.PlanItem(session("claude", C, title=" \t"), 0)]
+        with patch.object(lr, "IS_MAC", True):
+            _, _, opened = self.apply(items, lr.RestoreOptions(), emit=False)
+        self.assertEqual(opened.call_args.kwargs, {"titles": []})
+
+    def test_placeholder_snapshot_titles_are_accepted_at_correct_index(self):
+        items = [lr.PlanItem(session("codex", B, title="Codex"), 0),
+                 lr.PlanItem(session("claude", C, title="w-1"), 0)]
+        with patch.object(lr, "IS_MAC", True):
+            _, _, opened = self.apply(items, lr.RestoreOptions(), emit=False)
+        self.assertEqual(opened.call_args.kwargs, {"titles": [[1, "w-1"]]})
+
+    def test_title_failure_warning_does_not_stop_consumption_or_regeneration(self):
+        item = lr.PlanItem(session("claude", B, title="Saved"), 0)
+        warning = "warning: restored tabs opened, but iTerm conversation titles could not be set. (TimeoutExpired)\n"
+        result = subprocess.CompletedProcess([], 0, "", warning)
+        with patch.object(lr, "IS_MAC", True), patch.object(lr.subprocess, "run", return_value=result):
+            _, err, _ = self.apply([item], lr.RestoreOptions(), emit=False, opener=lr.open_terminals)
+        self.assertEqual(err, warning)
+        self.assertEqual(json.loads((self.root / "consumed.json").read_text()), ["prev"])
+        self.assertTrue((self.root / "restore").exists())
 
     def test_minutes_window_limits_what_reopens(self):
         items = [lr.PlanItem(session("claude", B), 20 * 60), lr.PlanItem(session("claude", C), 50 * 60)]

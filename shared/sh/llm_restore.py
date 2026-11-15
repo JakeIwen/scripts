@@ -813,15 +813,18 @@ ITERM_TRANSPORT = (Path(__file__).resolve().parents[2] / "macbook/scripts/iterm_
                    if IS_MAC else None)
 
 
-def open_iterm_tabs(commands: list[str]) -> str:
-    _run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT), *commands])
+def open_iterm_tabs(commands: list[str], *, titles: list | None = None) -> str:
+    result = subprocess.run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT), *commands],
+                            input=json.dumps(titles) if titles else "", capture_output=True, text=True, check=True)
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
     return "Opened as tabs of a new iTerm window."
 
 
-def open_terminals(sessions: list[Session]) -> str:
+def open_terminals(sessions: list[Session], *, titles: list | None = None) -> str:
     """Start each session's command in its own tab or window; returns a hint."""
     if IS_MAC:
-        return open_iterm_tabs([s.command for s in sessions])
+        return open_iterm_tabs([s.command for s in sessions], titles=titles)
     for s in sessions:
         exists = _run(["tmux", "has-session", "-t", f"={TMUX_SESSION}"], check=False).returncode == 0
         where = ["new-window", "-d", "-t", f"={TMUX_SESSION}:"] if exists else ["new-session", "-d", "-s", TMUX_SESSION]
@@ -851,9 +854,12 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
         todo, skipped = choose(plan, live, launched, opts.force, now, opts.last)
         for line in skipped:
             print(f"skip  {line}", file=report)
-        for s in todo:
+        titles = []
+        for index, s in enumerate(todo):
             seen = f"last seen {_clock(s.last_seen)}"
             name = session_name(s)
+            if IS_MAC and not emit and s.tool == CLAUDE and (name or s.title).strip():
+                titles.append([index, name or s.title])
             print(f"{'would open' if opts.dry_run else 'open'}  {s.label}  ({f'{name}, ' if name else ''}{seen})\n"
                   f"      {display_command(s.command)}", file=report)
         if opts.last is None and len(items) > len(plan):
@@ -868,7 +874,7 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
             if emit:
                 print("\n".join(json.dumps(asdict(s)) for s in todo))
             else:
-                print(open_terminals(todo))
+                print(open_terminals(todo, titles=titles))
         else:
             print("Nothing to reopen." if items else "No sessions recorded. Turn on recording with: llmrestore --cron on",
                   file=report)

@@ -611,6 +611,17 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `macbook/scripts/iterm_restore_tabs.py` is llmrestore's Mac-only iTerm transport,
   invoked by path with `/usr/bin/python3 -I -B` (stdlib, Python 3.9+).
   The shared restore script stays standalone for its flat Pi deployment.
+  AppleScript returns new session ids in command order; the optional `--titles`
+  stage maps those ids to tabs through iTerm's Python API in the existing
+  `~/.local/share/iterm-screen-fonts/venv` (owned by
+  `macbook/scripts/install_iterm_screen_fonts.zsh`). Missing/broken API support
+  warns once without failing restore; no dependencies are installed at runtime.
+  Mac-local Claude tabs use the saved custom title, then generated title, then
+  snapshot title, stripped of controls and capped at 60 characters. Blank names,
+  Codex and `--pi` tabs keep iTerm's normal title behavior. The explicit tab title
+  outranks iTerm's Claude workgroup name; it remains pinned after Claude exits
+  and does not follow later `/rename` changes. iTerm's Edit Tab Title can still
+  replace it. Profiles, workgroups and global settings are never modified.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
