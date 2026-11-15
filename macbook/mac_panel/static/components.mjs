@@ -87,6 +87,22 @@ export function card({title, level, summary, body, actions, anchor: id}) {
 const openInfos = new Set();
 let infoListeners = false;
 
+function positionInfo({root, pop}) {
+  const gutter = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-3')) || 12;
+  const bounds = root.getBoundingClientRect();
+  const left = Math.max(gutter, Math.min(bounds.left, innerWidth - pop.offsetWidth - gutter));
+  const top = Math.max(gutter, Math.min(bounds.bottom + 6, innerHeight - pop.offsetHeight - gutter));
+  pop.style.setProperty('--popover-left', `${left - bounds.left}px`);
+  pop.style.setProperty('--popover-top', `${top - bounds.top}px`);
+}
+
+function positionOpenInfos() {
+  openInfos.forEach(item => {
+    if (!item.root.isConnected) openInfos.delete(item);
+    else positionInfo(item);
+  });
+}
+
 function closeInfos(except) {
   openInfos.forEach(item => {
     if (item === except) return;
@@ -99,6 +115,8 @@ function closeInfos(except) {
 function listenForDismissal() {
   if (infoListeners) return;
   infoListeners = true;
+  globalThis.window?.addEventListener('resize', positionOpenInfos);
+  globalThis.window?.addEventListener('scroll', positionOpenInfos, true);
   document.addEventListener('click', event => {
     if (![...openInfos].some(item => item.root.contains(event.target))) closeInfos(null);
   });
@@ -129,9 +147,7 @@ export function info(text) {
     trigger.setAttribute('aria-expanded', String(opening));
     if (opening) {
       openInfos.add(item);
-      // Keep the popover inside the viewport whichever side the icon is on.
-      const edge = root.getBoundingClientRect().left;
-      pop.style.setProperty('--popover-left', `${Math.max(8, Math.min(edge, innerWidth - pop.offsetWidth - 8)) - edge}px`);
+      positionInfo(item);
     } else {
       openInfos.delete(item);
     }
