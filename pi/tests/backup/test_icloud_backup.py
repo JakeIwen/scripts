@@ -906,6 +906,23 @@ class RetentionResumeTests(unittest.TestCase):
         self.audit_state(orphan_audit={**audit, 'checked_at': time.time() - 90000})
         self.assertIsNone(self.run_worker()['orphan_audit']['error'])
 
+    def test_audit_contains_any_exception_and_a_stop_request_during_the_alert(self):
+        self.audit_state()
+        with mock.patch.object(backup, 'audit_stray_generations', side_effect=KeyError('generation')):
+            state = self.run_worker()
+        self.assertEqual((state['orphan_audit']['error'], state['phase']), ('KeyError', 'not due'))
+        self.file_size = 6 * 1024**3
+        self.notify.side_effect = backup.Deferred('stopped for service shutdown')
+        self.audit_state()
+        state = self.run_worker()
+        self.assertEqual((state['phase'], state['last_error']), ('not due', None))
+        self.assertEqual(state['orphan_audit']['unreferenced_bytes'], 6 * 1024**3)
+
+    def test_audit_lets_a_rejected_login_surface(self):
+        self.audit_state()
+        with mock.patch.object(backup, 'audit_stray_generations', side_effect=backup.AuthenticationRequired('rejected')):
+            self.run_worker(code=1)
+
     def test_interrupted_retention_finishes_on_next_run_even_when_no_copy_is_due(self):
         self.write_state()
         before = backup.read_json(self.state_dir / 'state.json')

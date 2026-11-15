@@ -591,17 +591,22 @@ def record_orphan_audit(state, generation, scan, title):
     """
     try:
         found = scan()
+    except AuthenticationRequired:
+        raise  # a rejected login is job-wide truth the dashboard should show
     except Deferred:
         return
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+    except Exception as exc:  # the audit is optional: nothing it hits may fail the run
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
         print('Leftover-file audit failed: ' + message + failure_detail(exc), file=sys.stderr, flush=True)
         state['orphan_audit'] = {'checked_at': time.time(), 'generation': generation, 'error': message}
         return
     state['orphan_audit'] = {'checked_at': time.time(), 'generation': generation, **found, 'error': None}
     if found['unreferenced_bytes'] > ORPHAN_ALERT_BYTES:
-        notify(state, title, '%.1f GiB in %d leftover files that no kept backup uses. Nothing was deleted.'
-               % (found['unreferenced_bytes'] / 1024**3, found['unreferenced_objects']))
+        try:  # recorded first; a stop request (Deferred) here must not change the run's phase
+            notify(state, title, '%.1f GiB in %d leftover files that no kept backup uses. Nothing was deleted.'
+                   % (found['unreferenced_bytes'] / 1024**3, found['unreferenced_objects']))
+        except Exception:
+            pass
 
 
 def unmount_if_unused(mount, label):

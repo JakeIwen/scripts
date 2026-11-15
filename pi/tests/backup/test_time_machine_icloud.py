@@ -27,6 +27,7 @@ spec = importlib.util.spec_from_file_location('coordinator', REPO / 'macbook/scr
 coordinator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coordinator)
 GEN = 'tm-20260930T010203Z-12345678'
+REAL_STORAGE_ROOT = job.storage_root  # the suites below replace it; one test needs the real one
 
 
 def source_fixture(root, *, now=None):
@@ -975,7 +976,7 @@ class RetentionResumeTests(unittest.TestCase):
         self.audit_state()
         # resume_retention returns before readiness, so the audit's own check is the only call.
         ready = mock.Mock(side_effect=cloud.Deferred('uplink busy'))
-        self.enterContext(mock.patch.object(job, 'require_network_ready', ready))
+        self.enterContext(mock.patch.object(job, 'audit_ready', ready))
         state = self.run_worker()
         self.assertEqual((state['phase'], state['failure_code'], state['last_error']), ('not due', None, None))
         self.assertNotIn('orphan_audit', state)
@@ -995,6 +996,58 @@ class RetentionResumeTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.audit_state(orphan_audit={**audit, 'checked_at': time.time() - 90000})
         self.assertIsNone(self.run_worker()['orphan_audit']['error'])
+
+    def assert_audit_skipped_quietly(self):
+        self.calls.clear()
+        state = self.run_worker()
+        self.assertNotIn('orphan_audit', state)
+        self.assertEqual((state['phase'], state['failure_code'], state['last_error']), ('not due', None, None))
+        self.assertEqual(self.calls, [])
+
+    def test_audit_skips_quietly_on_unreadable_or_foreign_local_metadata(self):
+        for name, content in (('pending.json', '{not json'), ('pending.json', '{}'), ('pending.json', '[]'),
+                              ('retiring.json', '{not json'), ('retiring.json', 'null')):
+            with self.subTest(name=name, content=content):
+                self.audit_state()
+                (self.local / name).write_text(content)
+                self.assert_audit_skipped_quietly()
+                (self.local / name).unlink()
+                (self.local / 'pending.json').write_text(json.dumps({**self.manifest, 'generation': GEN}))
+
+    def test_audit_contains_unexpected_exception_types(self):
+        self.audit_state()
+        self.documents[GEN]['manifest.json'] = json.dumps({**self.manifest, 'generation': None})
+        state = self.run_worker()
+        self.assertIsNotNone(state['orphan_audit']['error'])
+        self.assertEqual((state['phase'], state['failure_code']), ('not due', None))
+        self.audit_state()
+        with mock.patch.object(job, 'scan_leftover_objects', side_effect=TypeError('boom')):
+            state = self.run_worker()
+        self.assertEqual(state['orphan_audit']['error'], 'TypeError')
+
+    def test_audit_lets_a_rejected_login_surface(self):
+        self.audit_state()
+        with mock.patch.object(job, 'scan_leftover_objects', side_effect=cloud.AuthenticationRequired('login rejected')):
+            self.assertEqual(job.main(), 1)
+        self.assertEqual(store.read_json(self.state_dir / 'state.json')['phase'], 'authentication_required')
+
+    def test_stop_request_during_the_alert_keeps_the_recorded_audit_and_phase(self):
+        self.object_size = 2 * 1024**3
+        self.notify.side_effect = cloud.Deferred('stopped for service shutdown')
+        self.audit_state()
+        state = self.run_worker()
+        self.assertEqual((state['phase'], state['last_error']), ('not due', None))
+        self.assertEqual(state['orphan_audit']['unreferenced_bytes'], 6 * 1024**3)
+
+    def test_audit_never_initializes_the_local_store(self):
+        before = sorted(p.relative_to(self.local).as_posix() for p in self.local.rglob('*'))
+        mount = Path(self.state_dir) / 'mount'; mount.mkdir()
+        self.audit_state()
+        with mock.patch.object(job, 'storage_root', REAL_STORAGE_ROOT), mock.patch.object(job, 'MOUNT', mount):
+            state = self.run_worker()
+        self.assertIsNone(state['orphan_audit']['error'])
+        self.assertEqual(sorted(p.relative_to(self.local).as_posix() for p in self.local.rglob('*')), before)
+        self.assertEqual(list(mount.iterdir()), [])
 
     def test_state_without_the_key_triggers_exactly_one_cleanup(self):
         self.write_state()

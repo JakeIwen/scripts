@@ -482,11 +482,16 @@ def retention(cfg, current):
             entry.unlink()
 
 
-def require_network_ready(cfg):
+def audit_ready(cfg):
+    """Readiness without storage_root(), which creates the local store: a read-only audit must not."""
     if not cloud.credentials_ready(cfg) or not (AUTH / 'authenticated.json').is_file() or (AUTH / 'authentication-error.json').exists():
         raise cloud.Deferred('iCloud login is required; use the existing Pi login command')
     cloud.check_work_allowed(cfg)
     cloud.guard(cfg)
+
+
+def require_network_ready(cfg):
+    audit_ready(cfg)
     storage_root()
 
 
@@ -524,7 +529,7 @@ def resume_retention(cfg, state):
 
 def scan_leftover_objects(cfg):
     """Read-only: objects no present generation's manifest references, and generations never completed."""
-    require_network_ready(cfg)
+    audit_ready(cfg)
     require_remote_owner(cfg)
     remote = cfg['remote']
     rows = json.loads(network(cfg, 'lsjson', remote + '/generations', '--dirs-only'))
@@ -551,17 +556,29 @@ def scan_leftover_objects(cfg):
     return {'unreferenced_objects': len(leftover), 'unreferenced_bytes': size, 'stray_generations': sorted(stray)}
 
 
+def store_settled(last):
+    """No newer staged capture and no unfinished retirement; raises on unreadable metadata.
+
+    The last generation's own pending.json stays on disk after it publishes, so a
+    present one must be a dict naming exactly that generation.
+    """
+    absent = object()
+    staged = store.read_json(ROOT / 'pending.json', absent)
+    if staged is not absent and (not isinstance(staged, dict) or staged.get('generation') != last):
+        return False
+    return store.read_json(ROOT / 'retiring.json', []) == []
+
+
 def orphan_audit(cfg, state):
     """Not-due path, after resume_retention: weekly report of leftover cloud objects (never deletes)."""
     last = state.get('last_generation')
     if (not last or state.get('pending') or state.get('retention_done_for') != last
             or not cloud.orphan_audit_due(state)):
         return
-    # A newer staged capture or an unfinished retirement means the store is mid-change.
-    # The last generation's own pending.json stays on disk after it publishes.
-    staged = store.read_json(ROOT / 'pending.json', {})
-    if (not isinstance(staged, dict) or staged.get('generation', last) != last
-            or store.read_json(ROOT / 'retiring.json', []) != []):
+    try:
+        if not store_settled(last):
+            return
+    except Exception:  # unreadable local metadata: skip quietly, the audit is optional
         return
     cloud.record_orphan_audit(state, last, lambda: scan_leftover_objects(cfg), 'Mac Time Machine iCloud leftover files')
 
