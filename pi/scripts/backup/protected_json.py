@@ -19,7 +19,22 @@ def validate_metadata(info, error):
         raise ValueError(error)
 
 
+REPLACED_RETRIES = 3
+_REPLACED = object()
+
+
 def read_protected_json(path, error):
+    # An atomic replace that lands mid-read unlinks the inode we hold (nlink 0);
+    # the bytes read are a stale snapshot, so read the new record from the top.
+    for attempt in range(REPLACED_RETRIES):
+        result = _read_once(path, error, retry=attempt + 1 < REPLACED_RETRIES)
+        if result is not _REPLACED:
+            return result
+    raise AssertionError('unreachable')
+
+
+
+def _read_once(path, error, retry):
     try:
         before = path.lstat()
     except FileNotFoundError:
@@ -39,7 +54,10 @@ def read_protected_json(path, error):
             raise ValueError(error)
         with os.fdopen(fd, 'rb', closefd=False) as source:
             raw = source.read(MAX_RECORD_BYTES + 1)
-        validate_metadata(os.fstat(fd), error)
+        after = os.fstat(fd)
+        if retry and after.st_nlink == 0 and stat.S_ISREG(after.st_mode):
+            return _REPLACED
+        validate_metadata(after, error)
         if len(raw) > MAX_RECORD_BYTES:
             raise ValueError(error)
         return json.loads(raw.decode('utf-8'))

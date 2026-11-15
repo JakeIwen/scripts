@@ -61,6 +61,48 @@ class ProtectedJsonTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.read()
         self.assertEqual(self.path.read_text(), '{broken')
 
+    def test_atomic_replace_during_read_returns_the_new_record(self):
+        real_fdopen = os.fdopen
+        swaps = []
+        def replace_then_open(fd, *args, **kwargs):
+            if not swaps:
+                swaps.append(fd)
+                atomic_json(self.path, {'version': 2})
+            return real_fdopen(fd, *args, **kwargs)
+        with mock.patch.object(records.os, 'fdopen', replace_then_open):
+            self.assertEqual(self.read(), {'version': 2})
+        self.assertEqual(len(swaps), 1)
+
+    def test_discarded_snapshot_is_never_parsed_and_unsafe_successor_is_rejected(self):
+        self.path.write_bytes(b'{broken')
+        self.path.chmod(0o600)
+        real_fdopen = os.fdopen
+        swaps = []
+        def replace_with_public_record(fd, *args, **kwargs):
+            if not swaps:
+                swaps.append(fd)
+                atomic_json(self.path, {'version': 4})
+                self.path.chmod(0o644)
+            return real_fdopen(fd, *args, **kwargs)
+        with mock.patch.object(records.os, 'fdopen', replace_with_public_record):
+            with self.assertRaisesRegex(ValueError, self.error): self.read()
+        self.assertEqual(len(swaps), 1)
+
+    def test_replace_during_every_read_is_still_rejected(self):
+        real_fdopen = os.fdopen
+        writing = []
+        def always_replace(fd, *args, **kwargs):
+            # atomic_json opens through the same patched os.fdopen.
+            if not writing:
+                writing.append(fd)
+                try:
+                    atomic_json(self.path, {'version': 3})
+                finally:
+                    writing.clear()
+            return real_fdopen(fd, *args, **kwargs)
+        with mock.patch.object(records.os, 'fdopen', always_replace):
+            with self.assertRaises(ValueError): self.read()
+
     def test_symlink_swap_between_metadata_and_open_is_rejected(self):
         target = self.root / 'target.json'
         atomic_json(target, {'must': 'not follow'})
