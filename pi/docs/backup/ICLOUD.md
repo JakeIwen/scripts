@@ -73,6 +73,19 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   sends no "verified" alert. It does not recover a local directory left after its
   remote purge finished, or a generation whose `_COMPLETE.json` was removed
   mid-purge: retention no longer lists either one.
+- Leftover-generation audit: once a week, on a not-due run with nothing pending
+  and `retention_done_for` current, the worker lists the remote read-only
+  (`lsjson`/`cat` only; no mount, no delete) and treats every directory that is
+  not one of this job's complete generations (own `_COMPLETE.json`) as stray,
+  for example an abandoned upload or a half-purged generation. It records
+  `orphan_audit` in `state.json` (`checked_at`, `generation`,
+  `stray_generations`, `unreferenced_objects` and `unreferenced_bytes` counting
+  the files inside the strays, `error`) and, above 5 GiB, sends one alert,
+  "vanpi iCloud leftover files". It never changes the job's phase, `last_error`
+  or attempt history; a deferral skips it silently, and a failed audit logs one
+  stderr line, records `error` and retries after a day. To act on an alert,
+  inspect the listed directories with `rclone lsjson` and remove an abandoned one
+  yourself (`rclone purge`); the audit never does.
 - Copied repositories retain the original encryption key/identity. Treat them
   as restore sources; do not independently create/prune/recreate Borg archives
   in a copy while the original repository is in use.

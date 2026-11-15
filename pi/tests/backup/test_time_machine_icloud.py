@@ -740,6 +740,8 @@ class RetentionResumeTests(unittest.TestCase):
         self.inventory_failures = []
         self.owner = {'owner': store.OWNER}
         self.fail_deletes_after = None
+        self.object_size = 1
+        self.calls = []
         self.documents = {}
         for name in (self.PRIOR, GEN):
             data = json.dumps({**self.manifest, 'generation': name})
@@ -764,6 +766,7 @@ class RetentionResumeTests(unittest.TestCase):
         self.enterContext(mock.patch.object(sys, 'argv', ['worker', '--run']))
 
     def network(self, cfg, op, path, *args, **kwargs):
+        self.calls.append(op)
         if op == 'lsjson' and path == self.cfg['remote']:
             return json.dumps([] if self.owner is None else [{'Name': 'OWNER.json'}])
         if op == 'cat' and path == self.cfg['remote'] + '/OWNER.json':
@@ -787,7 +790,7 @@ class RetentionResumeTests(unittest.TestCase):
     def inventory(self, cfg, path):
         if self.inventory_failures:
             raise self.inventory_failures.pop(0)
-        return {k: {'IsDir': False, 'Size': 1, 'ModTime': 'now'} for k in self.remote_objects}
+        return {k: {'IsDir': False, 'Size': self.object_size, 'ModTime': 'now'} for k in self.remote_objects}
 
     def write_state(self, **values):
         store.atomic_json(self.state_dir / 'state.json', {'last_success_at': time.time() - 3600,
@@ -911,6 +914,87 @@ class RetentionResumeTests(unittest.TestCase):
         with mock.patch.object(job, 'retention') as retention:
             self.assertEqual(self.run_worker()['phase'], 'not due')
         retention.assert_not_called()
+
+    def audit_state(self, **values):
+        self.write_state(retention_done_for=GEN, **values)
+
+    def test_audit_records_leftovers_and_stays_quiet_below_the_threshold(self):
+        self.audit_state()
+        state = self.run_worker()
+        audit = state['orphan_audit']
+        self.assertEqual((audit['unreferenced_objects'], audit['unreferenced_bytes']), (3, 3))
+        self.assertEqual((audit['stray_generations'], audit['error'], audit['generation']), ([], None, GEN))
+        self.assertEqual(state['phase'], 'not due')
+        self.notify.assert_not_called()
+        self.assertTrue(set(self.calls) <= {'lsjson', 'cat'}, self.calls)
+        self.assert_nothing_deleted()
+
+    def test_audit_alerts_above_five_gib_without_deleting(self):
+        self.object_size = 2 * 1024**3
+        self.audit_state()
+        audit = self.run_worker()['orphan_audit']
+        self.assertEqual(audit['unreferenced_bytes'], 6 * 1024**3)
+        title, message = self.notify.call_args.args[1:]
+        self.assertEqual(title, 'Mac Time Machine iCloud leftover files')
+        self.assertIn('6.0 GiB', message); self.assertIn('3 leftover', message); self.assertIn('Nothing was deleted.', message)
+        self.assertTrue(set(self.calls) <= {'lsjson', 'cat'}, self.calls)
+        self.assert_nothing_deleted()
+
+    def test_audit_runs_weekly_and_not_before(self):
+        self.audit_state()
+        first = self.run_worker()['orphan_audit']['checked_at']
+        self.calls.clear()
+        self.assertEqual(self.run_worker()['orphan_audit']['checked_at'], first)
+        self.assertEqual(self.calls, [])
+        self.audit_state(orphan_audit={'checked_at': time.time() - 8 * 86400, 'error': None})
+        self.assertGreater(self.run_worker()['orphan_audit']['checked_at'], first)
+
+    def test_audit_skipped_while_work_is_unsettled(self):
+        for values, staged in (({'pending': self.UNFINISHED}, None), ({'retention_done_for': self.PRIOR}, None),
+                               ({}, ('retiring.json', [self.PRIOR])),
+                               ({}, ('pending.json', {**self.manifest, 'generation': self.UNFINISHED}))):
+            with self.subTest(values=values, staged=staged):
+                self.write_state(**{'retention_done_for': GEN, **values})
+                if staged: store.atomic_json(self.local / staged[0], staged[1])
+                with mock.patch.object(job, 'transfer', side_effect=cloud.Deferred('stop')), \
+                        mock.patch.object(job, 'resume_retention'), mock.patch.object(job, 'cleanup_staging'), \
+                        mock.patch.object(job, 'quiesced'), \
+                        mock.patch.object(job.store, 'freeze', side_effect=cloud.Deferred('stop')):
+                    self.assertNotIn('orphan_audit', self.run_worker())
+                self.assertEqual(self.calls, [])
+                for name in ('retiring.json', 'pending.json'):
+                    (self.local / name).unlink(missing_ok=True)
+
+    def test_audit_reports_a_generation_that_never_completed(self):
+        stray = 'tm-20261105T010203Z-00000000'
+        self.documents[stray] = {'manifest.json': json.dumps({**self.manifest, 'generation': stray})}
+        self.audit_state()
+        self.assertEqual(self.run_worker()['orphan_audit']['stray_generations'], [stray])
+
+    def test_audit_deferral_changes_nothing_and_retries_next_tick(self):
+        self.audit_state()
+        # resume_retention returns before readiness, so the audit's own check is the only call.
+        ready = mock.Mock(side_effect=cloud.Deferred('uplink busy'))
+        self.enterContext(mock.patch.object(job, 'require_network_ready', ready))
+        state = self.run_worker()
+        self.assertEqual((state['phase'], state['failure_code'], state['last_error']), ('not due', None, None))
+        self.assertNotIn('orphan_audit', state)
+        self.assertFalse((self.state_dir / 'history.json').exists())
+        ready.side_effect = None
+        self.assertIn('orphan_audit', self.run_worker())
+
+    def test_audit_failure_is_recorded_keeps_the_exit_code_and_retries_after_a_day(self):
+        self.audit_state()
+        self.inventory_failures = [RuntimeError('ambiguous cloud inventory')]
+        state = self.run_worker()
+        audit = state['orphan_audit']
+        self.assertEqual(audit['error'], 'ambiguous cloud inventory')
+        self.assertEqual((state['phase'], state['failure_code'], state['last_error']), ('not due', None, None))
+        self.calls.clear()
+        self.run_worker()
+        self.assertEqual(self.calls, [])
+        self.audit_state(orphan_audit={**audit, 'checked_at': time.time() - 90000})
+        self.assertIsNone(self.run_worker()['orphan_audit']['error'])
 
     def test_state_without_the_key_triggers_exactly_one_cleanup(self):
         self.write_state()

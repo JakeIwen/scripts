@@ -41,6 +41,9 @@ STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
 RCLONE = '/usr/local/bin/rclone'
 GENERATION = re.compile(r'vanpi-\d{8}T\d{6}Z-[0-9a-f]{8}\Z')
 OWNER = 'vanpi-icloud-weekly-v1'
+ORPHAN_AUDIT_INTERVAL = 7 * 86400
+ORPHAN_AUDIT_RETRY = 86400
+ORPHAN_ALERT_BYTES = 5 * 1024**3
 CHILD = None
 CHILD_INTERACTIVE = False
 UPLOAD_SPEED = upload_speed_log.UploadSpeedSampler()
@@ -569,6 +572,38 @@ def notify(state, title, message):
     state['last_notification_title'] = title
 
 
+def orphan_audit_due(state):
+    """Weekly cadence for the read-only leftover audit; a failed one retries after a day."""
+    last = state.get('orphan_audit')
+    if not isinstance(last, dict) or not isinstance(last.get('checked_at'), (int, float)):
+        return True
+    wait = ORPHAN_AUDIT_RETRY if last.get('error') else ORPHAN_AUDIT_INTERVAL
+    return time.time() - last['checked_at'] >= wait
+
+
+def record_orphan_audit(state, generation, scan, title):
+    """Run scan() (read-only, returns the audit's counts) and record it under state['orphan_audit'].
+
+    Leftover objects silently eat the store budget (2026-11-10: 100.7 GiB), so
+    this only reports. It must never change the job's phase, last_error or
+    failure_code: a Deferred (not ready, stop requested) skips silently and the
+    next tick tries again, and any other failure is recorded and retried in a day.
+    """
+    try:
+        found = scan()
+    except Deferred:
+        return
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
+        print('Leftover-file audit failed: ' + message + failure_detail(exc), file=sys.stderr, flush=True)
+        state['orphan_audit'] = {'checked_at': time.time(), 'generation': generation, 'error': message}
+        return
+    state['orphan_audit'] = {'checked_at': time.time(), 'generation': generation, **found, 'error': None}
+    if found['unreferenced_bytes'] > ORPHAN_ALERT_BYTES:
+        notify(state, title, '%.1f GiB in %d leftover files that no kept backup uses. Nothing was deleted.'
+               % (found['unreferenced_bytes'] / 1024**3, found['unreferenced_objects']))
+
+
 def unmount_if_unused(mount, label):
     # Ignition may already have removed the mount. Probe again and never unmount
     # a replacement filesystem accidentally.
@@ -710,9 +745,46 @@ def resume_retention_before_copy(cfg, state, root, mount):
         exact_mount(mount, os.environ['VANPI_ICLOUD_BACKUP_LABEL'])
 
 
+def audit_stray_generations(cfg, last):
+    """Read-only: remote generation directories that are not a complete copy of ours.
+
+    Retention only ever purges complete, verified generations, so an abandoned
+    upload or a half-purged one stays in iCloud until someone removes it.
+    """
+    check_published_generation(cfg, last)
+    rows = json.loads(run([RCLONE, 'lsjson', cfg['remote'], '--dirs-only'], cfg, network=True))
+    stray, count, size = [], 0, 0
+    for row in rows:
+        name = row.get('Name', '')
+        path = cfg['remote'] + '/' + name
+        entries = json.loads(run([RCLONE, 'lsjson', path, '--max-depth', '1'], cfg, network=True))
+        if GENERATION.fullmatch(name) and any(e.get('Name') == '_COMPLETE.json' for e in entries):
+            if complete_marker(json.loads(run([RCLONE, 'cat', path + '/_COMPLETE.json'], cfg, network=True)), name):
+                continue
+        stray.append(name)
+        for item in remote_inventory(cfg, path).values():
+            count += 1
+            size += item['Size'] if isinstance(item.get('Size'), int) else 0
+    return {'stray_generations': sorted(stray), 'unreferenced_objects': count, 'unreferenced_bytes': size}
+
+
+def orphan_audit(cfg, state):
+    """Not-due path, after resume_retention: weekly report of leftover generations (never deletes)."""
+    last = state.get('last_generation')
+    if (not last or state.get('pending') or state.get('retention_done_for') != last
+            or not orphan_audit_due(state)):
+        return
+
+    def scan():
+        require_cloud_ready(cfg)
+        return audit_stray_generations(cfg, last)
+    record_orphan_audit(state, last, scan, 'vanpi iCloud leftover files')
+
+
 def weekly(cfg, state):
     if not cloud_backup_requests.due(cfg, state, STATE_DIR):
         resume_retention(cfg, state)
+        orphan_audit(cfg, state)
         return 'not due'
     require_cloud_ready(cfg)
     with backup_disk_mounted(cfg) as mount:

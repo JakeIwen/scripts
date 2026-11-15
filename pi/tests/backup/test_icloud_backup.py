@@ -756,6 +756,8 @@ class RetentionResumeTests(unittest.TestCase):
         self.remote = {}
         self.calls = []
         self.purge_failures = []
+        self.file_size = None  # None: each fake file is as long as its content
+        self.listing_failures = []
         for name in (self.OLD, self.PRIOR, self.LAST):
             self.remote[name] = {'_COMPLETE.json': self.marker(name)}
             self.local_generation(name, complete=True)
@@ -797,6 +799,11 @@ class RetentionResumeTests(unittest.TestCase):
             return ''
         if operation == 'lsjson' and target == self.cfg['remote']:
             return json.dumps([{'Name': name, 'IsDir': True} for name in self.remote])
+        if operation == 'lsjson' and '--recursive' in args:
+            if self.listing_failures:
+                raise self.listing_failures.pop(0)
+            return json.dumps([{'Path': key, 'IsDir': False, 'Size': len(value) if self.file_size is None else self.file_size}
+                               for key, value in self.remote[target.removeprefix(prefix)].items()])
         if operation == 'lsjson':
             return json.dumps([{'Name': key} for key in self.remote[target.removeprefix(prefix)]])
         if operation == 'cat':
@@ -831,6 +838,73 @@ class RetentionResumeTests(unittest.TestCase):
         self.assertEqual(self.purges(), [])
         self.assertEqual(set(self.remote), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
         self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL})
+
+    def audit_state(self, **values):
+        self.write_state(retention_done_for=self.LAST, **values)
+
+    def assert_read_only(self):
+        self.assertTrue({operation for operation, target in self.calls} <= {'lsjson', 'cat'}, self.calls)
+
+    def test_audit_records_stray_generations_and_stays_quiet_below_the_threshold(self):
+        self.audit_state()
+        state = self.run_worker()
+        audit = state['orphan_audit']
+        self.assertEqual(audit['stray_generations'], [self.PARTIAL])
+        self.assertEqual((audit['unreferenced_objects'], audit['unreferenced_bytes']), (1, 1))
+        self.assertEqual((audit['error'], audit['generation'], state['phase']), (None, self.LAST, 'not due'))
+        self.notify.assert_not_called()
+        self.assert_read_only()
+        self.assert_nothing_deleted()
+        self.mount.assert_not_called()
+
+    def test_audit_alerts_above_five_gib_without_deleting(self):
+        self.file_size = 6 * 1024**3
+        self.audit_state()
+        self.assertEqual(self.run_worker()['orphan_audit']['unreferenced_bytes'], 6 * 1024**3)
+        title, message = self.notify.call_args.args[1:]
+        self.assertEqual(title, 'vanpi iCloud leftover files')
+        self.assertIn('6.0 GiB', message); self.assertIn('Nothing was deleted.', message)
+        self.assert_read_only()
+        self.assert_nothing_deleted()
+
+    def test_audit_runs_weekly_and_not_before(self):
+        self.audit_state()
+        first = self.run_worker()['orphan_audit']['checked_at']
+        self.calls.clear()
+        self.assertEqual(self.run_worker()['orphan_audit']['checked_at'], first)
+        self.assertEqual(self.calls, [])
+        self.audit_state(orphan_audit={'checked_at': time.time() - 8 * 86400, 'error': None})
+        self.assertGreater(self.run_worker()['orphan_audit']['checked_at'], first)
+
+    def test_audit_skipped_while_work_is_unsettled(self):
+        for values in ({'retention_done_for': self.PRIOR},):  # a pending copy is never a not-due run
+            with self.subTest(values=values):
+                self.write_state(**{'retention_done_for': self.LAST, **values})
+                with mock.patch.object(backup, 'resume_retention'):
+                    self.assertNotIn('orphan_audit', self.run_worker())
+                self.assertEqual(self.calls, [])
+
+    def test_audit_deferral_changes_nothing_and_retries_next_tick(self):
+        self.audit_state()
+        with mock.patch.object(backup, 'check_work_allowed', side_effect=backup.Deferred('ignition is on')):
+            state = self.run_worker()
+        self.assertEqual((state['phase'], state['last_error']), ('not due', None))
+        self.assertNotIn('orphan_audit', state)
+        self.assertFalse((self.state_dir / 'history.json').exists())
+        self.assertIn('orphan_audit', self.run_worker())
+
+    def test_audit_failure_is_recorded_keeps_the_exit_code_and_retries_after_a_day(self):
+        self.audit_state()
+        self.listing_failures = [RuntimeError('rclone lsjson failed (exit 1)')]
+        state = self.run_worker()
+        audit = state['orphan_audit']
+        self.assertEqual(audit['error'], 'rclone lsjson failed (exit 1)')
+        self.assertEqual((state['phase'], state['last_error']), ('not due', None))
+        self.calls.clear()
+        self.run_worker()
+        self.assertEqual(self.calls, [])
+        self.audit_state(orphan_audit={**audit, 'checked_at': time.time() - 90000})
+        self.assertIsNone(self.run_worker()['orphan_audit']['error'])
 
     def test_interrupted_retention_finishes_on_next_run_even_when_no_copy_is_due(self):
         self.write_state()

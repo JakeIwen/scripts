@@ -179,6 +179,23 @@ the leftover objects count against the store budget. The resumed cleanup first
 reads the cloud store's owner marker and refuses, deleting nothing, when it is
 missing or foreign; it never claims a store.
 
+**Leftover-file audit.** Once a week, on an ordinary run where no copy is due
+(and cleanup is settled: nothing pending, `retention_done_for` current, no newer
+staged capture, an empty `retiring.json`), the worker lists the store read-only
+(`lsjson`/`cat` only, after the same owner-marker check) and compares the objects
+with the union of every present generation's validated manifest. Objects nobody
+references, and generation directories without `_COMPLETE.json`, are recorded in
+`state.json` as `orphan_audit` (`checked_at`, `generation`,
+`unreferenced_objects`, `unreferenced_bytes`, `stray_generations`, `error`).
+Above 5 GiB unreferenced it sends one phone alert, "Mac Time Machine iCloud
+leftover files". It never deletes, claims or writes anything remote, and never
+changes the job's phase, `last_error`, `failure_code` or attempt history: a
+deferral (route, pause, ignition) skips it silently until the next tick, and a
+failed audit logs one stderr line, records `error` and retries after a day. To
+act on an alert, read `orphan_audit` with `--status`; an interrupted cleanup is
+normally already resumed, so unreferenced objects that persist need a manual,
+reviewed deletion of exactly those names (the audit lists none by design).
+
 The existing rclone iCloud backend reports `About=false`: account-wide free
 space cannot be queried through it. A configurable **900 GiB dedicated-store
 budget** limits new uploads; this is NOT an iCloud quota reservation. Leave

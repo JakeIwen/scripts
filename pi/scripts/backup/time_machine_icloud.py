@@ -522,9 +522,54 @@ def resume_retention(cfg, state):
     run_retention(cfg, state, last)
 
 
+def scan_leftover_objects(cfg):
+    """Read-only: objects no present generation's manifest references, and generations never completed."""
+    require_network_ready(cfg)
+    require_remote_owner(cfg)
+    remote = cfg['remote']
+    rows = json.loads(network(cfg, 'lsjson', remote + '/generations', '--dirs-only'))
+    referenced, stray = set(), []
+    for row in rows:
+        name = row.get('Name', '')
+        if not row.get('IsDir') or not store.GENERATION.fullmatch(name):
+            raise RuntimeError('unexpected cloud generation; audit refused')
+        path = remote + '/generations/' + name
+        names = {e.get('Name') for e in json.loads(network(cfg, 'lsjson', path, '--files-only'))}
+        if 'manifest.json' in names:
+            manifest = json.loads(network(cfg, 'cat', path + '/manifest.json'))
+            keys = store.validate_manifest(manifest)
+            if manifest['generation'] != name:
+                raise RuntimeError('audit generation mismatch')
+            referenced.update(keys)
+        if '_COMPLETE.json' not in names:
+            stray.append(name)
+    objects = cloud.remote_inventory(cfg, remote + '/objects')
+    if not all(store.DIGEST.fullmatch(digest) for digest in objects):
+        raise RuntimeError('unknown object name; audit refused')
+    leftover = objects.keys() - referenced
+    size = sum(objects[d]['Size'] for d in leftover if isinstance(objects[d].get('Size'), int))
+    return {'unreferenced_objects': len(leftover), 'unreferenced_bytes': size, 'stray_generations': sorted(stray)}
+
+
+def orphan_audit(cfg, state):
+    """Not-due path, after resume_retention: weekly report of leftover cloud objects (never deletes)."""
+    last = state.get('last_generation')
+    if (not last or state.get('pending') or state.get('retention_done_for') != last
+            or not cloud.orphan_audit_due(state)):
+        return
+    # A newer staged capture or an unfinished retirement means the store is mid-change.
+    # The last generation's own pending.json stays on disk after it publishes.
+    staged = store.read_json(ROOT / 'pending.json', {})
+    if (not isinstance(staged, dict) or staged.get('generation', last) != last
+            or store.read_json(ROOT / 'retiring.json', []) != []):
+        return
+    cloud.record_orphan_audit(state, last, lambda: scan_leftover_objects(cfg), 'Mac Time Machine iCloud leftover files')
+
+
 def weekly(cfg, state):
     resume_retention(cfg, state)
     if not cloud_backup_requests.due(cfg, state, STATE):
+        orphan_audit(cfg, state)
         return 'not due'
     require_network_ready(cfg)
     manifest = store.read_json(ROOT / 'pending.json')
