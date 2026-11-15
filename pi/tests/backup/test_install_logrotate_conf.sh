@@ -14,7 +14,9 @@ candidate="$repo_root/pi/configs/logrotate-rsyslog"
 
 bin="$test_root/bin"; mkdir -p "$bin"
 # Fake sudo: runs the command, dropping install's -o/-g (the test is not root);
-# TEST_SUDO_FAIL=1 simulates a sudo that refuses.
+# TEST_SUDO_FAIL=1 simulates a sudo that refuses. TEST_PUBLISH_FAIL breaks the
+# publication: `short` writes 16 bytes of the staged copy and fails, as a full
+# disk does; `rename` fails the mv into place.
 cat > "$bin/sudo" <<'EOF2'
 #!/bin/bash
 [[ ${TEST_SUDO_FAIL:-0} == 1 ]] && exit 1
@@ -23,7 +25,17 @@ args=()
 while [[ $# -gt 0 ]]; do
   case $1 in -o|-g) shift 2 ;; *) args+=("$1"); shift ;; esac
 done
+dest=${args[${#args[@]}-1]}
+if [[ ${args[0]} == */install && $dest == */.logrotate-rsyslog.* && ${TEST_PUBLISH_FAIL:-} == short ]]; then
+  head -c 16 "${args[${#args[@]}-2]}" > "$dest"; exit 1
+fi
+[[ ${args[0]} == */mv && ${TEST_PUBLISH_FAIL:-} == rename ]] && exit 1
 exec "${args[@]}"
+EOF2
+# Fake sync: records what was flushed (macOS sync takes no file arguments).
+cat > "$bin/sync" <<'EOF2'
+#!/bin/bash
+echo "$*" >> "$TEST_SYNC_LOG"
 EOF2
 # Fake logrotate: exit status from TEST_LR_STATUS; prints the stanza it was
 # given, as the real -d does, and records the config it loaded.
@@ -40,12 +52,16 @@ reset() {
   mkdir -p "$test_root/logrotate.d"
   echo "old stanza" > "$test_root/logrotate.d/rsyslog"; echo "other" > "$test_root/logrotate.d/samba"
   printf 'weekly\ninclude %s/logrotate.d\n' "$test_root" > "$test_root/main"
-  : > "$test_root/seen"
+  : > "$test_root/seen"; : > "$test_root/sync.log"
 }
 run() {
   INSTALL_LOGROTATE_SUDO="$bin/sudo" INSTALL_LOGROTATE_BIN="${LR_BIN:-$bin/logrotate}" \
   INSTALL_LOGROTATE_MAIN="$test_root/main" INSTALL_LOGROTATE_DIR="$test_root/logrotate.d" \
+  INSTALL_LOGROTATE_SYNC="$bin/sync" TEST_SYNC_LOG="$test_root/sync.log" \
   TEST_LR_SEEN="$test_root/seen" bash "$installer" "$candidate"
+}
+no_staged_copies() {
+  ! ls -a "$test_root" | grep -q '^\.logrotate-rsyslog\.' || fail "staged copy left behind: $1"
 }
 
 dbg() { cat "$test_root/out" >&2; }
@@ -53,8 +69,20 @@ reset; run > "$test_root/out" 2>&1 || { dbg; fail "valid candidate refused"; }
 cmp -s "$candidate" "$test_root/logrotate.d/rsyslog" || fail "valid candidate not installed"
 grep -q "maxsize 50M" "$test_root/seen" || fail "logrotate did not load the candidate"
 grep -q "^other" "$test_root/logrotate.d/samba" || fail "sibling config disturbed"
+grep -q '/\.logrotate-rsyslog\.' "$test_root/sync.log" || fail "staged copy not flushed before the rename"
+grep -qx -- "-- $test_root/logrotate.d" "$test_root/sync.log" || fail "directory not flushed after the rename"
+no_staged_copies "after a successful install"
 run > "$test_root/out" 2>&1 || fail "unchanged rerun failed"
 grep -q "already current" "$test_root/out" || fail "unchanged rerun did not no-op"
+
+# A failed publication keeps the old file whole and cleans up its staged copy.
+for mode in short rename; do
+  reset
+  if TEST_PUBLISH_FAIL=$mode run > "$test_root/out" 2>&1; then fail "publication failure ($mode) reported success"; fi
+  assert_eq "old stanza" "$(cat "$test_root/logrotate.d/rsyslog")" "live file damaged by a failed publication ($mode)"
+  no_staged_copies "after a failed publication ($mode)"
+  ls "$test_root/logrotate.d" | grep -vqx 'rsyslog\|samba' && fail "stray file in logrotate.d ($mode)"
+done
 
 reset; if TEST_LR_STATUS=1 run > /dev/null 2>&1; then fail "logrotate failure installed"; fi
 assert_eq "old stanza" "$(cat "$test_root/logrotate.d/rsyslog")" "installed despite a failing logrotate -d"

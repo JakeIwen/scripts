@@ -3,7 +3,10 @@
 # logrotate configuration still loads: validate a root-owned copy of the main
 # conf with the candidate in place of the live file, and require logrotate's
 # own exit status 0 (a missing binary or failed sudo refuses). Run as the
-# admin user; pi/sync_scripts.sh ships it next to the candidate.
+# admin user; pi/sync_scripts.sh ships it next to the candidate. The live file
+# is replaced only by a rename of a verified, fsynced copy staged beside
+# $conf_dir (outside it, so logrotate never reads the half-written copy), so a
+# full disk or interrupted write leaves the old file whole.
 # usage: install_logrotate_conf.sh CANDIDATE
 set -u
 
@@ -12,8 +15,11 @@ sudo_command=${INSTALL_LOGROTATE_SUDO:-/usr/bin/sudo}
 logrotate_command=${INSTALL_LOGROTATE_BIN:-/usr/sbin/logrotate}
 main_conf=${INSTALL_LOGROTATE_MAIN:-/etc/logrotate.conf}
 conf_dir=${INSTALL_LOGROTATE_DIR:-/etc/logrotate.d}
+sync_command=${INSTALL_LOGROTATE_SYNC:-/usr/bin/sync}
 target=$conf_dir/rsyslog
+stage_dir=$(dirname -- "$conf_dir")
 work=""
+staged=""
 
 [[ -n "$candidate" && -r "$candidate" ]] || { echo "usage: $0 CANDIDATE" >&2; exit 2; }
 if cmp -s -- "$candidate" "$target"; then
@@ -22,7 +28,11 @@ if cmp -s -- "$candidate" "$target"; then
 fi
 
 as_root() { "$sudo_command" -n "$@"; }
-cleanup() { [[ -n "$work" ]] && as_root /bin/rm -rf -- "$work" >/dev/null 2>&1; return 0; }
+cleanup() {
+  [[ -n "$work" ]] && as_root /bin/rm -rf -- "$work" >/dev/null 2>&1
+  [[ -n "$staged" ]] && as_root /bin/rm -f -- "$staged" >/dev/null 2>&1
+  return 0
+}
 trap cleanup EXIT
 refuse() { echo "logrotate: refusing to install: $*" >&2; exit 1; }
 
@@ -48,5 +58,17 @@ status=$?
 grep -q 'rotating pattern: /var/log/syslog' <<< "$output" ||
   refuse "the candidate's syslog stanza was not loaded"
 
-as_root /usr/bin/install -m 0644 -o root -g root -- "$candidate" "$target" || refuse "install failed"
+# Publish: same-filesystem rename of a copy proven byte-identical and flushed.
+[[ -f "$target" && ! -L "$target" ]] || [[ ! -e "$target" && ! -L "$target" ]] ||
+  refuse "$target is not a regular file"
+[[ "$(stat -c %d -- "$stage_dir" 2>/dev/null || stat -f %d -- "$stage_dir")" == \
+   "$(stat -c %d -- "$conf_dir" 2>/dev/null || stat -f %d -- "$conf_dir")" ]] ||
+  refuse "$stage_dir and $conf_dir are on different filesystems"
+staged=$(as_root /usr/bin/mktemp "$stage_dir/.logrotate-rsyslog.XXXXXX") || refuse "cannot stage the new file"
+as_root /usr/bin/install -m 0644 -o root -g root -- "$candidate" "$staged" || refuse "cannot write the staged file"
+cmp -s -- "$candidate" "$staged" || refuse "the staged file does not match the candidate"
+as_root "$sync_command" -- "$staged" || refuse "cannot flush the staged file"
+as_root /bin/mv -f -- "$staged" "$target" || refuse "cannot rename the staged file into place"
+staged=""
+as_root "$sync_command" -- "$conf_dir" || echo "logrotate: warning: could not flush $conf_dir" >&2
 echo "logrotate: installed $target"
