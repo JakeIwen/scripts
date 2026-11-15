@@ -121,6 +121,9 @@ class RemoteRepository(LocalRepository):
         except Interrupted:
             raise
         except (OSError, ValueError, RuntimeError, TypeError, AttributeError) as exc:
+            # A stop that lands while an admission command is failing or timing out (a loaded host)
+            # is the real cause; reporting the admission failure would hide it from history.
+            self.commands.allowed()
             raise Interrupted('Remote offsite admission denied or unknown; retry explicitly after checking uplink and Tailscale') from None
 
     def exact_mount(self, label=None, *, cleanup=False):

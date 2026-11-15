@@ -6,7 +6,10 @@ import signal
 import subprocess
 import time
 import unittest
+from unittest.mock import patch
 
+from offsite_remote import RemoteRepository
+from offsite_repository import Commands, Interrupted
 from pi.tests.backup.offsite_remote_fixtures import RemoteFixture
 
 
@@ -239,6 +242,39 @@ class DashboardTests(unittest.TestCase):
         (self.f.cfg.state / 'rates').touch()
         result = self.backup('borg')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class RemoteGuardStopTests(unittest.TestCase):
+    def setUp(self):
+        self.f = RemoteFixture()
+        self.addCleanup(self.f.close)
+        result = self.f.prepare_replayed()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.f.sources()
+        self.repo = RemoteRepository(self.f.cfg, Commands(self.f.cfg, self.f.locks()), self.f.label)
+        patcher = patch.dict(os.environ, self.f.env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def failing_admit(self, cancel):
+        run = self.repo.commands.run
+
+        def fail(name, *args, **kwargs):
+            if name != 'metered':
+                return run(name, *args, **kwargs)
+            if cancel:
+                self.repo.commands.cancelled = 'SIGTERM'  # TERM lands while the command is failing
+            raise RuntimeError('command timed out')
+        return patch.object(self.repo.commands, 'run', side_effect=fail)
+
+    def test_stop_during_a_failing_admission_command_is_reported_as_the_stop(self):
+        # A loaded host can time an admission command out just as TERM arrives; history must say SIGTERM.
+        with self.failing_admit(cancel=True), self.assertRaisesRegex(Interrupted, 'SIGTERM'):
+            self.repo.network_guard()
+
+    def test_failing_admission_command_without_a_stop_is_a_denial(self):
+        with self.failing_admit(cancel=False), self.assertRaisesRegex(Interrupted, 'admission denied or unknown'):
+            self.repo.network_guard()
 
 
 if __name__ == '__main__':

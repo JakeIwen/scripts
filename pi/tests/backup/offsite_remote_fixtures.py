@@ -72,18 +72,29 @@ class RemoteFixture(OffsiteFixture):
             (self.live / relative).chmod(0o755)
 
     def start(self, *args, **kwargs):
-        code = BOOTSTRAP
+        # Production bounds each admission command to 5-35 s, sized for the Pi. A process that
+        # must start while the whole suite runs in parallel can exceed that, and the run would
+        # then report an admission denial instead of what the test provokes. Raise only the
+        # floor here; the production values are asserted nowhere.
+        setup = '''
+import offsite_repository
+_execute = offsite_repository.Commands.execute
+def _loaded_host_execute(self, name, *args, timeout=60, **kwargs):
+    return _execute(self, name, *args, timeout=None if timeout is None else max(timeout, 180), **kwargs)
+'''
+        patches = "patch('offsite_repository.Commands.execute', _loaded_host_execute)"
         if self.loopback:
             # The production parser still validates the Tailscale-only endpoint.
             # This fixture alone redirects transport to a random loopback port.
-            setup = '''
+            setup += '''
 from offsite_remote import RemoteRepository
 class LoopbackRepository(RemoteRepository):
     def configure(self):
         super().configure()
         self.path=os.environ['OFFSITE_LOOPBACK']
 '''
-            code = code.replace('with context:', setup + "\nwith context, patch('offsite_remote.RemoteRepository',LoopbackRepository):")
+            patches += ", patch('offsite_remote.RemoteRepository',LoopbackRepository)"
+        code = BOOTSTRAP.replace('with context:', setup + "\nwith context, " + patches + ":")
         return super().start(*args, code=code, env={'OFFSITE_LOOPBACK': self.loopback or ''}, **kwargs)
 
 
