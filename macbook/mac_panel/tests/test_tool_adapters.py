@@ -1,4 +1,7 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 
 from cli_runner import CommandResult
 from guard_adapter import GuardAdapter
@@ -102,6 +105,152 @@ class RestoreTests(unittest.TestCase):
         with self.assertRaises(ApiError) as raised:
             RestoreAdapter(FakeRunner()).snapshots({'action': 'delete'})
         self.assertEqual(raised.exception.status, 400)
+
+
+class SavedSetChangeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.saved = Path(self.tmp.name) / 'saved'
+        self.saved.mkdir()
+        self.file = self.saved / 'focus.sh'
+        self.file.write_text('#!/bin/sh\noriginal\n')
+        self.listing = [{'name': 'focus', 'path': str(self.file), 'saved_at': 1.0, 'sessions': 2}]
+        self.target = {'kind': 'saved', 'name': 'focus'}
+
+    def adapter(self, *results, listing=None):
+        self.runner = FakeRunner([json_command(self.listing if listing is None else listing), *results])
+        return RestoreAdapter(self.runner, saved_dir=self.saved)
+
+    def backups(self):
+        return sorted((self.saved / '.deleted').glob('*')) if (self.saved / '.deleted').exists() else []
+
+    def test_delete_moves_the_set_out_of_the_listing_but_keeps_it(self):
+        reply = self.adapter().snapshots({'action': 'delete', 'target': self.target, 'confirmed': True})
+        self.assertFalse(self.file.exists())
+        [kept] = self.backups()
+        self.assertRegex(kept.name, r'^focus-\d{8}-\d{6}\.sh$')
+        self.assertEqual(kept.read_text(), '#!/bin/sh\noriginal\n')
+        self.assertEqual(oct(kept.stat().st_mode & 0o777), '0o600')
+        self.assertEqual(oct((self.saved / '.deleted').stat().st_mode & 0o777), '0o700')
+        self.assertIn(str(kept), reply.body['message'])
+        self.assertEqual([p.name for p in self.saved.glob('*.sh')], [], 'the CLI glob no longer sees it')
+
+    def test_both_need_confirmation_and_a_saved_target(self):
+        for action in ('delete', 'overwrite'):
+            for body in ({'action': action, 'target': self.target},
+                         {'action': action, 'target': self.target, 'confirmed': 'yes'}):
+                with self.subTest(action=action, body=body), self.assertRaises(ApiError) as raised:
+                    self.adapter().snapshots(body)
+                self.assertEqual(raised.exception.status, 400)
+            for target in ({'kind': 'auto'}, {'kind': 'saved', 'name': 'nope'}, None):
+                with self.subTest(action=action, target=target), self.assertRaises(ApiError) as raised:
+                    self.adapter().snapshots({'action': action, 'target': target, 'confirmed': True})
+                self.assertEqual(raised.exception.status, 400)
+        self.assertTrue(self.file.exists())
+        self.assertEqual(self.backups(), [])
+
+    def test_a_listed_path_outside_the_saved_directory_is_refused(self):
+        outside = Path(self.tmp.name) / 'elsewhere.sh'
+        outside.write_text('x')
+        link = self.saved / 'link.sh'
+        os.symlink(outside, link)
+        for path in (outside, link, self.saved / 'missing.sh', self.saved / '..' / 'elsewhere.sh', self.saved / 'notes.txt'):
+            listing = [{'name': path.stem, 'path': str(path), 'saved_at': 1.0, 'sessions': 1}]
+            for action in ('delete', 'overwrite'):
+                with self.subTest(path=path, action=action), self.assertRaises(ApiError) as raised:
+                    self.adapter(listing=listing).snapshots(
+                        {'action': action, 'target': {'kind': 'saved', 'name': path.stem}, 'confirmed': True})
+                self.assertEqual(raised.exception.status, 400)
+        self.assertTrue(outside.exists())
+
+    def overwrite(self, runner_result):
+        adapter = self.adapter(runner_result)
+        return adapter.snapshots({'action': 'overwrite', 'target': self.target, 'confirmed': True})
+
+    def cli_saves(self, text='new\n', result=None):
+        """A runner result that, like the CLI, writes the new set when called."""
+        def run():
+            self.file.write_text(text)
+            return result or CommandResult(0, 'Saved 4 open session(s) to x\n')
+        return run
+
+    def test_overwrite_moves_the_old_version_aside_then_saves_without_force(self):
+        reply = self.overwrite(self.cli_saves())
+        self.assertEqual(self.runner.calls[-1], ((*RESTORE, '--save=focus'), 30))
+        [kept] = self.backups()
+        self.assertEqual(kept.read_text(), '#!/bin/sh\noriginal\n')
+        self.assertEqual(oct(kept.stat().st_mode & 0o777), '0o600')
+        self.assertEqual(self.file.read_text(), 'new\n')
+        self.assertIn('Saved 4', reply.body['report'])
+        self.assertIn(str(kept), reply.body['report'])
+
+    def test_a_failed_overwrite_puts_the_old_version_back(self):
+        with self.assertRaises(ApiError) as raised:
+            self.overwrite(CommandResult(1, '', 'boom'))
+        self.assertEqual(raised.exception.status, 502)
+        self.assertIn('restored', str(raised.exception))
+        self.assertEqual(self.file.read_text(), '#!/bin/sh\noriginal\n')
+        self.assertEqual(self.backups(), [])
+
+    def test_restore_back_never_clobbers_a_set_that_appeared(self):
+        failing = self.cli_saves('concurrent', CommandResult(1, '', 'boom'))
+        with self.assertRaises(ApiError) as raised:
+            self.overwrite(failing)
+        self.assertEqual(self.file.read_text(), 'concurrent')
+        [kept] = self.backups()
+        self.assertEqual(kept.read_text(), '#!/bin/sh\noriginal\n')
+        self.assertIn(str(kept), str(raised.exception))
+
+    def test_a_save_landing_meanwhile_is_a_conflict_that_keeps_both(self):
+        exists = self.cli_saves('theirs', CommandResult(1, '', "saved set 'focus' already exists"))
+        with self.assertRaises(ApiError) as raised:
+            self.overwrite(exists)
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self.file.read_text(), 'theirs')
+        [kept] = self.backups()
+        self.assertEqual(kept.read_text(), '#!/bin/sh\noriginal\n')
+
+    def test_overwrite_refuses_a_name_the_cli_cannot_address(self):
+        odd = self.saved / 'focus.sh.sh'
+        odd.write_text('other')
+        other = [{'name': 'focus.sh', 'path': str(odd), 'saved_at': 1.0, 'sessions': 1}]
+        with self.assertRaises(ApiError) as raised:
+            self.adapter(listing=other).snapshots(
+                {'action': 'overwrite', 'target': {'kind': 'saved', 'name': 'focus.sh'}, 'confirmed': True})
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(odd.read_text(), 'other')
+        self.assertEqual(self.file.read_text(), '#!/bin/sh\noriginal\n')
+        self.assertEqual(self.backups(), [])
+        self.adapter(listing=other).snapshots(  # delete still works: it goes by path
+            {'action': 'delete', 'target': {'kind': 'saved', 'name': 'focus.sh'}, 'confirmed': True})
+        self.assertFalse(odd.exists())
+
+    def test_a_backup_folder_that_is_a_symlink_or_file_is_refused(self):
+        elsewhere = Path(self.tmp.name) / 'elsewhere'
+        elsewhere.mkdir()
+        for make in (lambda p: os.symlink(elsewhere, p), lambda p: p.write_text('x')):
+            folder = self.saved / '.deleted'
+            make(folder)
+            for action in ('delete', 'overwrite'):
+                with self.subTest(action=action), self.assertRaises(ApiError) as raised:
+                    self.adapter(CommandResult(0, '')).snapshots({'action': action, 'target': self.target, 'confirmed': True})
+                self.assertEqual(raised.exception.status, 400)
+            self.assertTrue(self.file.exists())
+            self.assertEqual(list(elsewhere.iterdir()), [])
+            folder.unlink()
+
+    def test_backups_never_replace_each_other(self):
+        for _ in range(2):
+            self.file.write_text('again')
+            self.adapter().snapshots({'action': 'delete', 'target': self.target, 'confirmed': True})
+        self.assertEqual(len(self.backups()), 2)
+
+    def test_a_duplicate_save_name_points_at_overwrite(self):
+        exists = CommandResult(1, '', "saved set 'x' already exists")
+        with self.assertRaises(ApiError) as raised:
+            RestoreAdapter(FakeRunner([exists])).snapshots({'action': 'save', 'name': 'x'})
+        self.assertIn('Overwrite', str(raised.exception))
 
 
 class GuardTests(unittest.TestCase):

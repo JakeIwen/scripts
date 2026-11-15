@@ -20,7 +20,7 @@ test('search finds restore and take-snapshot rows, including saved set names, an
   const items = searchItems(data).map((item, index) => ({id: String(index), kind: 'item', section: 'llm-restore', ...item}));
   assert.equal(search(items, 'restore snapshot')[0].title, 'Restore a session snapshot');
   assert.equal(search(items, 'take snapshot')[0].title, 'Take a session snapshot');
-  assert.equal(search(items, 'focus-2026-11-06')[0].title, 'Restore a session snapshot');
+  assert.equal(search(items, 'focus-2026-11-06')[0].title, 'Restore snapshot focus-2026-11-06');
   assert.deepEqual(search(items, 'take snapshot')[0].actions.map(action => action.label), ['Name snapshot']);
 });
 
@@ -136,4 +136,100 @@ test('a save report shows with nothing selected', async () => {
   requests[0].reply('Saved 3 open session(s) to /s/2026-11-14-2200.sh');
   await settle();
   assert.match(output(rendered), /Snapshot report[\s\S]*2026-11-14-2200/);
+});
+
+const control = (card, key) => walk(card).find(element => element.dataset?.key === key);
+const confirmClick = element => { element.click(); element.click(); };
+
+test('Delete and Overwrite exist only for a saved set, and lock the row while one runs', async () => {
+  const requests = deferredFetch();
+  const card = snapshotCard(twoSets);
+  pick(card, 'auto').click();
+  requests[0].reply('auto preview');
+  await settle();
+  assert.equal(control(card, 'delete-selected'), undefined);
+  assert.equal(control(card, 'overwrite-selected'), undefined);
+  pick(card, 'saved:a').click();
+  requests[1].reply('preview a');
+  await settle();
+  const [restore, overwrite, remove] = ['restore', 'overwrite', 'delete'].map(kind => control(card, `${kind}-selected`));
+  assert.equal(remove.textContent, 'Delete');
+  remove.click();
+  assert.equal(remove.textContent, 'Confirm: delete a', 'the first click only arms');
+  assert.equal(requests.length, 2);
+  remove.click();
+  assert.deepEqual(requests[2].body, {action: 'delete', target: {kind: 'saved', name: 'a'}, confirmed: true});
+  assert.equal(restore.disabled && overwrite.disabled && remove.disabled, true, 'the three never overlap');
+  requests[2].reply('Moved /s/a.sh to /s/.deleted/a-1.sh');
+  await settle();
+  await settle();
+  assert.match(output(rendered), /Delete report: a[\s\S]*\.deleted/);
+  assert.equal(control(rendered, 'restore-selected'), undefined, 'a deleted set is no longer selected');
+  assert.equal(requests.length, 3, 'no dry run is fetched for nothing');
+});
+
+test('Overwrite arms with its own wording and fetches a new dry run afterwards', async () => {
+  const requests = deferredFetch();
+  const card = snapshotCard(twoSets);
+  pick(card, 'saved:b').click();
+  requests[0].reply('preview b');
+  await settle();
+  const overwrite = control(card, 'overwrite-selected');
+  overwrite.click();
+  assert.equal(overwrite.textContent, 'Confirm: overwrite b');
+  overwrite.click();
+  assert.equal(requests[1].body.action, 'overwrite');
+  requests[1].reply('Saved 5 open session(s)');
+  await settle();
+  await settle();
+  assert.match(output(rendered), /Overwrite report: b/);
+  assert.equal(requests.length, 3, 'the preview of the replaced set is requested again');
+  assert.equal(requests[2].body.action, 'preview');
+});
+
+test('a bare set name ranks Restore first; the verb brings Delete or Overwrite for that set first', () => {
+  const items = searchItems(twoSets).map((item, index) => ({id: String(index), kind: 'item', section: 'llm-restore', ...item}));
+  assert.equal(search(items, 'b')[0].title, 'Restore snapshot b');
+  const remove = search(items, 'delete b')[0];
+  assert.equal(remove.title, 'Delete a saved snapshot');
+  assert.match(remove.subtitle, /^b ·/);
+  assert.match(search(items, 'overwrite a')[0].subtitle, /^a ·/);
+});
+
+test('running every search action only stages: it arms at most, and never posts', async context => {
+  const requests = deferredFetch();
+  context.mock.timers.enable({apis: ['setTimeout']});
+  const {button} = await import('../static/panel_dom.mjs');
+  const {searchTarget, setSearchTarget} = await import('./dom_fixture.mjs');
+  let clicks = 0;
+  const actions = searchItems(twoSets).flatMap(item => item.actions ?? []);
+  assert.ok(actions.length >= 6);
+  for (let round = 0; round < 2; round++) {
+    for (const found of actions) {
+      setSearchTarget(button('Go', () => { clicks++; }, {confirm: 'Confirm: go'}));
+      found.run();
+      context.mock.timers.tick(1000);
+    }
+  }
+  assert.equal(clicks, 0);
+  assert.equal(requests.filter(request => request.body.action !== 'preview').length, 0, 'no delete, overwrite or save was posted');
+});
+
+test('reselecting a row mid-delete leaves all three of its buttons disabled', async () => {
+  const requests = deferredFetch();
+  const card = snapshotCard(twoSets);
+  pick(card, 'saved:a').click();
+  requests[0].reply('preview a');
+  await settle();
+  confirmClick(control(card, 'delete-selected'));
+  assert.equal(requests[1].body.action, 'delete');
+  pick(card, 'saved:a').click();
+  const fresh = ['restore', 'overwrite', 'delete'].map(kind => control(card, `${kind}-selected`));
+  assert.deepEqual(fresh.map(element => element.disabled), [true, true, true]);
+  pick(card, 'saved:b').click();
+  assert.equal(control(card, 'delete-selected').disabled, false, 'another row stays usable');
+  requests[1].reply('Moved');
+  await settle();
+  await settle();
+  assert.equal(control(rendered, 'restore-selected'), undefined);
 });

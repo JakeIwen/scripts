@@ -4,7 +4,7 @@ import {card, info, kv, node, settingRow, tag, timeNode, toggle} from './panel_d
 import {action, refresh} from './panel_sections.mjs';
 import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
-import {AUTO_KEY, NAME_KEY, SNAPSHOT_ANCHOR, snapshotCard} from './restore_snapshots.mjs';
+import {AUTO_KEY, NAME_KEY, SNAPSHOT_ANCHOR, selectSavedSet, snapshotCard} from './restore_snapshots.mjs';
 import {Level, status} from './status_cell.mjs';
 
 const SECTION = 'llm-restore';
@@ -39,14 +39,28 @@ export function render(data) {
 export function searchItems(data) {
   const sets = data.saved.map(set => set.name);
   return [{
-    title: 'Restore a session snapshot', subtitle: `${sets.length} saved sets`, keywords: ['llmrestore', 'reopen', 'restore', 'snapshot', 'reboot', 'saved', ...sets],
+    title: 'Restore a session snapshot', subtitle: sets.join(', ') || 'no saved sets', keywords: ['llmrestore', 'reopen', 'restore', 'snapshot', 'reboot', 'saved', ...sets],
     anchor: SNAPSHOT_ANCHOR,
     actions: [{label: 'Choose snapshot', run: () => stageAction(SECTION, SNAPSHOT_ANCHOR, AUTO_KEY)}],
   }, {
     title: 'Take a session snapshot', subtitle: 'save the open sessions as a named set', keywords: ['llmrestore', 'save', 'snapshot', 'take', 'sessions'],
     anchor: SNAPSHOT_ANCHOR,
     actions: [{label: 'Name snapshot', run: () => stageAction(SECTION, SNAPSHOT_ANCHOR, NAME_KEY)}],
-  }, {
+  }, ...data.saved.map(set => ({
+    // The name is in this title (not in Delete/Overwrite's), so a bare name query lands on Restore first.
+    title: `Restore snapshot ${set.name}`, subtitle: `${set.sessions} sessions`, keywords: ['llmrestore', 'reopen', 'saved'], anchor: SNAPSHOT_ANCHOR,
+    actions: [{label: 'Select to restore', run: () => {
+      selectSavedSet(set.name);
+      stageAction(SECTION, SNAPSHOT_ANCHOR, 'restore-selected', {arm: true});
+    }}],
+  })), ...data.saved.flatMap(set => [['Delete', 'delete'], ['Overwrite', 'overwrite']].map(([verb, kind]) => ({
+    title: `${verb} a saved snapshot`, subtitle: `${set.name} · kept in saved/.deleted/`,
+    keywords: ['llmrestore', 'snapshot', 'saved', kind], anchor: SNAPSHOT_ANCHOR,
+    actions: [{label: `${verb}…`, run: () => {
+      selectSavedSet(set.name);
+      stageAction(SECTION, SNAPSHOT_ANCHOR, `${kind}-selected`, {arm: true});
+    }}],
+  }))), {
     title: 'llm-restore snapshots', subtitle: data.enabled ? 'on' : 'off', keywords: ['llmrestore', 'sessions', 'claude', 'codex', 'snapshot'],
     anchor: SNAPSHOTS,
     actions: [{label: data.enabled ? 'Turn off' : 'Turn on', run: () => stageAction(SECTION, SNAPSHOTS, 'toggle')}],

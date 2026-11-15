@@ -28,6 +28,8 @@ PREPARED = DATA / f'{LABEL}.plist'
 LOG = DATA / 'panel.log'
 DEFERRED = ('/bin/zsh', str(ROOT / 'macbook/scripts/deferred.zsh'))
 RESTORE = ('/usr/bin/python3', '-I', '-B', str(ROOT / 'shared/sh/llm_restore.py'))
+# Where the CLI keeps saved sets (the panel's child environment never sets LLM_RESTORE_STATE, so this is fixed).
+RESTORE_SAVED = HOME / '.local/state/llm-restore/saved'
 GUARD = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/bettertouchtool/btt.py'), 'guard')
 # Not -I: the script finds its log_rotate package beside itself on sys.path, and -I drops that.
 LOG_ROTATE = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/scripts/log_rotate.py'))

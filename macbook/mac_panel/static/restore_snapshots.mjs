@@ -17,11 +17,11 @@ const AUTO = 'auto';
 // selected source (`stamp` is that source's timestamp and count when it was fetched); a report belongs
 // to the action that produced it, so selecting another row never re-attributes it. `gen` numbers preview
 // requests so only the newest response is applied; `paint` redraws the output of the latest render.
-const view = {key: null, preview: null, report: null, gen: 0, paint: null};
+const view = {key: null, preview: null, report: null, gen: 0, paint: null, choose: null};
 
 // Test seam: the module keeps selection across renders on purpose, so tests start from nothing.
 export function resetSnapshotView() {
-  Object.assign(view, {key: null, preview: null, report: null, gen: view.gen + 1, paint: null});
+  Object.assign(view, {key: null, preview: null, report: null, gen: view.gen + 1, paint: null, choose: null});
 }
 
 const targetOf = key => key === AUTO ? {kind: 'auto'} : {kind: 'saved', name: key.slice('saved:'.length)};
@@ -85,15 +85,43 @@ function paintOutput(slot) {
   slot.replaceChildren(...parts);
 }
 
+const savedName = key => key.slice('saved:'.length);
+
+// Targets with a restore, delete or overwrite in flight. Module state, not per-control, so a row that is
+// reselected mid-action gets freshly built buttons that are already disabled.
+const pending = new Set();
+let syncLock = () => {};
+
+// Restore, Delete and Overwrite share one control: while any runs for a row, the others are disabled.
 function restoreControl(key) {
   const wrap = node('div', null, 'actions');
   const label = labelOf(key);
-  wrap.append(button('Restore', () => action(SECTION, ENDPOINT, {action: 'restore', target: targetOf(key), confirmed: true}, {
-    after: result => {
-      view.report = {title: `Restore report: ${label}`, text: result.report};
-      view.preview = null; // what a restore would do has changed; the refresh fetches it again
-    },
-  }), {confirm: confirmText(`restore ${label}`), key: 'restore-selected'}), info(COPY.restoreInfo));
+  const buttons = [];
+  syncLock = () => buttons.forEach(other => { other.disabled = pending.has(key); });
+  const make = (text, kind, phrase, after) => {
+    const control = button(text, async () => {
+      pending.add(key);
+      syncLock();
+      try {
+        await action(SECTION, ENDPOINT, {action: kind, target: targetOf(key), confirmed: true}, {after});
+      } finally {
+        pending.delete(key);
+        syncLock();
+      }
+    }, {confirm: confirmText(`${phrase} ${label}`), key: `${kind}-selected`, disabled: pending.has(key)});
+    buttons.push(control);
+    return control;
+  };
+  const reported = (title, keepSelection) => result => {
+    view.report = {title: `${title}: ${label}`, text: result.report};
+    view.preview = null; // the refresh fetches a fresh dry run for whatever is still selected
+    if (!keepSelection) view.key = null;
+  };
+  wrap.append(make('Restore', 'restore', 'restore', reported('Restore report', true)), info(COPY.restoreInfo));
+  if (key !== AUTO) {
+    wrap.append(make('Overwrite', 'overwrite', 'overwrite', reported('Overwrite report', true)),
+      make('Delete', 'delete', 'delete', reported('Delete report', false)), info(COPY.changeInfo));
+  }
   return wrap;
 }
 
@@ -123,6 +151,7 @@ export function snapshotCard(data) {
   const stage = node('div', null, 'snapshot-stage');
   stage.append(control, output);
   view.paint = () => paintOutput(output);
+  view.choose = key => { if (keys.includes(key)) choose(key); };
   const show = () => {
     control.replaceChildren(...(view.key ? [restoreControl(view.key)] : []));
     if (view.key) ensurePreview(view.key, stampOf(data, view.key));
@@ -140,4 +169,11 @@ export function snapshotCard(data) {
   body.append(snapshotForm(), list, stage);
   show();
   return card({title: 'Restore sessions', body, anchor: SNAPSHOT_ANCHOR});
+}
+
+// Search rows select a saved set (no request) so its Delete/Overwrite button exists to be focused or armed.
+export function selectSavedSet(name) {
+  const key = `saved:${name}`;
+  if (view.choose) view.choose(key);
+  else view.key = key;
 }
