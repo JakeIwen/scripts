@@ -3,6 +3,8 @@
 # Codex release retention is the shared cleanup_codex_releases.py (the Mac runs
 # the same script). It needs root to see non-dumpable processes in /proc, and
 # acts on the owner's files with that account's effective IDs (--owner).
+# rootfs_tidy_sweeps.sh adds the age-based sweeps (Codex archive move, scratch
+# dirs, download caches) and the agent-shared report; run as root.
 set -u
 
 apply=0
@@ -28,6 +30,12 @@ sudo_command=${ROOTFS_TIDY_SUDO:-/usr/bin/sudo}
 apt_get_command=${ROOTFS_TIDY_APT_GET:-/usr/bin/apt-get}
 
 failed=0
+
+# shellcheck source=rootfs_tidy_sweeps.sh
+source "$script_dir/rootfs_tidy_sweeps.sh" || {
+  echo "rootfs_tidy.sh: cannot load rootfs_tidy_sweeps.sh" >&2
+  exit 1
+}
 
 run_codex_cleanup() {
   local uid mode=--dry-run status=0
@@ -79,4 +87,5 @@ run_apt_clean() {
 
 run_codex_cleanup
 run_apt_clean
+run_extra_sweeps
 exit "$failed"

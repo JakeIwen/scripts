@@ -206,6 +206,25 @@ sync_non_python() {
   cp_smb_conf &
   smb_pid=$!
 
+  # /etc/logrotate.d/rsyslog bounds syslog and auth.log (size cap, immediate
+  # compression); same install-when-changed shape as smb.conf. Validate with
+  # logrotate -d before replacing the live file.
+  cp_logrotate_conf() {
+    local remote_tmp
+    remote_tmp="$(ssh $mux $pi_ip 'mktemp /tmp/vanpi-logrotate.XXXXXX')" || return 1
+    scp $mux "$configs/logrotate-rsyslog" "$pi_ip:$remote_tmp" || return 1
+    # logrotate -d ignores configs not owned by root, so validate a root-owned
+    # copy and refuse on any error line before replacing the live file.
+    ssh $mux $pi_ip "cmp -s '$remote_tmp' /etc/logrotate.d/rsyslog && { rm -f -- '$remote_tmp'; exit 0; }
+      check=\$(sudo mktemp /tmp/vanpi-logrotate-check.XXXXXX) &&
+      sudo install -m 0644 -o root -g root -- '$remote_tmp' \"\$check\" &&
+      ! sudo /usr/sbin/logrotate -d \"\$check\" 2>&1 | grep -q '^error' &&
+      sudo install -m 0644 -o root -g root -- '$remote_tmp' /etc/logrotate.d/rsyslog
+      status=\$?; sudo rm -f -- \"\$check\" '$remote_tmp'; exit \$status"
+  }
+  cp_logrotate_conf &
+  logrotate_pid=$!
+
   sync_failed=0
   chmod_pid=""
   if wait "$home_pid"; then
@@ -225,6 +244,10 @@ sync_non_python() {
   fi
   if ! wait "$smb_pid"; then
     echo "Samba configuration deployment failed" >&2
+    sync_failed=1
+  fi
+  if ! wait "$logrotate_pid"; then
+    echo "logrotate configuration deployment failed" >&2
     sync_failed=1
   fi
   if [[ -n "$chmod_pid" ]] && ! wait "$chmod_pid"; then

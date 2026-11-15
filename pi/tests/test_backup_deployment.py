@@ -38,6 +38,7 @@ class BackupDeploymentTests(unittest.TestCase):
         shipped = [
             BACKUP_DIR / "rootfs_budget.sh",
             REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh",
+            REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy_sweeps.sh",
             REPOSITORY_ROOT / "shared" / "sh" / "cleanup_codex_releases.py",
         ]
 

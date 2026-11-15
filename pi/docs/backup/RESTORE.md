@@ -343,6 +343,24 @@ window:
 30 1 * * 0  "$scripts/rootfs_tidy.sh" --apply  >> "$cronlog/rootfs_tidy.log" 2>&1
 ```
 
+The same run (`rootfs_tidy_sweeps.sh`, sourced beside it) also, each as a dry run
+without `--apply`:
+
+- moves `~/.codex/archived_sessions/**` and `~/.codex/migration-backups/**` files
+  older than 30 days to `/mnt/EXFAT512/vanpi-root-archive/codex/<same path>` (plain
+  copy, sha256 verified, then the source is deleted; skipped and logged unless
+  `mountpoint` positively reports `/mnt/EXFAT512`; live `sessions/` is never touched);
+- removes `obd-things/tmp/suite-*` directories idle for 2 days and `tmp/playwright?*`
+  siblings idle for 14 days (`tmp/playwright`, `compute`, `vehicle_data`, `captures`
+  are never matched);
+- deletes `~/.npm/_cacache` and `~/.cache/pip` files older than 30 days;
+- lists files over 200 MB and older than 14 days in `~/Documents/agent-shared`
+  (report only; nothing is deleted).
+
+`/etc/logrotate.d/rsyslog` comes from `pi/configs/logrotate-rsyslog` (installed by
+`pi/sync_scripts.sh` after a `logrotate -d` check): syslog and auth.log rotate weekly
+or at 50 MB, whichever first (logrotate runs daily), and compress immediately.
+
 Compute job history is pruned separately at Sunday 01:45 by van-compute's own
 `prune` subcommand, run as `pi`. Its retention rules (cited jobs kept, uncited
 `done` jobs after 60 days, `failed` after 31) live in the van-compute repository's
