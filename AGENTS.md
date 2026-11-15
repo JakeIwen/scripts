@@ -630,7 +630,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   each `SSH_CONNECTION` client endpoint against this Mac's established SSH sockets
   (`lsof`), excluding tmux and other clients. Restore sends saved agents through
   the Pi's `--apply - --emit` chooser/launch guard, and skips plain login shells
-  already open from this Mac in the same cwd. `--dry-run` opens no tabs; an
+  already open from this Mac in the same cwd. Login shells occupied by tmux/screen
+  clients are excluded even though their own environment has no `TMUX`.
+  Pending shell launches use the shared local launch ledger and lock, the same
+  120-second grace period and `--force` semantics as agents. Mixed saved sets use
+  one recency-ordered `--last N` budget across local agents, Pi agents and shells;
+  open, missing or guarded items do not consume it. Local preview uses
+  `--apply - --emit --dry-run` (JSON choices without launch-guard writes).
+  `--dry-run` opens no tabs; an
   unreachable Pi warns without blocking local sessions. The helper uses the
   shared script's `PI_HOST`/`LLM_RESTORE_PI_HOST` and `PI_LLM_RESTORE` settings.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
@@ -659,7 +666,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   with the usual flags and `--saved [--json]` lists the sets. Mac saved sets also
   include Pi SSH agents and plain login-shell tabs from this Mac, not tmux or
   other SSH clients. Their optional `host` field distinguishes them from local
-  records; old sets without it still load. Host records bypass local transcript
+  records; old sets without it still load. Human-readable script headers replace
+  nonprintable characters so none can escape a shell comment; JSON stays exact.
+  Host records bypass local transcript
   checks. Only saved sets gain these records: boot snapshots/cron are unchanged.
   Deploy the shared script alone, flat at `/home/pi/scripts/llm_restore.py`;
   the Mac-only helpers stay in the checkout.

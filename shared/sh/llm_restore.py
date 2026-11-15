@@ -620,11 +620,12 @@ def write_restore_script(plan: list[PlanItem], sources: list[str], warnings: lis
             "# --dry-run shows what would happen, --force ignores the 2-minute guard",
             "# against reopening a session that was just launched."]),
     ]
-    lines += [f"#   {i.session.host + ' ' if i.session.host else ''}{i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})\n#     {display_command(i.session.command)}"
-              for i in plan]
+    lines += [text for i in plan for text in (f"#   {i.session.host + ' ' if i.session.host else ''}{i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})",
+                                             f"#     {display_command(i.session.command)}")]
     lines += [f"# warning: {w}" for w in warnings]
     if not plan:
         lines.append("#   (no sessions recorded)")
+    lines = ["".join(c if c.isprintable() else " " for c in line) for line in lines]
     lines += [
         f"exec /usr/bin/python3 -I -B {shlex.quote(str(Path(__file__).resolve()))} "
         f"--apply {shlex.quote(','.join(sources) or '-')} \"$@\" <<'SESSIONS'",
@@ -848,6 +849,8 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
     printed as JSON lines instead, and the report goes to stderr.
     """
     items = [PlanItem.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
+    if IS_MAC and not emit and opts.last is not None and any(i.session.host for i in items):
+        return pi_request("last", opts, items)
     host_items, items = [i for i in items if i.session.host], [i for i in items if not i.session.host]
     if host_items and IS_MAC and not emit:
         pi_request("apply", opts, host_items)
@@ -876,17 +879,17 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
         if opts.last is None and len(items) > len(plan):
             print(f"({len(items) - len(plan)} closed more than {opts.minutes} minutes before the last snapshot or loss; "
                   f"widen with -m or -H)", file=report)
-        if opts.dry_run:
-            return 0
-        if todo:
+        if todo and not opts.dry_run:
             # Recorded first, so a launch that fails part-way can't be doubled
             # by an immediate rerun before its sessions register.
             _write_private(LAUNCHED, json.dumps({**launched, **{s.key: now for s in todo}}))
-            if emit:
-                print("\n".join(json.dumps(asdict(s)) for s in todo))
-            else:
-                print(open_terminals(todo, titles=titles))
-        else:
+        if emit and todo:
+            print("\n".join(json.dumps(asdict(s)) for s in todo))
+        if opts.dry_run:
+            return 0
+        if todo and not emit:
+            print(open_terminals(todo, titles=titles))
+        elif not todo:
             print("Nothing local to reopen." if host_items else "Nothing to reopen." if items else "No sessions recorded. Turn on recording with: llmrestore --cron on",
                   file=report)
         if opts.last is not None:
@@ -900,11 +903,17 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
 
 
 def pi_request(action, opts=RestoreOptions(), items=()):
-    """Best-effort saved SSH tabs; keep local saving/restoration independent."""
+    """Mac SSH adapter: boot restore, or best-effort saved SSH tabs."""
+    argv = ["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT.with_name("llm_restore_pi.py")) if IS_MAC else "",
+            action, PI_HOST, PI_LLM_RESTORE, str(ITERM_TRANSPORT), *opts.flags()]
+    if action == "restore":
+        if not IS_MAC:
+            raise SystemExit("--pi opens iTerm tabs on the Mac; on the Pi, run llmrestore without it")
+        return subprocess.run(argv).returncode
     try:
-        result = subprocess.run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT.with_name("llm_restore_pi.py")),
-                                 action, PI_HOST, PI_LLM_RESTORE, str(ITERM_TRANSPORT), *opts.flags()],
-                                input=json.dumps([asdict(i) for i in items]), capture_output=True, text=True, check=True)
+        result = subprocess.run(argv, input=json.dumps({"items": [asdict(i) for i in items],
+                                "local_restore": str(Path(__file__).resolve()), "launched": str(LAUNCHED),
+                                "lock": str(LOCK), "grace": LAUNCH_GRACE_S}), capture_output=True, text=True, check=True)
         if result.stderr:
             print(result.stderr.rstrip(), file=sys.stderr)
         if action == "save":
@@ -912,15 +921,7 @@ def pi_request(action, opts=RestoreOptions(), items=()):
         print(result.stdout, end="")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"warning: Pi SSH tabs unavailable: {error}", file=sys.stderr)
-    return {"sessions": [], "warnings": []}
-
-
-def restore_pi(opts: RestoreOptions) -> int:
-    """Ask the Pi which of its sessions to reopen, then open them as iTerm tabs."""
-    if not IS_MAC:
-        raise SystemExit("--pi opens iTerm tabs on the Mac; on the Pi, run llmrestore without it")
-    return subprocess.run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT.with_name("llm_restore_pi.py")),
-                           "restore", PI_HOST, PI_LLM_RESTORE, str(ITERM_TRANSPORT), *opts.flags()]).returncode
+    return {"sessions": [], "warnings": []} if action == "save" else 0
 
 
 def run_restore(opts: RestoreOptions, emit: bool) -> int:
@@ -1091,7 +1092,7 @@ def main() -> int:
     if args.apply is not None:
         return apply(args.apply, opts, args.emit)
     if args.pi:
-        return restore_pi(opts)
+        return pi_request("restore", opts)
     return run_restore(opts, args.emit)
 
 

@@ -5,11 +5,16 @@ Saved sets include Pi agent and plain login-shell tabs belonging to this Mac's
 SSH sockets. Boot restoration (--pi) keeps the Pi's existing selection policy.
 """
 
+from contextlib import contextmanager
+import fcntl
 import ipaddress
 import json
+import os
+from pathlib import Path
 import shlex
 import subprocess
 import sys
+import time
 
 
 # Sent on stdin in one read-only SSH request; no file is installed on the Pi.
@@ -62,11 +67,11 @@ def main(pi_restore):
                 raise ValueError("Pi llmrestore --list lacks command; update the Pi shared script before saving SSH tabs")
             records.append({"session": {k: session[k] for k in
                                        ("tool", "id", "cwd", "title", "command")}, "client": client})
-    # Walk ancestors of every agent process, including unidentifiable/headless
-    # ones: an occupied login shell must not become a duplicate plain-shell tab.
+    # Multiplexer clients belong to this SSH tty, but their agents belong to a
+    # separate server. Neither occupied topology is a plain login-shell tab.
     occupied = set()
     for pid, proc in procs.items():
-        if proc["comm"] not in ("claude", "codex"):
+        if proc["comm"].split(":", 1)[0].lower() not in ("claude", "codex", "tmux", "screen"):
             continue
         seen = set()
         while pid in procs and pid not in seen:
@@ -120,7 +125,7 @@ def restore(host, pi_restore, transport, flags):
         print(f"Pi restore failed (ssh {host} exited {result.returncode}); nothing opened", file=sys.stderr)
         return result.returncode
     sessions = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-    if sessions:
+    if sessions and "--dry-run" not in flags:
         print(open_tabs([pi_tab_command(s["command"], host) for s in sessions], transport) + f" (ssh {host})")
     return 0
 
@@ -175,13 +180,64 @@ def save(host, pi_restore):
     return 0
 
 
-def apply_host(host, pi_restore, transport, flags, items):
+@contextmanager
+def shell_launches(config, dry_run):
+    """Share the local agent launch ledger and lock across helper processes."""
+    path, lock = Path(config["launched"]), Path(config["lock"])
+    lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            previous = json.loads(path.read_text())
+        except (OSError, ValueError):
+            previous = {}
+        now = time.time()
+        pending = {k: t for k, t in previous.items() if now - t < config["grace"]}
+        yield pending, now
+        if not dry_run and pending != previous:
+            # Match the shared writer at this standalone subprocess boundary:
+            # private atomic replacement under the same lock preserves all guards.
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            tmp = path.with_name(f".{path.name}.{os.getpid()}")
+            with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as output:
+                json.dump(pending, output)
+            os.replace(tmp, path)
+    finally:
+        os.close(fd)
+
+
+def shell_commands(host, shells, live, flags, config):
+    commands = []
+    open_cwds = {s["cwd"] for s in live if s["tool"] == "shell"}
+    dry_run = "--dry-run" in flags
+    with shell_launches(config, dry_run) as (pending, now):
+        for shell in shells:
+            cwd = shell["cwd"]
+            key = f"shell:{host}:{cwd}"
+            if cwd in open_cwds:
+                print(f"skip  shell {host}:{cwd}: already open")
+                continue
+            if "--force" not in flags and now - pending.get(key, 0) < config["grace"]:
+                print(f"skip  shell {host}:{cwd}: launched under {config['grace']}s ago (--force to reopen)")
+                continue
+            open_cwds.add(cwd)
+            command = pi_tab_command("cd -- " + shlex.quote(cwd), host)
+            print(f"{'would open' if dry_run else 'open'}  shell {host}:{cwd}\n      {command}")
+            commands.append(command)
+            if not dry_run:
+                pending[key] = now
+    return commands
+
+
+def apply_host(host, pi_restore, transport, flags, items, config):
     agents = [i for i in items if i["session"]["tool"] != "shell"]
     shells = [i["session"] for i in items if i["session"]["tool"] == "shell"]
     commands = []
     live, warnings = probe(host, pi_restore) if shells else ([], [])
     for message in warnings:
         print("warning: " + message, file=sys.stderr)
+    shell_tabs = shell_commands(host, shells, live, flags, config) if shells else []
     if agents:
         # The remote chooser owns transcript checks, live detection and its
         # launch guard. Strip host so these are local records on the Pi.
@@ -193,27 +249,64 @@ def apply_host(host, pi_restore, transport, flags, items):
             print(result.stderr.rstrip(), file=sys.stderr)
         commands += [pi_tab_command(json.loads(line)["command"], host)
                      for line in result.stdout.splitlines() if line.strip()]
-    if shells:
-        open_cwds = {s["cwd"] for s in live if s["tool"] == "shell"}
-        for shell in shells:
-            if shell["cwd"] in open_cwds:
-                print(f"skip  shell {host}:{shell['cwd']}: already open")
-                continue
-            open_cwds.add(shell["cwd"])
-            # Do not trust an old shell record's command to land in its cwd.
-            command = pi_tab_command("cd -- " + shlex.quote(shell["cwd"]), host)
-            print(f"{'would open' if '--dry-run' in flags else 'open'}  shell {host}:{shell['cwd']}\n      {command}")
-            commands.append(command)
+    commands += shell_tabs
     if commands and "--dry-run" not in flags:
         print(open_tabs(commands, transport) + f" (ssh {host})")
+    return len(commands)
 
 
-def apply_saved(pi_restore, transport, flags, items):
+def apply_local(items, flags, config):
+    """Preview one local candidate without consuming its launch guard."""
+    payload = "".join(json.dumps(i) + "\n" for i in items)
+    argv = ["/usr/bin/python3", "-I", "-B", config["local_restore"], "--apply", "-", *flags]
+    result = subprocess.run([*argv, "--emit", "--dry-run"], input=payload,
+                            capture_output=True, text=True, check=True)
+    selected = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    if not selected or "--dry-run" in flags:
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        return len(selected)
+    # The normal local apply preserves transcript-derived iTerm titles and
+    # rechecks live/guard state in case it changed after the preview.
+    result = subprocess.run(argv, input=payload, capture_output=True, text=True, check=True)
+    print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
+    return len(selected)
+
+
+def apply_last(pi_restore, transport, flags, config):
+    """One recency-ordered budget across local agents, Pi agents and shells."""
+    at = flags.index("--last") + 1
+    remaining = int(flags[at])
+    flags = list(flags)
+    flags[at] = "1"  # one candidate per chooser; only this loop owns the budget
+    seen = set()
+    for item in sorted(config["items"], key=lambda i: i["session"].get("last_seen", 0), reverse=True):
+        session = item["session"]
+        host = session.get("host")
+        key = (host, session["tool"], session["id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        if remaining == 0:
+            break
+        try:
+            count = (apply_host(host, pi_restore, transport, flags, [item], config) if host
+                     else apply_local([item], flags, config))
+            remaining -= count
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            print("warning: " + warning(host or "local", error), file=sys.stderr)
+    return 0
+
+
+def apply_saved(pi_restore, transport, flags, config):
+    items = config["items"]
     # A saved host remains authoritative even if the current default changes.
     for host in dict.fromkeys(i["session"]["host"] for i in items):
         try:
             apply_host(host, pi_restore, transport, flags,
-                       [i for i in items if i["session"]["host"] == host])
+                       [i for i in items if i["session"]["host"] == host], config)
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             print("warning: " + warning(host, error), file=sys.stderr)
     return 0
@@ -225,8 +318,9 @@ def main(argv=None):
         return restore(host, pi_restore, transport, flags)
     if action == "save":
         return save(host, pi_restore)
-    if action == "apply":
-        return apply_saved(pi_restore, transport, flags, json.load(sys.stdin))
+    if action in ("apply", "last"):
+        config = json.load(sys.stdin)
+        return (apply_last if action == "last" else apply_saved)(pi_restore, transport, flags, config)
     raise ValueError("unknown Pi action")
 
 

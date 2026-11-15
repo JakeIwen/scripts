@@ -45,7 +45,9 @@ class PiSavedTabs(unittest.TestCase):
 
     def entry(self, action, items=(), flags=()):
         out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err), patch("sys.stdin", io.StringIO(json.dumps(items))):
+        config = {"items": list(items), "launched": str(self.root / "launched.json"),
+                  "lock": str(self.root / "lock"), "grace": 120, "local_restore": str(ROOT / "shared/sh/llm_restore.py")}
+        with redirect_stdout(out), redirect_stderr(err), patch("sys.stdin", io.StringIO(json.dumps(config))):
             result = pi.main([action, "vanpi", lr.PI_LLM_RESTORE, "transport.py", *flags])
         return result, out.getvalue(), err.getvalue()
 
@@ -80,6 +82,10 @@ class PiSavedTabs(unittest.TestCase):
         self.fake_process(15, 1, "bash", tty=0)
         self.fake_process(16, 10, "codex", tmux=True)
         self.fake_process(17, 12, "codex", client="192.0.2.9 50001 192.0.2.2 22")
+        self.fake_process(18, 1, "bash")
+        self.fake_process(19, 18, "tmux: client")  # server/agents are not its children
+        self.fake_process(20, 1, "bash")
+        self.fake_process(21, 20, "SCREEN")
         listed = [{**asdict(session()), "pid": 11}, {**asdict(session("codex", "tmux")), "pid": 16},
                   {**asdict(session("codex", "other-client")), "pid": 17}]
         probe_output = self.probe_run(listed)
@@ -164,6 +170,95 @@ class PiSavedTabs(unittest.TestCase):
         self.assertNotIn("\n", json.loads(save_out)["warnings"][0])
         self.assertEqual(run.call_count, 2)
 
+    def test_pi_boot_restore_dry_run_never_opens_emitted_records(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(asdict(session())) + "\n", "would open agent\n")
+        with patch.object(pi.subprocess, "run", return_value=result) as run, patch.object(pi, "open_tabs") as opened:
+            self.assertEqual(self.entry("restore", flags=["--dry-run"])[0], 0)
+        opened.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+
+    def test_last_keeps_local_candidates_when_remote_is_unreachable(self):
+        remote, local = item(session()), item(session(sid="local", host=None))
+        remote["session"]["last_seen"], local["session"]["last_seen"] = 20, 10
+        def run(cmd, **kwargs):
+            if cmd[0] == "/usr/bin/ssh":
+                raise subprocess.CalledProcessError(255, cmd, stderr="offline")
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(local["session"]) + "\n" if "--emit" in cmd else "opened local\n", "")
+        with patch.object(pi.subprocess, "run", side_effect=run) as run, patch.object(pi, "open_tabs") as opened:
+            code, out, err = self.entry("last", [remote, local], ["--last", "1"])
+        self.assertEqual(code, 0)
+        self.assertIn("offline", err)
+        self.assertIn("opened local", out)
+        self.assertEqual(run.call_count, 3)
+        opened.assert_not_called()
+
+    def test_pending_shell_launches_share_agent_ledger_and_honor_force_expiry_and_dry_run(self):
+        records = [item(session("shell", "shell", cwd="/pi/shell"))]
+        ledger = self.root / "launched.json"
+        ledger.write_text(json.dumps({"claude:existing": 995}))
+        with patch.object(pi, "probe", return_value=([], [])), \
+                patch.object(pi, "open_tabs", return_value="opened") as opened, patch.object(pi.time, "time", return_value=1000):
+            self.assertEqual(self.entry("apply", records)[0], 0)
+            _, report, _ = self.entry("apply", records)
+            self.assertIn("launched under 120s ago", report)
+            self.assertEqual(opened.call_count, 1)
+            pending = json.loads(ledger.read_text())
+            self.assertEqual(pending, {"claude:existing": 995, "shell:vanpi:/pi/shell": 1000})
+            before = ledger.read_bytes()
+            _, report, _ = self.entry("apply", records, ["--force", "--dry-run"])
+            self.assertIn("would open", report)
+            self.assertEqual(ledger.read_bytes(), before)
+            self.assertEqual(opened.call_count, 1)
+            self.entry("apply", records, ["--force"])
+            self.assertEqual(opened.call_count, 2)
+        with patch.object(pi, "probe", return_value=([], [])), \
+                patch.object(pi, "open_tabs", return_value="opened") as opened, patch.object(pi.time, "time", return_value=1121):
+            self.entry("apply", records)
+        opened.assert_called_once()
+
+    def test_last_has_one_recency_budget_for_local_remote_and_shell_items(self):
+        def record(tool, sid, host, seen):
+            data = item(session(tool, sid, host=host, cwd="/pi/" + sid))
+            data["session"]["last_seen"] = seen
+            return data
+        # Deliberately unsorted, including a duplicate and two already-open
+        # agents that must not consume the shared budget.
+        records = [record("claude", "remote", "vanpi", 30), record("claude", "local", None, 40),
+                   record("shell", "shell", "vanpi", 50), record("claude", "open-local", None, 60),
+                   record("codex", "open-remote", "vanpi", 55), record("claude", "local", None, 20)]
+        for limit, dry_run in ((1, False), (2, False), (3, False), (2, True)):
+            with self.subTest(limit=limit, dry_run=dry_run):
+                (self.root / "launched.json").unlink(missing_ok=True)
+                opened_ids, local_opened, visited = [], [], []
+                def run(cmd, **kwargs):
+                    row = json.loads(kwargs["input"].splitlines()[0])["session"]
+                    visited.append(row["id"])
+                    self.assertIn("--last 1", cmd[-1] if cmd[0] == "/usr/bin/ssh" else " ".join(cmd))
+                    if row["id"].startswith("open-"):
+                        return subprocess.CompletedProcess(cmd, 0, "", "skip already open\n")
+                    if cmd[0] != "/usr/bin/ssh" and "--emit" not in cmd:
+                        local_opened.append(row["id"])
+                        return subprocess.CompletedProcess(cmd, 0, "opened local\n", "")
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps(row) + "\n", "would open agent\n")
+                def tabs(commands, transport):
+                    opened_ids.extend(commands)
+                    return "opened"
+                with patch.object(pi, "probe", return_value=([], [])), \
+                        patch.object(pi.subprocess, "run", side_effect=run), patch.object(pi, "open_tabs", side_effect=tabs):
+                    flags = ["--last", str(limit), *(["--dry-run"] if dry_run else [])]
+                    code, out, err = self.entry("last", records, flags)
+                self.assertEqual(code, 0)
+                if dry_run:
+                    self.assertEqual((opened_ids, local_opened), ([], []))
+                    self.assertFalse((self.root / "launched.json").exists())
+                    self.assertIn("would open", out + err)
+                else:
+                    self.assertEqual(len(opened_ids) + len(local_opened), limit)
+                    self.assertEqual(local_opened, ["local"] if limit >= 2 else [])
+                self.assertEqual(visited[:2], ["open-local", "open-remote"])
+                self.assertEqual("remote" in visited, limit == 3)
+
+
 
 class SharedSavedTabs(unittest.TestCase):
     def setUp(self):
@@ -218,6 +313,45 @@ class SharedSavedTabs(unittest.TestCase):
             self.assertEqual(lr.apply("-", lr.RestoreOptions(), False), 0)
         self.assertIn("warning:", err.getvalue())
         self.assertEqual(opened.call_args.args[0], [session(host=None)])
+
+    def test_mixed_last_delegates_the_entire_set_without_spending_separate_budgets(self):
+        records = [item(session(host=None)), item(session()), item(session("shell", "shell"))]
+        opts = lr.RestoreOptions(last=2)
+        with patch("sys.stdin", io.StringIO("\n".join(json.dumps(i) for i in records))), \
+                patch.object(lr, "pi_request", return_value=0) as helper, patch.object(lr, "choose") as choose:
+            self.assertEqual(lr.apply("-", opts, False), 0)
+        helper.assert_called_once_with("last", opts, [lr.PlanItem.from_json(i) for i in records])
+        choose.assert_not_called()
+
+    def test_emit_dry_run_reports_selected_records_without_launching_or_recording(self):
+        record = item(session(host=None))
+        with patch("sys.stdin", io.StringIO(json.dumps(record))), patch("sys.stdout", io.StringIO()) as out, \
+                patch("sys.stderr", io.StringIO()), patch.object(lr, "live_sessions", return_value=([], [])), \
+                patch.object(lr, "_session_exists", return_value=True), patch.object(lr, "session_name", return_value=""), \
+                patch.object(lr, "_switchboard_kept", return_value=set()), patch.object(lr, "open_terminals") as opened:
+            self.assertEqual(lr.apply("-", lr.RestoreOptions(dry_run=True), True), 0)
+        self.assertEqual(json.loads(out.getvalue()), record["session"])
+        self.assertFalse((self.root / "launched.json").exists())
+        opened.assert_not_called()
+
+    def test_saved_header_cannot_execute_control_characters_and_payload_is_exact(self):
+        attack = "\nprintf HEADER_EXECUTED\n#"
+        cwd = "/pi/" + attack
+        record = lr.Session("shell" + attack, "id" + attack, cwd, "title\x00\r\x1b", "cd -- " + shlex.quote(cwd), host="vanpi" + attack)
+        plan = [lr.PlanItem(record, 0)]
+        path = self.root / "unsafe.sh"
+        lr.write_restore_script(plan, [], ["warning\r" + attack], dest=path,
+                                header=["# custom" + attack])
+        text = path.read_text()
+        # Stub just the exec target: /bin/sh still parses every generated header.
+        script = self.root / "stubbed.sh"
+        script.write_text(lr.re.sub(r"^exec .*<<'SESSIONS'$", "exec /bin/cat <<'SESSIONS'", text, flags=lr.re.M))
+        result = subprocess.run(["/bin/sh", str(script)], capture_output=True, text=True, check=True)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], [asdict(plan[0])])
+        self.assertEqual(result.stderr, "")
+        for line in text.split("exec /usr/bin/python3", 1)[0].splitlines():
+            self.assertTrue(line.startswith("#"))
+            self.assertFalse(any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in line))
 
     def test_save_keeps_local_sessions_when_helper_or_pi_fails(self):
         for failure in (subprocess.CalledProcessError(255, ["helper"]), OSError("missing helper")):
