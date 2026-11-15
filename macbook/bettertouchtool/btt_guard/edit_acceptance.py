@@ -122,7 +122,7 @@ def _accept(state_dir, state: EditAcceptanceState, report: AuditReport, process:
         # Capture verified the current state, so the same session continues from the new checkpoint.
         state['baseline'] = dict(checkpoint_id=manifest['checkpoint_id'], btt_version=report['btt_version'],
                                  process=process)
-        state['candidate'] = None
+        state['candidate'] = state['refused_key'] = None
         state['last_accepted'] = dict(at=now, checkpoint_id=manifest['checkpoint_id'], reason=None,
                                       findings=findings)
         return Action.ACCEPTED

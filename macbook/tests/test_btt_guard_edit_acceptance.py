@@ -56,6 +56,17 @@ class DecisionTests(unittest.TestCase):
         self.state['refused_key'] = self.state['candidate']['key']
         self.assertEqual(decide(self.state, report('drift'), SESSION, 200 + SETTLE_SECONDS), Action.REFUSED)
 
+    def test_accepting_a_later_edit_resolves_an_earlier_refusal(self):
+        self.state['refused_key'] = 'refused-earlier-drift'
+        changed = report('drift', findings=[{'kind': 'config_changed', 'uuid': 'v', 'detail': 'd'}])
+        decide(self.state, changed, SESSION, 100)
+        self.assertEqual(decide(self.state, changed, SESSION, 100 + SETTLE_SECONDS), Action.ACCEPTED)
+        with tempfile.TemporaryDirectory() as state_dir, \
+                patch.object(edit_acceptance, 'capture', return_value={'checkpoint_id': 'cp-2'}):
+            accepted = edit_acceptance._accept(state_dir, self.state, changed, SESSION, 100 + SETTLE_SECONDS)
+        self.assertEqual(accepted, Action.ACCEPTED)
+        self.assertIsNone(self.state['refused_key'])
+
 
 class RunningBttTests(unittest.TestCase):
     def listing(self, stdout, code=0):
