@@ -149,11 +149,11 @@ class Commands:
                 return rc, output
             finally:
                 if child.poll() is None:
-                    signal_group(child.pid, signal.SIGTERM)
+                    signal_group(child, signal.SIGTERM)
                     try:
                         child.wait(timeout=STOP_SECONDS)
                     except subprocess.TimeoutExpired:
-                        signal_group(child.pid, signal.SIGKILL)
+                        signal_group(child, signal.SIGKILL)
                         child.wait()
                 if rclone_env is not None:
                     # restic is gone; the run's snapshot (and its rclone) is removed only after this.
@@ -225,18 +225,28 @@ class Commands:
         return output
 
 
-def signal_group(pid, sig):
+EXIT_RECHECK_SECONDS = 2
+
+
+def signal_group(child, sig):
     """Signal a command's process group, tolerating one that just exited.
 
     A child that exits between poll() and the signal is gone (ESRCH on Linux,
-    EPERM on macOS while its leader is an unreaped zombie); either way it needs
-    no signal, and raising would turn a stop or a finished guard command into a
-    spurious failure.
+    EPERM on macOS while its leader is an unreaped zombie); raising would turn
+    a stop or a finished guard command into a spurious failure. The error is
+    swallowed only once the child is confirmed exited; against a live child (a real
+    permission denial) it propagates, since the caller would otherwise wait on
+    a process it failed to signal.
     """
     try:
-        os.killpg(pid, sig)
-    except (ProcessLookupError, PermissionError):
-        pass
+        os.killpg(child.pid, sig)
+    except (ProcessLookupError, PermissionError) as exc:
+        # macOS reports EPERM while the child is still tearing down, before
+        # poll() can reap it, so give an exiting child a short bounded moment.
+        try:
+            child.wait(timeout=EXIT_RECHECK_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise exc from None
 
 
 def private_directory(path, owner):
