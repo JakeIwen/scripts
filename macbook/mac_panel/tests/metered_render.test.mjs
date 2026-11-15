@@ -30,7 +30,8 @@ test('renders actual Wi-Fi state and the automatic control', () => {
     assert.ok(text.includes('Automatic Low Data Mode'));
     assert.ok(text.includes(expected), `${actual}: ${text}`);
     if (actual !== null && actual !== 'n/a') assert.ok(text.includes('Controller reason'));
-    assert.ok(text.includes('Only this Mac’s Wi-Fi interface (en0) is affected.'));
+    assert.ok(text.includes('policy holds Full-speed Wi-Fi'));
+    assert.ok(text.includes('unmetered, approved or exempt'));
   }
   const stale = render(payload('held', false)).node.textContent;
   assert.ok(stale.includes('Wi-Fi now: unknown'));
