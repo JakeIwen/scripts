@@ -31,11 +31,8 @@ apt_get_command=${ROOTFS_TIDY_APT_GET:-/usr/bin/apt-get}
 
 failed=0
 
-# shellcheck source=rootfs_tidy_sweeps.sh
-source "$script_dir/rootfs_tidy_sweeps.sh" || {
-  echo "rootfs_tidy.sh: cannot load rootfs_tidy_sweeps.sh" >&2
-  exit 1
-}
+sweeps=${ROOTFS_TIDY_SWEEPS:-$script_dir/rootfs_tidy_sweeps.sh}
+setpriv_command=${ROOTFS_TIDY_SETPRIV:-/usr/bin/setpriv}
 
 run_codex_cleanup() {
   local uid mode=--dry-run status=0
@@ -82,6 +79,20 @@ run_apt_clean() {
     fi
   else
     echo "apt cache: skipped (root or passwordless sudo required)"
+  fi
+}
+
+# The sweeps touch only $codex_user's files, so as root they run as that user
+# (a symlink swap then cannot redirect root); a non-root run uses its own IDs.
+run_extra_sweeps() {
+  local uid
+  [[ -r "$sweeps" ]] || { echo "sweeps: cannot read $sweeps" >&2; failed=1; return; }
+  uid=$("$id_command" -u 2>/dev/null) || { echo "sweeps: cannot determine effective user" >&2; failed=1; return; }
+  if [[ "$uid" == 0 ]]; then
+    "$setpriv_command" --reuid="$codex_user" --regid="$codex_user" --init-groups -- \
+      /bin/bash "$sweeps" "$apply" || failed=1
+  else
+    /bin/bash "$sweeps" "$apply" || failed=1
   fi
 }
 

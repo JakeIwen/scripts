@@ -31,6 +31,12 @@ cat > "$fake_bin/sudo" <<'EOF'
 #!/bin/bash
 exit 1
 EOF
+cat > "$fake_bin/setpriv" <<'EOF2'
+#!/bin/bash
+while [[ $# -gt 0 && $1 != -- ]]; do shift; done
+shift
+exec "$@"
+EOF2
 chmod +x "$fake_bin"/*
 
 run_tidy() {
@@ -41,6 +47,7 @@ run_tidy() {
   ROOTFS_TIDY_SUDO="$fake_bin/sudo" \
   ROOTFS_TIDY_APT_GET="$fake_bin/apt-get" \
   ROOTFS_TIDY_HOME="$test_root/nohome" \
+  ROOTFS_TIDY_SETPRIV="$fake_bin/setpriv" \
   TEST_UID="${TEST_UID:-0}" \
   TEST_CLEANUP_STATUS="${TEST_CLEANUP_STATUS:-0}" \
   TEST_LOG="$log" \
