@@ -66,7 +66,7 @@ label=${2:-}
   exit 2
 }
 disk_policy_is_control_label "$label" || {
-  echo "diskctl: unknown managed disk label" >&2
+  disk_policy_refuse_unlisted "$label"
   exit 2
 }
 

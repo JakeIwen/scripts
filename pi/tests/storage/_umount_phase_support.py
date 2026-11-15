@@ -199,16 +199,7 @@ def _transform_source(source_text: str) -> str:
     return transformed
 
 
-DISK_POLICY_STUB = """\
-MOUNT_LABELS=()
-MANUAL_MOUNT_LABELS=()
-HDD_LABELS=()
-DISK_POLICY_RESOLVE_REASON=
-DISK_POLICY_RESOLVE_ERROR=
-DISK_POLICY_VANISHED_DEVICE=
-disk_policy_resolve_exact_label() { return 1; }
-disk_policy_samba_share_name() { return 1; }
-"""
+DISK_POLICY_STUB = SOURCE.with_name("disk_policy.sh").read_text(encoding="utf-8")
 
 
 DRIVER = r"""#!/usr/bin/env bash

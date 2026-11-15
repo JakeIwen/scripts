@@ -23,7 +23,7 @@ md_resolve_label() {
   MD_DEVICE=""
   MD_LABEL_KEY=""
 
-  disk_policy_resolve_exact_label "$label" label-or-partlabel
+  disk_policy_resolve_exact_label "$label" "${2:-label-or-partlabel}"
   status=$?
   if (( status == 0 )); then
     MD_DEVICE=$DISK_POLICY_RESOLVED_DEVICE
@@ -359,9 +359,28 @@ md_require_empty_mount_dir() {
   return 0
 }
 
+# Only the explicit CLI path may lack managed quarantine state. Automatic and
+# control callers retain the policy boundary and listed labels retain PARTLABEL.
+md_mount_admission() {
+  local label=$1 explicit=$2 status
+  disk_policy_validate_label "$label" || return 1
+  if ! disk_policy_is_control_label "$label"; then
+    [[ "$explicit" == 1 ]] && return 0
+    disk_policy_refuse_unlisted "$label"
+    return 1
+  fi
+  disk_health_is_quarantined "$label"
+  status=$?
+  if (( status == 0 )); then
+    echo "ERROR: $label is quarantined after a failed filesystem check; repair it before mounting" >&2
+    return 1
+  fi
+  (( status == 1 ))
+}
+
 mntdsk() {
   local label="$1"
-  local pth="/mnt/$label"
+  local pth
   local resolve_status
   local status
   local device
@@ -377,20 +396,16 @@ mntdsk() {
   local pi_uid pi_gid
   local -a mount_opts=()
 
-  disk_health_is_quarantined "$label"
-  status=$?
-  if (( status == 0 )); then
-    echo "ERROR: $label is quarantined after a failed filesystem check; repair it before mounting" >&2
-    return 1
-  elif (( status != 1 )); then
-    return 1
-  fi
-
-  md_resolve_label "$label"
+  local explicit=${2:-0} mode=label-or-partlabel
+  md_mount_admission "$label" "$explicit" || return 1
+  pth="/mnt/$label"
+  disk_policy_is_control_label "$label" || mode=label-only
+  md_resolve_label "$label" "$mode"
   resolve_status=$?
   if (( resolve_status == 1 )); then
     echo "no exact LABEL or PARTLABEL match for: $label"
-    return 0
+    (( explicit == 0 ))
+    return $?
   elif (( resolve_status != 0 )); then
     return 1
   fi
@@ -578,7 +593,8 @@ mount_disks_main() {
     echo "usage: ${0##*/} [label|--always|--list-stale|--recover-stale]" >&2
     return 2
   elif (( $# == 1 )); then
-    mntdsk "$1" || had_failure=1
+    disk_policy_validate_label "$1" || return 1
+    mntdsk "$1" 1 || had_failure=1
   elif (( $# == 0 )); then # used by the minutely policy job
     for dir in "${rm_dirs[@]}"; do
       rm_mnt_dir "$dir" || had_failure=1

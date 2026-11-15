@@ -190,3 +190,14 @@ If the policy file is missing or invalid while parked, reconciliation returns
 an error without inferring a mount or unmount request. Ignition-on handling
 still stops qBittorrent and spins down disks even when requested policy cannot
 be read.
+
+### Ad-hoc removable filesystems
+
+`mount_disks.sh <label>` also mounts an unlisted filesystem LABEL at
+`/mnt/<label>` after exact unique discovery and the usual mount safeguards.
+Ad-hoc labels do not use PARTLABEL, quarantine, dashboard controls, automatic
+reconciliation or HDD spindown; the policy lists still bound those operations.
+Use `umount_disks.sh <label>` to sync and ordinarily unmount it; a busy mount
+is refused without killing its users. Only a plain empty mount directory is
+removed, using `rmdir`. Safe reboot/poweroff deliberately refuses while an
+ad-hoc USB/SCSI filesystem remains mounted and tells you to unmount it first.

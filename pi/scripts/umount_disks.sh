@@ -847,6 +847,53 @@ ud_spindown() {
   return 0
 }
 
+# Ad-hoc labels have no Samba export or registered backup lock. Keep this
+# separate from managed shutdown: never evict a process using a user's stick.
+ud_unmount_adhoc() {
+  local label=$1 device=$2 target="/mnt/$1" source output rc
+  source=$(ud_findmnt_exact_source "$target" 2>&1)
+  rc=$?
+  if (( rc == 1 )) && [[ -z "$source" ]]; then return 0; fi
+  if (( rc != 0 )) || [[ -z "$device" || "$source" != "$device" ]]; then
+    ud_record_failure "cannot verify $label at $target from its LABEL-resolved device $device: $source"
+    return 1
+  fi
+  (( dry_run )) && { echo "dry run: would unmount $label at $target"; return 0; }
+  ud_sync_mount "$target" || return 1
+  output=$(ud_normal_unmount "$target" 2>&1)
+  rc=$?
+  if (( rc != 0 )); then
+    ud_record_failure "ordinary unmount refused for $label at $target (possibly busy): $output"
+    return 1
+  fi
+  output=$(ud_findmnt_source_targets "$device" 2>&1)
+  rc=$?
+  if (( rc != 1 )) || [[ -n "$output" ]]; then
+    ud_record_failure "cannot verify $label is unmounted: $output"
+    return 1
+  fi
+  # rmdir is the final emptiness check; never recurse or follow a symlink.
+  [[ ! -L "$target" && -d "$target" ]] || return 0
+  /usr/bin/sudo /usr/bin/rmdir -- "$target"
+}
+
+ud_report_remaining_mounts() {
+  local rows=$1 device target extra label actual
+  while read -r device target extra; do
+    [[ "$device" == /dev/sd* ]] || continue
+    label=${target#/mnt/}
+    if [[ -z "$extra" && "$target" == /mnt/* ]] &&
+        disk_policy_validate_label "$label" 2>/dev/null &&
+        actual=$(/usr/bin/sudo /sbin/blkid -s LABEL -o value -- "$device") &&
+        [[ "$actual" == "$label" ]]; then
+      printf -v actual 's umount_disks %q' "$label"
+      ud_record_failure "$label ($device) is still mounted at $target; unmount it first: $actual"
+    else
+      ud_record_failure "$device is still mounted at $target; unmount it first"
+    fi
+  done <<< "$rows"
+}
+
 umount_disks_main() {
   local dry_run=0 spindown=0 emergency=0 clear_state=0 all_labels=0 explicit_label=
   local label arg rc expected_mount target
@@ -908,8 +955,10 @@ umount_disks_main() {
     # unmount can be undone before a later label is validated.
     labels=("${MOUNT_LABELS[@]}" "${MANUAL_MOUNT_LABELS[@]}")
   elif [[ -n "$explicit_label" ]]; then
+    disk_policy_validate_label "$explicit_label" || return 1
     labels=("$explicit_label")
     if (( spindown )) && ! ud_is_hdd_label "$explicit_label"; then
+      disk_policy_is_control_label "$explicit_label" || disk_policy_refuse_unlisted "$explicit_label"
       ud_record_failure "refusing to spin down label $explicit_label because it is not in HDD_LABELS"
       ud_notify_failures "$(( spindown && ! dry_run ))"
       return 1
@@ -919,6 +968,11 @@ umount_disks_main() {
   fi
 
   ud_preflight || return 1
+
+  if [[ -n "$explicit_label" ]] && ! disk_policy_is_control_label "$explicit_label"; then
+    ud_unmount_adhoc "$explicit_label" "${devices[$explicit_label]:-}"
+    return $?
+  fi
 
   for label in "${attached_labels[@]}"; do
     if [[ -n "${mounts[$label]}" ]]; then
@@ -950,6 +1004,7 @@ umount_disks_main() {
       )
       if [[ -n "$remaining_scsi_mounts" ]]; then
         ud_record_failure "USB/SCSI filesystems remain mounted after --all: $remaining_scsi_mounts"
+        ud_report_remaining_mounts "$remaining_scsi_mounts"
         had_runtime_failure=1
       fi
     fi

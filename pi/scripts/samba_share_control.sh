@@ -38,7 +38,7 @@ labels=()
 shares=()
 for label in "$@"; do
   disk_policy_is_control_label "$label" || {
-    echo "ERROR: refusing Samba control for unmanaged label '$label'" >&2
+    disk_policy_refuse_unlisted "$label"
     exit 2
   }
   share=$(disk_policy_samba_share_name "$label") || continue

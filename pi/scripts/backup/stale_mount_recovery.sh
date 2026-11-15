@@ -9,7 +9,15 @@ stale_mount_parse_records() { # <records>; sets STALE_RECOVERY_LABELS / SOURCES
   STALE_RECOVERY_SOURCES=()
   [[ -n "$records" ]] || return 0
   while IFS=$'\t' read -r label target source extra; do
-    if ! disk_policy_is_mount_label "$label" || [[ "$target" != "/mnt/$label" ||
+    if ! disk_policy_is_mount_label "$label"; then
+      if disk_policy_is_control_label "$label"; then
+        echo "ERROR: malformed stale-mount record; refusing recovery" >&2
+      else
+        disk_policy_refuse_unlisted "$label"
+      fi
+      return 1
+    fi
+    if [[ "$target" != "/mnt/$label" ||
         "$source" != /dev/?* || "$source" == *[[:space:]]* || -n ${extra:-} ||
         "$seen" == *"|$label|"* ]]; then
       echo "ERROR: malformed stale-mount record; refusing recovery" >&2

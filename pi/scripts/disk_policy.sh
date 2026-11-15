@@ -16,7 +16,9 @@ ALWAYS_MOUNT_LABELS=(
 )
 
 # Filesystem/partition labels that may be mounted and unmounted explicitly but
-# are not part of automatic policy reconciliation. This lets backup disks stay
+# are not part of automatic policy reconciliation. Unlisted filesystem LABELs
+# can also be mounted ad hoc with mount_disks.sh <label>, without managed controls.
+# This lets backup disks stay
 # unmounted after a backup while remaining available to dashboard/user tools.
 MANUAL_MOUNT_LABELS=(
   bigboi
@@ -34,7 +36,8 @@ OFFSITE_LABELS=(
 
 # Filesystem labels for rotational USB disks that must be unmounted and
 # explicitly spun down while the van is running.  A newly attached disk is
-# intentionally ignored until its label is added here.
+# excluded from automatic policy/spindown until its label is added here;
+# explicit ad-hoc mounting does not add it to this list.
 HDD_LABELS=(
   movingparts
   bigboi
@@ -339,6 +342,25 @@ disk_policy_is_manual_mount_label() {
   return 1
 }
 
+# Labels become path components, never options or traversal. Use a byte bound
+# and printable ASCII so diagnostics and shell commands cannot hide controls.
+disk_policy_validate_label() {
+  local LC_ALL=C label=$1
+  if [[ -z "$label" || ${#label} -gt 64 || "$label" == -* ||
+        "$label" == . || "$label" == */* || "$label" == *..* || "$label" == *[!\ -~]* ]]; then
+    printf 'ERROR: unsafe disk label: %q\n' "$label" >&2
+    return 1
+  fi
+}
+
+# One diagnostic for managed-only entry points. The hand route is the ad-hoc
+# CLI mount (mount_disks.sh <label>), which picks per-filesystem options itself.
+disk_policy_refuse_unlisted() {
+  local label=$1
+  printf 'ERROR: %q is not in disk_policy.sh; add it to MANUAL_MOUNT_LABELS, or mount it by hand from a Pi shell: s mount_disks %q\n' \
+    "$label" "$label" >&2
+}
+
 disk_policy_is_control_label() {
   disk_policy_is_mount_label "$1" || disk_policy_is_manual_mount_label "$1"
 }
@@ -363,7 +385,11 @@ disk_eject_prepare_dir() {
 disk_eject_hold_set() {
   local label=$1 seconds=$2 now deadline marker temporary
   disk_policy_is_mount_label "$label" || {
-    echo "ERROR: disk label '$label' is not managed for automatic mounting" >&2
+    if disk_policy_is_control_label "$label"; then
+      echo "ERROR: disk label '$label' is not managed for automatic mounting" >&2
+    else
+      disk_policy_refuse_unlisted "$label"
+    fi
     return 1
   }
   [[ "$seconds" =~ ^[1-9][0-9]{0,2}$ ]] && ((seconds <= 300)) || {
@@ -414,7 +440,10 @@ disk_eject_hold_remaining() {
 
 disk_eject_hold_clear() {
   local label=$1 marker
-  disk_policy_is_mount_label "$label" || return 1
+  disk_policy_is_mount_label "$label" || {
+    disk_policy_is_control_label "$label" || disk_policy_refuse_unlisted "$label"
+    return 1
+  }
   marker="$DISK_EJECT_HOLD_DIR/$label"
   [[ ! -e "$marker" && ! -L "$marker" ]] || /bin/rm -f -- "$marker"
 }
@@ -425,7 +454,10 @@ disk_health_quarantine_marker() {
 
 disk_health_is_quarantined() {
   local label=$1 marker
-  disk_policy_is_control_label "$label" || return 2
+  disk_policy_is_control_label "$label" || {
+    disk_policy_refuse_unlisted "$label"
+    return 2
+  }
   marker=$(disk_health_quarantine_marker "$label") || return 2
   if [[ -L "$DISK_HEALTH_STATE_DIR" ||
         -L "$DISK_HEALTH_STATE_DIR/quarantine" ||
