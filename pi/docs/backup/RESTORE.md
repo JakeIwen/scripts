@@ -277,7 +277,8 @@ problem nag. The percent is `df`'s: used / (used + avail), rounded up. Crossing
 70, 80 or 90% sends one ntfy message (on the `NTFY_WARNING_URL` topic through the
 watchdog's notify; one message for the highest level when several are crossed at
 once) and is recorded in `/home/pi/backups/stamps/rootfs_alert.state`. A level
-alerts again only after usage falls 5 points below it (`ROOTFS_ALERT_HYSTERESIS`).
+alerts again only after usage falls to 5 points below it (70 re-arms at 65%; `ROOTFS_ALERT_HYSTERESIS`).
+The percent comes from the raw KiB counters (a negative `avail`, when root uses reserved blocks, counts as full). The read-send-write of the state runs under a non-blocking `flock` on `rootfs_alert.state.lock` beside it; an overlapping run skips its alerts and logs that it did.
 The state is written only after a successful send, so a failed send retries on the
 next run. The forecast fits a least-squares line to the last 30 days of
 `rootfs_used_mib.history` (at least 7 points) and alerts once, with the projected

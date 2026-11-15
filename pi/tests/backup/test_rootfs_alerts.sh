@@ -21,6 +21,10 @@ cat > "$fake_bin/df" <<'EOF2'
 #!/bin/bash
 total=$((100 * 1024 * 1024))
 used=$((total * TEST_USED_PCT / 100))
+if [[ -n "${TEST_RAW_USED_KIB:-}" ]]; then
+  printf 'Used Avail\n%s %s\n' "$TEST_RAW_USED_KIB" "$TEST_RAW_AVAIL_KIB"
+  exit 0
+fi
 printf 'Used Avail\n%s %s\n' "$used" "$((total - used))"
 EOF2
 cat > "$fake_bin/du" <<'EOF2'
@@ -101,16 +105,31 @@ TEST_USED_PCT=75
 run_check
 assert_eq 1 "$(sent_count)" "70% alerted again"
 
-# Falling to 66 (inside the 5-point band) keeps it armed-off; 64 re-arms.
+# Falling to 66 (inside the 5-point band) keeps it alerted; 65 re-arms.
 TEST_USED_PCT=66
 run_check
 assert_eq "level70=1" "$(state level70)" "level70 re-armed inside the hysteresis band"
-TEST_USED_PCT=64
+TEST_USED_PCT=65
 run_check
-assert_eq "level70=0" "$(state level70)" "level70 did not re-arm at 64%"
+assert_eq "level70=0" "$(state level70)" "level70 did not re-arm at 65%"
 TEST_USED_PCT=70
 run_check
 assert_eq 2 "$(sent_count)" "re-armed level did not alert again"
+
+# Exact re-arm boundary for every level: level-5 re-arms, level-4 does not.
+for level in 70 80 90; do
+  rm -f "$ROOTFS_ALERT_STATE_FILE"
+  TEST_USED_PCT=$level
+  run_check
+  assert_eq "level$level=1" "$(state level$level)" "level $level not alerted"
+  TEST_USED_PCT=$((level - 4))
+  run_check
+  assert_eq "level$level=1" "$(state level$level)" "level $level re-armed at $((level - 4))"
+  TEST_USED_PCT=$((level - 5))
+  run_check
+  assert_eq "level$level=0" "$(state level$level)" "level $level did not re-arm at $((level - 5))"
+done
+: > "$sent_file"
 
 # Jumping past two levels sends one message for the highest and marks both.
 : > "$ROOTFS_ALERT_STATE_FILE"
@@ -187,6 +206,27 @@ done
 run_check
 assert_eq 0 "$(sent_count)" "forecast fired on fewer than 7 points"
 
+# Percent uses the raw KiB counters: 70,656,900 used + 31,744,000 free is
+# 69.0% truncated to MiB but df rounds up to 70, so level 70 must alert.
+rm -f "$ROOTFS_ALERT_STATE_FILE"
+: > "$sent_file"
+TEST_RAW_USED_KIB=70656900
+TEST_RAW_AVAIL_KIB=31744000
+export TEST_RAW_USED_KIB TEST_RAW_AVAIL_KIB
+run_check
+assert_eq 1 "$(sent_count)" "KiB-precision 70% did not alert"
+grep -Fq 'is 70% full' "$sent_file" || fail "percent not computed from raw KiB"
+
+# A negative avail (root using reserved blocks) is still checked: 100% alerts at 90.
+rm -f "$ROOTFS_ALERT_STATE_FILE"
+: > "$sent_file"
+TEST_RAW_USED_KIB=104857600
+TEST_RAW_AVAIL_KIB=-1024
+run_check
+assert_eq 1 "$(sent_count)" "negative avail did not alert"
+grep -Fq 'crossed 90%' "$sent_file" || fail "negative avail not treated as full"
+unset TEST_RAW_USED_KIB TEST_RAW_AVAIL_KIB
+
 # Per-path budget: over budget is a problem; sizes are recorded daily, with
 # the same-day line replaced and lines older than the retention dropped.
 TEST_DU_KIB=$((2 * 1024 * 1024))
@@ -203,5 +243,37 @@ assert_eq 2 "$(grep -c '^' "$ROOTFS_PATH_HISTORY_FILE")" "path history not prune
 grep -Fq "$((now / 86400)) $now $TEST_PATH_A:2048" "$ROOTFS_PATH_HISTORY_FILE" ||
   fail "today's path size was not recorded"
 grep -q '^1 ' "$ROOTFS_PATH_HISTORY_FILE" && fail "stale path history line kept"
+
+# Two overlapping runs send one message. A development Mac has no flock, so a
+# python stand-in with the same `flock -n 8` contract is used there.
+if [[ ! -x /usr/bin/flock ]]; then
+  cat > "$fake_bin/flock" <<'EOF2'
+#!/usr/bin/python3
+import fcntl, sys
+try:
+    fcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(1)
+EOF2
+  chmod +x "$fake_bin/flock"
+  ROOTFS_FLOCK_COMMAND="$fake_bin/flock"
+fi
+if true; then
+  rm -f "$ROOTFS_ALERT_STATE_FILE"
+  : > "$sent_file"
+  slow_notify="$test_root/slow-notify"
+  notify() {
+    sleep 1
+    printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "${NTFY_TOPIC_VAR:-}" >> "$sent_file"
+  }
+  TEST_USED_PCT=75
+  export TEST_USED_PCT
+  ( problems=(); status=; check_rootfs_budget "$now" 2>/dev/null ) &
+  pid_a=$!
+  ( problems=(); status=; check_rootfs_budget "$now" 2>/dev/null ) &
+  pid_b=$!
+  wait "$pid_a" "$pid_b"
+  assert_eq 1 "$(sent_count)" "overlapping runs double-sent"
+fi
 
 echo "PASS: rootfs level, forecast, and path-history alerts"

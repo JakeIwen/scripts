@@ -149,11 +149,11 @@ class Commands:
                 return rc, output
             finally:
                 if child.poll() is None:
-                    os.killpg(child.pid, signal.SIGTERM)
+                    signal_group(child.pid, signal.SIGTERM)
                     try:
                         child.wait(timeout=STOP_SECONDS)
                     except subprocess.TimeoutExpired:
-                        os.killpg(child.pid, signal.SIGKILL)
+                        signal_group(child.pid, signal.SIGKILL)
                         child.wait()
                 if rclone_env is not None:
                     # restic is gone; the run's snapshot (and its rclone) is removed only after this.
@@ -223,6 +223,20 @@ class Commands:
                 line(text)
             output += text
         return output
+
+
+def signal_group(pid, sig):
+    """Signal a command's process group, tolerating one that just exited.
+
+    A child that exits between poll() and the signal is gone (ESRCH on Linux,
+    EPERM on macOS while its leader is an unreaped zombie); either way it needs
+    no signal, and raising would turn a stop or a finished guard command into a
+    spurious failure.
+    """
+    try:
+        os.killpg(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def private_directory(path, owner):

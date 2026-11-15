@@ -78,8 +78,11 @@ rootfs_read_used_mib() {
   local output result line used avail extra
   local df_command=${ROOTFS_DF_COMMAND:-/bin/df}
 
+  local parsed=0
   ROOTFS_USED_MIB=0
   ROOTFS_AVAIL_MIB=0
+  ROOTFS_USED_KIB=0
+  ROOTFS_AVAIL_KIB=0
   output=$("$df_command" -k --output=used,avail / 2>&1)
   result=$?
   if (( result != 0 )); then
@@ -87,12 +90,17 @@ rootfs_read_used_mib() {
     return 1
   fi
   while read -r used avail extra; do
-    if [[ "$used" =~ ^[0-9]+$ && "$avail" =~ ^[0-9]+$ && -z "${extra:-}" ]]; then
+    # avail goes negative when root has eaten the reserved blocks, which is
+    # exactly when the checks matter most.
+    if [[ "$used" =~ ^[0-9]+$ && "$avail" =~ ^-?[0-9]+$ && -z "${extra:-}" ]]; then
+      ROOTFS_USED_KIB=$used
+      ROOTFS_AVAIL_KIB=$avail
       ROOTFS_USED_MIB=$((used / 1024))
       ROOTFS_AVAIL_MIB=$((avail / 1024))
+      parsed=1
     fi
   done <<< "$output"
-  if (( ROOTFS_USED_MIB + ROOTFS_AVAIL_MIB == 0 )); then
+  if (( ! parsed )); then
     rootfs_add_problem "could not parse rootfs usage"
     return 1
   fi
@@ -345,13 +353,19 @@ rootfs_forecast() {
   read -r ROOTFS_FORECAST_DAYS ROOTFS_FORECAST_EPOCH <<< "$result"
 }
 
-rootfs_check_alerts() {
+rootfs_check_alerts_locked() {
   local now=$1 percent state_file level var newly="" highest=0 changed=0
-  local total_mib horizon clear_at forecast_note priority tags message test_note=""
+  local total_kib total_mib horizon clear_at forecast_note priority tags message test_note=""
   state_file=${ROOTFS_ALERT_STATE_FILE:-"$STAMP_DIR/rootfs_alert.state"}
-  total_mib=$((ROOTFS_USED_MIB + ROOTFS_AVAIL_MIB))
-  # Percent as df prints it: used / (used + avail), rounded up.
-  percent=$(( (ROOTFS_USED_MIB * 100 + total_mib - 1) / total_mib ))
+  total_kib=$((ROOTFS_USED_KIB + ROOTFS_AVAIL_KIB))
+  total_mib=$((total_kib / 1024))
+  # Percent as df prints it: used / (used + avail) from the raw KiB counters,
+  # rounded up; a non-positive total (no space left at all) counts as full.
+  if (( total_kib > 0 )); then
+    percent=$(( (ROOTFS_USED_KIB * 100 + total_kib - 1) / total_kib ))
+  else
+    percent=100
+  fi
   if [[ -n "${ROOTFS_TEST_PERCENT:-}" ]]; then
     if [[ ! "$ROOTFS_TEST_PERCENT" =~ ^[0-9]{1,3}$ ]]; then
       rootfs_add_problem "invalid ROOTFS_TEST_PERCENT: $ROOTFS_TEST_PERCENT"
@@ -365,7 +379,7 @@ rootfs_check_alerts() {
 
   for level in 70 80 90; do
     var=ROOTFS_ALERT_L$level
-    if (( ${!var} )) && (( percent < level - ${ROOTFS_ALERT_HYSTERESIS:-5} )); then
+    if (( ${!var} )) && (( percent <= level - ${ROOTFS_ALERT_HYSTERESIS:-5} )); then
       printf -v "$var" 0
       changed=1
     elif (( ! ${!var} )) && (( percent >= level )); then
@@ -379,7 +393,7 @@ rootfs_check_alerts() {
       80) priority=high tags=warning ;;
       *)  priority=urgent tags=rotating_light ;;
     esac
-    message="Root filesystem is ${percent}% full (crossed ${highest}%)$test_note: $(rootfs_format_mib "$ROOTFS_USED_MIB") used, $(rootfs_format_mib "$ROOTFS_AVAIL_MIB") free of $(rootfs_format_mib "$total_mib"). Next alerts at 80% and 90%; each re-arms 5 points below its level."
+    message="Root filesystem is ${percent}% full (crossed ${highest}%)$test_note: $(rootfs_format_mib "$ROOTFS_USED_MIB") used, $(rootfs_format_mib $((ROOTFS_AVAIL_MIB > 0 ? ROOTFS_AVAIL_MIB : 0))) free of $(rootfs_format_mib "$total_mib"). Next alerts at 80% and 90%; each re-arms once usage is 5 points below its level."
     if rootfs_send_alert "vanpi root disk ${percent}%" "$message" "$priority" "$tags"; then
       for level in $newly; do printf -v "ROOTFS_ALERT_L$level" 1; done
       changed=1
@@ -413,6 +427,32 @@ rootfs_check_alerts() {
   fi
   (( changed )) && rootfs_write_alert_state "$state_file"
   return 0
+}
+
+# Boot, scheduled and manual runs can overlap; the read-send-write of the alert
+# state is one transaction under a non-blocking flock on a file beside it (fd 8).
+# A run that finds it held skips the alerts and logs; the holder sends them.
+rootfs_check_alerts() {
+  local now=$1 state_file lock_file flock_command
+  state_file=${ROOTFS_ALERT_STATE_FILE:-"$STAMP_DIR/rootfs_alert.state"}
+  lock_file=${ROOTFS_ALERT_LOCK_FILE:-"${state_file}.lock"}
+  flock_command=${ROOTFS_FLOCK_COMMAND:-/usr/bin/flock}
+  if [[ ! -x "$flock_command" ]]; then
+    # Linux always has flock; only a development Mac lacks it.
+    rootfs_check_alerts_locked "$now"
+    return
+  fi
+  if ! exec 8>>"$lock_file"; then
+    rootfs_add_problem "could not open rootfs alert lock: $lock_file"
+    return
+  fi
+  if ! "$flock_command" -n 8; then
+    echo "rootfs alert check skipped: another run holds $lock_file" >&2
+    exec 8>&-
+    return
+  fi
+  rootfs_check_alerts_locked "$now"
+  exec 8>&-
 }
 
 rootfs_append_context() {
