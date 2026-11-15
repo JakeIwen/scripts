@@ -608,6 +608,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   (no finished index build, asked twice) still use grep. The llm-switchboard repo's
   `tests/test_search_oracle.py` consumes these scripts' records mode, so preserve
   that format and the fallback triggers.
+- `macbook/scripts/iterm_restore_tabs.py` is llmrestore's Mac-only iTerm transport,
+  invoked by path with `/usr/bin/python3 -I -B` (stdlib, Python 3.9+).
+  The shared restore script stays standalone for its flat Pi deployment.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on

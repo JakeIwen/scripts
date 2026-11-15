@@ -809,29 +809,12 @@ def choose(plan: list[Session], live: list[Session], launched: dict, force: bool
     return todo, skipped
 
 
-ITERM_SCRIPT = """
-on run argv
-  tell application "iTerm"
-    activate
-    set w to (create window with default profile)
-    set isFirst to true
-    repeat with c in argv
-      if isFirst then
-        set isFirst to false
-        set s to current session of w
-      else
-        tell w to set t to (create tab with default profile)
-        set s to current session of t
-      end if
-      tell s to write text (c as text)
-    end repeat
-  end tell
-end run
-"""
+ITERM_TRANSPORT = (Path(__file__).resolve().parents[2] / "macbook/scripts/iterm_restore_tabs.py"
+                   if IS_MAC else None)
 
 
 def open_iterm_tabs(commands: list[str]) -> str:
-    _run(["/usr/bin/osascript", "-e", ITERM_SCRIPT, *commands])
+    _run(["/usr/bin/python3", "-I", "-B", str(ITERM_TRANSPORT), *commands])
     return "Opened as tabs of a new iTerm window."
 
 
