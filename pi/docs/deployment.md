@@ -157,6 +157,17 @@ use Xwayland without a Wayland idle inhibitor, so the hook watches their
 processes before blanking through wlopm. castit's receiver relies on the
 `pgrep -x mpv` check holding the screen on while its player exists; retain it.
 
+## Swap
+
+zram is the Pi's only swap: `zramswap.service` (package `zram-tools`,
+`/etc/default/zramswap`: zstd, 50% of RAM, priority 100). The 2 GiB
+`/var/swap` file was removed on 2026-11-14 to free SD space (it had 0 B in
+use while zram held about 1.1 GiB): `dphys-swapfile` was disabled and purged,
+so no unit recreates the file at boot. Don't reinstall `dphys-swapfile` or
+add a swap file on the SD card; if memory runs short, raise zram's share in
+`/etc/default/zramswap` instead. The `dphys-swapfile` comment in
+`pi/configs/fstab` is historical.
+
 ## Orchestrator cutover checklist
 
 Run these commands **after merge**, from the primary Mac checkout. No commands in
