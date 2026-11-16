@@ -10,6 +10,7 @@ from unittest import mock
 import icloud_backup as cloud
 import time_machine_store as store
 from pi.tests.backup.test_time_machine_icloud import GEN, job
+from time_machine_verification import CHECKPOINT, ObjectVerifier
 
 
 class UplinkRetryTests(unittest.TestCase):
@@ -76,3 +77,44 @@ class UplinkRetryTests(unittest.TestCase):
         self.assertNotIn('uplink_hold', seen[0])
         self.assertEqual(seen[1], 'stale uplink evidence')
         self.assertNotIn('uplink_hold', state)
+
+    def transfer_failing_after(self, checkpoint_new_proof):
+        """weekly() runs the real transfer; its verifier checkpoints (or not), then loses the uplink."""
+        store_root = self.directory / 'store'; store_root.mkdir(exist_ok=True)
+        digest, old = 'a' * 64, 'b' * 64
+        expected = {digest: {'sha256': digest, 'bytes': 1}, old: {'sha256': old, 'bytes': 1}}
+        row = {'IsDir': False, 'Size': 1, 'ModTime': 'now', 'ID': 'x'}
+        # A proof from an earlier run is already checkpointed: it is no advancement.
+        ObjectVerifier(expected, store_root / CHECKPOINT).accept_hash(old, row, old)
+
+        def verifier_then_uplink_lost(cfg, root, expected, rows, files, state):
+            if checkpoint_new_proof:
+                # What the verifier child does: a durable proof, then its next command loses the uplink.
+                ObjectVerifier(expected, root / CHECKPOINT).accept_hash(digest, row, digest)
+            raise cloud.UplinkUnknown('selected uplink identity is unknown')
+
+        cfg = {'remote': 'icloud:VanRecovery/m4mac/time-machine', 'max_cloud_store_gib': 1000,
+               'overlap_verification': True}
+        def weekly(_cfg, state):
+            return job.transfer(cfg, {'generation': GEN}, state)
+        patches = (mock.patch.object(job, 'ROOT', store_root), mock.patch.object(job, 'ensure_remote'),
+                   mock.patch.object(job.store, 'validate_manifest', return_value=expected),
+                   mock.patch.object(cloud, 'remote_inventory', return_value={}),
+                   mock.patch.object(job, 'upload_and_follow', side_effect=verifier_then_uplink_lost))
+        for patch in patches:
+            self.enterContext(patch)
+        return self.run_uplink_deferral(weekly)
+
+    def test_a_proof_checkpointed_before_the_verifier_lost_the_uplink_resets_the_cap(self):
+        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100, 'pending': GEN,
+                                                          'uplink_quick_retries': 3})
+        state = self.transfer_failing_after(checkpoint_new_proof=True)
+        self.assertEqual(state['uplink_quick_retries'], 1)
+        self.assertGreater(state['retry_at'], time.time() + 295)
+
+    def test_only_earlier_proofs_leave_an_exhausted_cap_exhausted(self):
+        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100, 'pending': GEN,
+                                                          'uplink_quick_retries': 3})
+        state = self.transfer_failing_after(checkpoint_new_proof=False)
+        self.assertEqual(state['uplink_quick_retries'], 3)
+        self.assertIsNone(state['retry_at'])

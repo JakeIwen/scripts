@@ -155,13 +155,17 @@ or incomplete evidence, unreachable router) never permits anything: a running
 client is killed at its first unknown verdict and no new client starts, but the
 worker holds and re-probes every five seconds for `uplink_unknown_grace_seconds`
 (default 90, 0-300; 0 means defer at once), re-checking parking and priority
-between probes and immediately before any client starts or resumes. If the
+between probes and immediately before any client starts or resumes, then
+deciding again on the same evidence, so a slow parking check cannot let proof
+past the metering freshness limit start work. If the
 uplink is verified again in time, the killed command restarts from scratch
 (`icloud_uplink_hold.RESTART_EXITS`; a restarted delete that finds its object
 already gone counts as done; `hashsum` batches are not restarted). Its grace
 counts from its first loss, so a flapping uplink cannot restart it forever. An expired
 hold defers with `UplinkUnknown`, retried after five minutes at most three runs
-in a row without durable advancement (an object uploaded, verified or deleted).
+in a row without durable advancement (an object uploaded or deleted, or a new
+proof in the verification checkpoint file, compared before and after the
+attempt so a verifier failure cannot hide it).
 While holding, `uplink_hold` in the state file keeps the status non-stale and
 shows "Paused: checking the uplink". The parallel verifier starts no new
 command while the uploader holds. Login, verify-login and `--preflight` keep the

@@ -1,15 +1,48 @@
 """Incremental SHA-256 proofs shared by catch-up and final verification."""
+from contextlib import contextmanager
 import time
 from typing import TypedDict
 
 from icloud_inventory import remote_fingerprint
+import icloud_uplink_hold as uplink_hold
 from time_machine_store import atomic_json, read_json
+
+# The checkpoint file's name in the local store; staging cleanup protects it too.
+CHECKPOINT = 'verified-objects.json'
 
 
 class VerifiedObject(TypedDict):
     expected: dict
     remote: dict
     verified_at: float
+
+
+def checkpoint_stamps(checkpoint):
+    """Each checkpointed object's verified_at; {} when the file is missing or unreadable."""
+    try:
+        cache = read_json(checkpoint, {})
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(cache, dict):
+        return {}
+    return {digest: proof.get('verified_at') for digest, proof in cache.items() if isinstance(proof, dict)}
+
+
+@contextmanager
+def advancement_from_checkpoints(checkpoint):
+    """Count a newly checkpointed proof as this run's durable advancement.
+
+    Compares the checkpoint file before and after the block, in a finally, so
+    a proof the (possibly separate) verifier wrote counts even when the block
+    then fails; lossy progress telemetry never decides it.
+    """
+    before = checkpoint_stamps(checkpoint)
+    try:
+        yield
+    finally:
+        after = checkpoint_stamps(checkpoint)
+        if any(stamp != before.get(digest) for digest, stamp in after.items()):
+            uplink_hold.note_advancement()
 
 
 class ObjectVerifier:

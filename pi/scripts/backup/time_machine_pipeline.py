@@ -20,7 +20,7 @@ import icloud_uplink_hold as uplink_hold
 from icloud_inventory import parse_inventory
 from icloud_progress import TransferActivity
 from time_machine_downloads import download_batch, VerificationMeter
-from time_machine_verification import ObjectVerifier
+from time_machine_verification import CHECKPOINT, ObjectVerifier
 
 
 class ResultKind(str, Enum):
@@ -43,7 +43,7 @@ class Follower:
     def __init__(self, cfg, root, expected, rows, parent_pid, completed, updates, done, parent_hold=None):
         self.cfg = {**cfg, 'bandwidth_limit': cfg.get('verification_bandwidth_limit', cfg['bandwidth_limit'])}
         self.remote = cfg['remote'] + '/objects'
-        self.verifier = ObjectVerifier(expected, root / 'verified-objects.json')
+        self.verifier = ObjectVerifier(expected, root / CHECKPOINT)
         self.verifier.observe(rows)
         self.rows = rows
         self.ready = {k for k in expected if self.verifier.available(k, rows)}
@@ -288,19 +288,9 @@ def upload_and_follow(cfg, root, expected, rows, files, state):
         verification_bytes_per_second=None, verification_idle_seconds=0,
         verification_waiting=False, **cloud.upload_progress(expected, rows, {}))
     with VerificationPipeline(cfg, root, expected, rows, admission=backup_admission.current()) as pipeline:
-        verified = [None]
-        def observe(values):
-            # Checkpointed objects from earlier runs set the baseline; only newly
-            # verified ones count as this run's durable advancement.
-            count = values.get('verified_files')
-            if type(count) is int:
-                if verified[0] is not None and count > verified[0]:
-                    uplink_hold.note_advancement()
-                verified[0] = count if verified[0] is None else max(verified[0], count)
-            return values
         def report(counters):
-            values = observe(pipeline.progress())
-            cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, counters), **values)
+            cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, counters),
+                                  **pipeline.progress())
         def completed(digest):
             uplink_hold.note_advancement()
             pipeline.completed_object(digest)
@@ -308,5 +298,4 @@ def upload_and_follow(cfg, root, expected, rows, files, state):
                    '--files-from-raw', str(files), '--immutable', '--size-only', '--log-level', 'INFO'],
                   cfg, network=True, progress=report, on_completed=completed, on_hold=pipeline.parent_hold)
         pipeline.finish(lambda values: cloud.record_progress(state, 'verifying',
-            upload_estimated_bytes=total, command_idle_seconds=values.get('verification_idle_seconds', 0),
-            **observe(values)))
+            upload_estimated_bytes=total, command_idle_seconds=values.get('verification_idle_seconds', 0), **values))

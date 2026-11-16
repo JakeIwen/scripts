@@ -33,7 +33,7 @@ import backup_priority as priority
 import mac_capture_control
 import upload_speed_log
 from time_machine_pipeline import upload_and_follow
-from time_machine_verification import ObjectVerifier
+from time_machine_verification import CHECKPOINT, ObjectVerifier, advancement_from_checkpoints
 from time_machine_icloud_control import admit_worker, is_paused
 
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -351,20 +351,22 @@ def transfer(cfg, manifest, state):
     # All entries are validated lowercase SHA-256 names, not caller paths.
     files.write_text(''.join(name + '\n' for name in sorted(expected)))
     history.transfer_started(state)
-    if cfg.get('overlap_verification'):
-        upload_and_follow(cfg, ROOT, expected, rows, files, state)
-    else:
-        cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, {}))
-        network(cfg, 'copy', str(ROOT / 'objects'), objects_remote,
-                '--files-from-raw', str(files), '--immutable', '--size-only',
-                progress=lambda counters: cloud.record_progress(state, 'uploading',
-                    **cloud.upload_progress(expected, rows, counters)))
-        if missing:
-            uplink_hold.note_advancement()
     total = sum(x['bytes'] for x in expected.values())
-    cloud.record_progress(state, 'verifying', upload_estimated_bytes=total,
-                          parallel_verification=False, verification_bytes_per_second=None)
-    verify_objects(cfg, expected, state)
+    # A proof checkpointed by either verifier counts even if the attempt then fails.
+    with advancement_from_checkpoints(ROOT / CHECKPOINT):
+        if cfg.get('overlap_verification'):
+            upload_and_follow(cfg, ROOT, expected, rows, files, state)
+        else:
+            cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, {}))
+            network(cfg, 'copy', str(ROOT / 'objects'), objects_remote,
+                    '--files-from-raw', str(files), '--immutable', '--size-only',
+                    progress=lambda counters: cloud.record_progress(state, 'uploading',
+                        **cloud.upload_progress(expected, rows, counters)))
+            if missing:
+                uplink_hold.note_advancement()
+        cloud.record_progress(state, 'verifying', upload_estimated_bytes=total,
+                              parallel_verification=False, verification_bytes_per_second=None)
+        verify_objects(cfg, expected, state)
     name = manifest['generation']
     gen = ROOT / 'generations' / name
     private_directory(gen)
@@ -399,7 +401,7 @@ def transfer(cfg, manifest, state):
 def verify_objects(cfg, expected, state):
     remote = cfg['remote'] + '/objects'
     rows = cloud.remote_inventory(cfg, remote)
-    verifier = ObjectVerifier(expected, ROOT / 'verified-objects.json')
+    verifier = ObjectVerifier(expected, ROOT / CHECKPOINT)
     verifier.observe(rows)
     if any(not verifier.available(k, rows) for k in expected):
         raise RuntimeError('cloud object missing or wrong size')
@@ -413,7 +415,6 @@ def verify_objects(cfg, expected, state):
         verifier.verify(digest, rows[digest], lambda key: network(cfg, 'cat', remote + '/' + key,
             stream_hash=True, progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0),
                                                        command_idle_seconds=c.get('idle_seconds', 0))))
-        uplink_hold.note_advancement()
         report(current_file_bytes=0)
     if verifier.invalidate_changed(cloud.remote_inventory(cfg, remote)):
         raise cloud.Deferred('cloud objects changed during verification; checkpoints invalidated')
