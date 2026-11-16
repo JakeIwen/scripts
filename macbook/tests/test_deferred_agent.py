@@ -7,6 +7,7 @@ import datetime
 import json
 from pathlib import Path
 import stat
+import subprocess
 import time
 
 from macbook.tests.deferred_fixture import DeferredHarness, WarningTopic
@@ -79,6 +80,63 @@ class NotReadyTests(DeferredHarness):
         self.assertIn(f"not ready {job.name}", result.stdout)
         self.assertEqual(self.meta(job)["attempts"], "0")
         self.assertEqual(WarningTopic.received, [])
+
+    def test_not_ready_checks_are_recorded_listed_and_reset(self):
+        job = self.add(YESTERDAY, "recorded", "exit 75")
+        fresh = self.listed(job)
+        self.assertEqual((fresh["last_not_ready"], fresh["not_ready_checks"]), (None, 0))
+        due = datetime.date.fromisoformat(YESTERDAY)
+        self.assertEqual(fresh["give_up"], (due + datetime.timedelta(days=7)).isoformat() + "T00:00")
+        self.assertEqual((fresh["agent"], fresh["ready"]), (False, None))
+        self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertEqual(self.deferred("run-now", job.name, check=False).returncode, 4)
+        record = self.listed(job)
+        self.assertEqual(record["not_ready_checks"], 3)
+        self.assertRegex(record["last_not_ready"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d$")
+        self.assertEqual(self.meta(job)["not_ready_checks"], "3")
+        self.deferred("reschedule", job.name, "+1d")
+        moved = next((self.root / "jobs").iterdir())
+        self.assertNotIn("last_not_ready", self.meta(moved))
+        self.assertNotIn("not_ready_checks", self.meta(moved))
+
+    def test_a_check_that_fails_for_another_reason_clears_the_not_ready_record(self):
+        flag = self.tmp / "go"
+        job = self.add(YESTERDAY, "turns", f"test -e {flag} && exit 9; exit 75", "--attempts", "2")
+        self.deferred("run-due")
+        self.assertEqual(self.listed(job)["not_ready_checks"], 1)
+        flag.write_text("")
+        self.deferred("run-due")
+        record = self.listed(job)
+        self.assertEqual((record["last_not_ready"], record["not_ready_checks"], record["attempts"]), (None, 0, 1))
+
+    def test_malformed_not_ready_record_is_isolated_from_healthy_jobs(self):
+        for bad in ("not_ready_checks=bogus", "not_ready_checks=-1", "last_not_ready=yesterday-ish"):
+            with self.subTest(bad=bad):
+                marker = self.tmp / "healthy-ran"
+                marker.unlink(missing_ok=True)
+                broken = self.add(YESTERDAY, "aaa-broken", "exit 75")
+                with (broken / "job").open("a") as record:
+                    record.write(bad + "\n")
+                healthy = self.add(YESTERDAY, "zzz-healthy", f"touch {marker}")
+                records = {r["id"]: r for r in json.loads(self.deferred("list", "--json").stdout)["jobs"]}
+                self.assertEqual(records[broken.name], {"id": broken.name, "valid": False})
+                self.assertTrue(records[healthy.name]["valid"])
+                self.assertEqual(self.deferred("run-due").returncode, 0)
+                self.assertTrue(marker.exists())
+                self.assertFalse(healthy.exists())
+                self.deferred("cancel", broken.name)
+
+    def test_retry_clears_not_ready_record(self):
+        job = self.add("2020-01-01", "stale-note", "exit 75", "--attempts", "1", "--give-up", "2020-01-02")
+        self.deferred("run-due")  # past the window: an ordinary failure
+        self.assertEqual(self.listed(job)["state"], "failed")
+        with (job / "job").open("a") as record:
+            record.write("last_not_ready=2020-01-01T10:00\nnot_ready_checks=2\n")
+        self.assertEqual(self.listed(job)["not_ready_checks"], 2)
+        self.deferred("retry", job.name)
+        self.assertEqual(self.listed(job)["not_ready_checks"], 0)
+        self.assertIsNone(self.listed(job)["last_not_ready"])
 
 
 class TimeoutTests(DeferredHarness):
@@ -163,6 +221,48 @@ class AddAgentTests(DeferredHarness):
         self.assertFalse(job.exists())
         self.assertEqual(len((self.fake / "claude-calls").read_text().split()), 1)
         self.assertEqual([t for t, _, _ in WarningTopic.received], ["followup"])
+
+    def test_ready_command_round_trips_through_the_job_record_and_json(self):
+        ready = ("ssh -o BatchMode=yes vanpi.lan 'sudo python3 -c \"import json;"
+                 "s=json.load(open(\\\"/var/x/state.json\\\"));print(s.get(\\\"a\\\") or {})\"'; "
+                 "echo $HOME `x` 'q'\\''s' \\ end")
+        job = self.add_agent("--ready", ready)
+        record = self.listed(job)
+        self.assertEqual(record["ready"], ready)
+        self.assertTrue(record["agent"])
+
+    def test_live_escaped_ready_decodes_to_the_runnable_command(self):
+        job = self.add_agent("--ready", "true")
+        live = (r"agent_ready=ssh\ -o\ BatchMode=yes\ -o\ ConnectTimeout=15\ vanpi.lan\ \'sudo\ /usr/bin/python3\ -c\ \"import\ json,sys\;s=json.load\(open\(\\\"/var/lib/vanpi-time-machine-icloud/state.json\\\"\)\)\;a=s.get\(\\\"orphan_audit\\\"\)\ or\ \{\}\;sys.exit\(0\ if\ s.get\(\\\"retention_done_for\\\"\)==s.get\(\\\"last_generation\\\"\)\ and\ a.get\(\\\"generation\\\"\)==s.get\(\\\"last_generation\\\"\)\ else\ 1\)\"\'")
+        lines = [l for l in (job / "agent.env").read_text().splitlines() if not l.startswith("agent_ready=")]
+        (job / "agent.env").write_text("\n".join(lines + [live]) + "\n")
+        decoded = self.listed(job)["ready"]
+        self.assertTrue(decoded.startswith(
+            "ssh -o BatchMode=yes -o ConnectTimeout=15 vanpi.lan 'sudo /usr/bin/python3 -c \"import json,sys;s=json.load(open("))
+        self.assertIn('open(\\"/var/lib/vanpi-time-machine-icloud/state.json\\")', decoded)
+        self.assertTrue(decoded.endswith('else 1)"\''))
+        # The job's own runner evaluates it with zsh -c, so it must parse as shell.
+        self.assertEqual(subprocess.run(["/bin/zsh", "-n", "-c", decoded]).returncode, 0)
+
+    def test_ready_command_keeps_trailing_newlines_and_backslashes_exactly(self):
+        for ready in ("echo hi\n", "echo hi \\\n", "echo hi\n\n", "echo hi\\", "a\\\nb"):
+            with self.subTest(ready=ready):
+                job = self.add_agent("--ready", ready, name="exact")
+                self.assertEqual(self.listed(job)["ready"], ready)
+                self.deferred("cancel", job.name)
+
+    def test_agent_job_without_ready_lists_null_ready(self):
+        record = self.listed(self.add_agent())
+        self.assertTrue(record["agent"])
+        self.assertIsNone(record["ready"])
+
+    def test_failing_ready_check_is_recorded_as_not_ready(self):
+        job = self.add_agent("--ready", "exit 1")
+        self.deferred("run-due")
+        record = self.listed(job)
+        self.assertEqual(record["not_ready_checks"], 1)
+        self.assertIsNotNone(record["last_not_ready"])
+        self.assertEqual(record["ready"], "exit 1")
 
     def test_defaults_are_haiku_and_medium(self):
         self.add_agent()

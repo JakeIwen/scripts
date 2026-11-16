@@ -35,7 +35,10 @@ default_timeout=900
 lock_wait=${DEFERRED_LOCK_WAIT:-10}
 # Every job record defines these keys; `state` is pending or failed. `give_up`
 # is optional (records written before it existed lack it): empty means due + 7d.
+# `last_not_ready` (stamp of the latest check that exited not-ready) and
+# `not_ready_checks` (how many such checks) are optional too, empty when none.
 job_keys=(name due description created origin attempts max_attempts timeout state)
+optional_job_keys=(give_up last_not_ready not_ready_checks)
 not_ready_status=75     # a job's own "condition not met yet" exit status
 run_now_not_ready=4     # run-now's exit status for it (75 there means the lock is busy)
 default_give_up_seconds=$(( 7 * 86400 ))
@@ -65,7 +68,7 @@ load_job() {  # DIR: fills $job from DIR/job; fails unless every job_keys entry 
       [[ $line == ?*=* ]] && job[${line%%=*}]=${line#*=}
     done } 2>/dev/null < $1/job || return 1
   for key in $job_keys; do (( ${+job[$key]} )) || return 1; done
-  (( ${+job[give_up]} )) || job[give_up]=
+  for key in $optional_job_keys; do (( ${+job[$key]} )) || job[$key]=; done
 }
 
 give_up_stamp() {  # prints the time after which a not-ready exit counts as a failure
@@ -76,11 +79,27 @@ give_up_stamp() {  # prints the time after which a not-ready exit counts as a fa
   print -r -- $out
 }
 
+clear_not_ready() { job[last_not_ready]=; job[not_ready_checks]= }
+
+record_not_ready() {  # the check just made exited not-ready: remember when and how often
+  job[last_not_ready]=$(strftime $stamp_format $EPOCHSECONDS)
+  job[not_ready_checks]=$(( ${job[not_ready_checks]:-0} + 1 ))
+}
+
+ready_command() {  # DIR: sets REPLY to the add-agent --ready command as typed; empty when none
+  local line
+  REPLY=
+  [[ -f $1/agent.env ]] || return 0
+  while IFS= read -r line; do
+    [[ $line == agent_ready=* ]] && { REPLY=${(Q)${line#agent_ready=}}; return 0 }
+  done < $1/agent.env
+}
+
 save_job() {  # DIR: rewrites DIR/job from $job atomically
   local key
   local -a lines
   for key in $job_keys; do lines+=("$key=$job[$key]"); done
-  [[ -z ${job[give_up]-} ]] || lines+=("give_up=$job[give_up]")
+  for key in $optional_job_keys; do [[ -z ${job[$key]-} ]] || lines+=("$key=$job[$key]"); done
   print -rl -- $lines > $1/job.tmp
   /bin/mv -f -- $1/job.tmp $1/job
 }
@@ -240,6 +259,12 @@ emit_list_json_records() {
     emit_json_field "$job[created]"
     emit_json_field "$job[origin]"
     emit_json_field "$dir/last.log"
+    emit_json_field "$(give_up_stamp)"
+    emit_json_field "$([[ -f $dir/agent.env ]] && print 1 || print 0)"
+    ready_command $dir   # not in $(...), which would strip trailing newlines
+    emit_json_field "$REPLY"
+    emit_json_field "$job[last_not_ready]"
+    emit_json_field "${job[not_ready_checks]:-0}"
   done
 }
 
@@ -296,6 +321,11 @@ for kind in fields:
         "created": next(fields),
         "origin": next(fields),
         "last_log": tail_log(next(fields)),
+        "give_up": next(fields),
+        "agent": next(fields) == "1",
+        "ready": next(fields) or None,
+        "last_not_ready": next(fields) or None,
+        "not_ready_checks": int(next(fields)),
     })
 json.dump(result, sys.stdout, ensure_ascii=False)
 sys.stdout.write("\n")
@@ -349,6 +379,7 @@ cmd_retry() {
   [[ $job[state] == failed ]] || die "job ${dir:t} has invalid state: $job[state]"
   job[state]=pending
   job[attempts]=0
+  clear_not_ready
   save_job $dir
   log_line "retrying ${dir:t} at the next check"
   print -r -- "retrying ${dir:t} at the next check"
@@ -366,6 +397,7 @@ cmd_reschedule() {
   [[ $new_dir == $dir || ! -e $new_dir ]] || die "job ${new_dir:t} already exists"
   job[due]=$due
   job[give_up]=   # a new due time gets the default window again
+  clear_not_ready
   if [[ $job[state] == failed ]]; then
     job[state]=pending
     job[attempts]=0
@@ -412,10 +444,13 @@ run_job() {  # DIR MODE: one scheduled/manual attempt; purge success, warn only 
   if (( rc == not_ready_status )) && [[ $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
     run_job_not_ready=1
     job[attempts]=$(( job[attempts] - 1 ))
+    record_not_ready
     save_job $dir
     log_line "${${mode:#scheduled}:+manual }not ready ${dir:t}; the next check retries"
     return 0
   fi
+  clear_not_ready   # the condition was met (or the window closed), so the last check is no longer "not ready"
+  (( rc == 0 )) || save_job $dir
   local tries="attempt $job[attempts]/$job[max_attempts]" prefix=
   [[ $mode == manual ]] && prefix="manual "
   if (( rc == 0 )); then
@@ -445,6 +480,8 @@ job_record_valid() {  # DIR: validate fields that later become paths, numbers or
   [[ $job[attempts] == <-> && $job[max_attempts] == <1-> && $job[timeout] == <1-> ]] || return 1
   [[ $job[due] == <->-<->-<->T<->:<-> ]] || return 1
   [[ -z $job[give_up] ]] || normalize_due "$job[give_up]" >/dev/null || return 1
+  [[ -z $job[last_not_ready] ]] || normalize_due "$job[last_not_ready]" >/dev/null || return 1
+  [[ -z $job[not_ready_checks] || $job[not_ready_checks] == <-> ]] || return 1
   normalize_due "$job[due]" >/dev/null || return 1
   [[ $job[created] == <->-<->-<->T<->:<-> ]] || return 1
   normalize_due "$job[created]" >/dev/null || return 1

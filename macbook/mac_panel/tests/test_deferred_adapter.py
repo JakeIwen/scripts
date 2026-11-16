@@ -12,7 +12,9 @@ def inventory():
     return {'checker': {'agent_loaded': True, 'last_run': None, 'stale': False}, 'jobs_dir': '/fixture/jobs',
             'jobs': [{'id': 'test-job', 'valid': True, 'name': 'Test', 'due': '2026-10-20T15:00',
                       'state': 'pending', 'attempts': 0, 'max_attempts': 3, 'timeout': 900,
-                      'description': 'Example', 'created': 'today', 'origin': 'test', 'last_log': None}]}
+                      'description': 'Example', 'created': 'today', 'origin': 'test', 'last_log': None,
+                      'give_up': '2026-10-27T15:00', 'agent': False, 'ready': None,
+                      'last_not_ready': None, 'not_ready_checks': 0}]}
 
 
 class DeferredTests(unittest.TestCase):
@@ -88,6 +90,26 @@ class DeferredTests(unittest.TestCase):
             self.assertNotIn('hidden-value', result['message'])
         finally:
             adapter.tasks.close()
+
+    def test_ready_fields_pass_through_and_malformed_ones_fail_closed(self):
+        waiting = inventory()
+        waiting['jobs'][0].update(agent=True, ready="ssh h 'true'", last_not_ready='2026-10-20T16:00', not_ready_checks=4)
+        adapter = DeferredAdapter(FakeRunner([json_command(waiting)]))
+        try:
+            job = adapter.read()['jobs'][0]
+            self.assertEqual((job['ready'], job['not_ready_checks'], job['give_up']),
+                             ("ssh h 'true'", 4, '2026-10-27T15:00'))
+        finally:
+            adapter.tasks.close()
+        for key, value in (('ready', 5), ('agent', 'yes'), ('not_ready_checks', -1), ('give_up', None)):
+            broken = inventory()
+            broken['jobs'][0][key] = value
+            adapter = DeferredAdapter(FakeRunner([json_command(broken)]))
+            try:
+                with self.assertRaises(ApiError, msg=key):
+                    adapter.read()
+            finally:
+                adapter.tasks.close()
 
     def test_invalid_cli_payload_fails_closed(self):
         adapter = DeferredAdapter(FakeRunner([json_command({'jobs': []})]))

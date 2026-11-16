@@ -367,7 +367,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   reports it as 4), and `add-agent` queues a headless Claude follow-up from
   `macbook/scripts/deferred_agent_run.zsh` that ntfys the result and a resume
   command. Usage is in `macbook/README.md`.
-  Its `list --json`, `retry`, `run-now` and `reschedule` serve the Mac Panel;
+  Its `list --json` (with `ready`, `give_up`, `last_not_ready`) feeds the Mac Panel's
+  "Ready condition" disclosure (`mac_panel/static/section_deferred_ready.mjs`);
+  its `retry`, `run-now` and `reschedule` serve the Mac Panel too;
   every mutation (and `cancel`) takes the checker's own flock and exits 75 when
   it is busy, and `run-now` never sends a failure alert.
   LaunchAgent plists name `/usr/bin/python3`, a versioned Homebrew interpreter

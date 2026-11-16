@@ -254,6 +254,12 @@ export const JOBS_COPY = {
     },
     defaultScript: '#!/bin/zsh\nset -eu\n\n',
     empty: 'No deferred jobs.',
+    ready: {
+      title: 'Ready condition',
+      none: 'None: runs as soon as it\'s due',
+      ownScript: 'Decided by the job\'s own script (exit 75 = not ready)',
+      waiting: 'waiting: not ready',
+    },
   },
   automations: {
     empty: 'No automations declared.',

@@ -194,6 +194,11 @@ That cannot go on forever: `add --give-up DUE` (same DUE syntax; default the due
 time plus 7 days) sets the time after which a 75 counts as an ordinary failure
 (attempt spent, alert as usual). `reschedule` resets the window to the default.
 Records written before `give_up` existed lack the key and get the default.
+Each not-ready check is recorded in the job as `last_not_ready` (time) and
+`not_ready_checks` (count); a failed attempt, `retry` or `reschedule` clears them.
+`list --json` reports them with `give_up` (resolved), `agent`, and `ready`, the
+`--ready` command as typed (null when none), which Mac Panel shows under each
+job's "Ready condition" disclosure.
 
 Agent follow-ups: `deferred.zsh add-agent [--ready CMD] [--model M] [--effort E]
 [--topic-var VAR] [--cwd DIR] [--attempts N] [--timeout S] [--give-up DUE] DUE NAME

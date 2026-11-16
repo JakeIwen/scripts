@@ -1,6 +1,7 @@
 """Shared harness for the deferred.zsh tests: a temporary job root, a loopback
 stand-in for the ntfy topics and a CLI runner. launchd is never touched."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import signal
@@ -70,6 +71,11 @@ class DeferredHarness(unittest.TestCase):
 
     def meta(self, job):
         return dict(line.split("=", 1) for line in (job / "job").read_text().splitlines())
+
+    def listed(self, job):
+        """The `list --json` record of one job directory."""
+        jobs = json.loads(self.deferred("list", "--json").stdout)["jobs"]
+        return next(record for record in jobs if record["id"] == job.name)
 
     def hold_checker_lock(self):
         lock = self.root / "lock"

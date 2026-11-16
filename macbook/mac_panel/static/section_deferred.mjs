@@ -6,6 +6,7 @@ import {action, refresh} from './panel_sections.mjs';
 import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {addJobForm} from './section_deferred_add.mjs';
+import {readyDetails, stateLabel} from './section_deferred_ready.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 import {latestTask, resumeTasks, taskLine, watchTask} from './task_receipt.mjs';
 import {parseStamp} from './relative_time.mjs';
@@ -71,12 +72,12 @@ function jobCard(job, tasks) {
   }
   const failed = job.state === 'failed';
   const body = node('div');
-  body.append(status(failed ? Level.ERROR : Level.IDLE, job.state, `${job.attempts}/${job.max_attempts} attempts`));
+  body.append(status(failed ? Level.ERROR : Level.IDLE, stateLabel(job), `${job.attempts}/${job.max_attempts} attempts`));
   if (job.description) body.append(node('p', job.description));
   body.append(kv([['Due', timeWithAbsolute(job.due)]]));
   const task = latestTask(tasks, job.id);
   if (task) body.append(taskLine(task));
-  body.append(jobDetails(job), jobActions(job));
+  body.append(readyDetails(job), jobDetails(job), jobActions(job));
   return card({title: job.name, level: failed ? Level.ERROR : Level.IDLE, body, anchor: jobAnchor(job)});
 }
 

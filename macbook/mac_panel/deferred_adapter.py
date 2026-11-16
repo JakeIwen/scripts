@@ -51,6 +51,12 @@ def decode_jobs(value):
             if field(job, key, int) < 0:
                 raise ApiError(502, f'Invalid job {key}')
         field(job, 'last_log', str, nullable=True)
+        field(job, 'give_up', str)
+        field(job, 'agent', bool)
+        field(job, 'ready', str, nullable=True)
+        field(job, 'last_not_ready', str, nullable=True)
+        if field(job, 'not_ready_checks', int) < 0:
+            raise ApiError(502, 'Invalid job not_ready_checks')
         if job['state'] not in tuple(JobState):
             raise ApiError(502, 'Invalid job state')
     return value
