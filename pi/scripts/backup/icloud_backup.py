@@ -319,6 +319,22 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
             lost = exc if lost is None else UplinkLost(exc.reason, lost.started, lost.since)
 
 
+def admit_client(cfg, network, hold, on_activity):
+    """The uplink proof for a client about to start (None off the network).
+
+    The activity callback can block (the verifier's runs a parking check), so
+    in a worker hold it runs before the final admission decision: nothing that
+    can block stands between that decision and the caller's Popen.
+    """
+    connecting = (lambda: on_activity(TransferActivity.CONNECTING)) if on_activity is not None else None
+    if network and hold is not None:
+        return guard(cfg, hold, connecting)
+    proof = guard(cfg) if network else None
+    if connecting is not None:
+        connecting()
+    return proof
+
+
 def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
                 on_completed, on_activity, account, repository_fd, hold=None, restarted=False):
     """Admit, start and supervise one client process."""
@@ -330,16 +346,7 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
         check_work_allowed(cfg)
     if network and on_activity is not None:
         on_activity(TransferActivity.NETWORK_CHECK)
-    connecting = (lambda: on_activity(TransferActivity.CONNECTING)) if on_activity is not None else None
-    if network and hold is not None:
-        # The activity callback can block (the verifier's runs a parking check),
-        # so it runs inside the hold, before the final admission decision:
-        # nothing that can block stands between that decision and Popen below.
-        proof = guard(cfg, hold, connecting)
-    else:
-        proof = guard(cfg) if network else None
-        if connecting is not None:
-            connecting()
+    proof = admit_client(cfg, network, hold, on_activity)
     source = proof[0] if network else None
     env = os.environ.copy()
     if network:
