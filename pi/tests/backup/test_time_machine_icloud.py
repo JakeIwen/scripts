@@ -22,6 +22,7 @@ import time_machine_icloud as job
 import icloud_backup as cloud
 import time_machine_icloud_control as control
 import time_machine_icloud_status as dashboard_status
+from pi.tests.backup.orphan_delete_fixtures import batch_delete
 
 spec = importlib.util.spec_from_file_location('coordinator', REPO / 'macbook/scripts/time_machine_offsite_coordinator.py')
 coordinator = importlib.util.module_from_spec(spec)
@@ -752,7 +753,7 @@ class RetentionFixture(unittest.TestCase):
                 'manifest_sha256': hashlib.sha256(data.encode()).hexdigest()})}
         self.cfg = {'remote': 'icloud:test', 'keep_generations': 2, 'interval_days': 7}
         self.notify = mock.Mock()
-        for target, replacement in ((job, {'STATE': self.state_dir, 'ROOT': self.local, 'AUTH': self.state_dir,
+        for target, replacement in ((job, {'STATE': self.state_dir, 'ROOT': self.local, 'AUTH': self.state_dir, 'DELETE_LIST_DIR': root,
                                             'private_directory': mock.Mock(), 'storage_root': mock.Mock(),
                                             'network': self.network, 'config': mock.Mock(return_value=self.cfg)}),
                                     (cloud, {'STATE_DIR': self.state_dir, 'credentials_ready': mock.Mock(return_value=True),
@@ -787,16 +788,8 @@ class RetentionFixture(unittest.TestCase):
         if op == 'rmdir':
             del self.documents[path.rsplit('/', 1)[1]]
             return ''
-        if op == 'deletefile':
-            if self.fail_deletes_after is not None and len(self.deleted) >= self.fail_deletes_after:
-                self.fail_deletes_after = None
-                if self.fail_after_server_delete:
-                    # The delete reached the server; only the client saw the failure.
-                    self.remote_objects.discard(path.rsplit('/', 1)[1])
-                raise cloud.Deferred('Waiting for a verified, permitted internet route.')
-            self.deleted.append(path.rsplit('/', 1)[1])
-            self.remote_objects.discard(self.deleted[-1])
-            return ''
+        if op == 'delete':
+            return batch_delete(self, path, *args, **kwargs)
         self.fail('unexpected cloud operation: ' + op + ' ' + path)
 
     def inventory(self, cfg, path, progress=None):

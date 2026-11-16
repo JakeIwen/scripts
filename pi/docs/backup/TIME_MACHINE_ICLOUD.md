@@ -160,8 +160,12 @@ deciding again on the same evidence as the last step (after any activity
 callback), so a slow parking check cannot let proof past the metering
 freshness limit start or resume work. If the
 uplink is verified again in time, the killed command restarts from scratch
-(`icloud_uplink_hold.RESTART_EXITS`; a restarted delete that finds its object
-already gone counts as done; `hashsum` batches are not restarted). Its grace
+(`icloud_uplink_hold.RESTART_EXITS`; a restarted `deletefile` that finds its
+object already gone counts as done, and a restarted batch `delete` re-lists
+with only its unconfirmed names and a matching cap; `hashsum` batches are not
+restarted). After every client is reaped, its remaining complete log records
+are still read, so a completion logged just before exit or while the client
+was being stopped is never lost. Its grace
 counts from its first loss, so a flapping uplink cannot restart it forever. An expired
 hold defers with `UplinkUnknown`, retried after five minutes at most three runs
 in a row without durable advancement (an object uploaded or deleted, or a new
@@ -203,6 +207,30 @@ planned, deleted and remaining objects and bytes, accumulated across
 interrupted runs of one episode (generation plus `keep_generations`). The status
 text shows "Deleting unused cloud files: N / M (X GiB left)". The counts are
 advisory: `retention_done_for` alone records completion.
+
+**Batched object deletion** (`time_machine_orphan_delete.py`). Unreferenced
+objects are deleted with one `rclone delete --files-from-raw <list>
+--max-delete <n>` call per chunk of at most 100, instead of a `deletefile`
+per object: on iclouddrive each `deletefile` lists the whole objects folder
+three times (about 90 s each on 13k objects), while a batch lists it once and
+then trashes each listed object. Never add `--no-traverse` here: with a file
+list it makes iclouddrive list the folder once per name. The list holds only
+validated SHA-256 names from the same listing that found them unreferenced,
+and lives in the volatile `/run/vanpi-time-machine-icloud/` (removed after
+each cleanup, gone at boot). rclone's file list matches exact names only; the
+cap stops a call (exit 7) beyond its list; a "Deleted" record for any name
+outside the chunk stops cleanup at once. After every chunk a fresh listing
+settles the counts, then must show every name processed so far gone and every
+other object of the first listing still present; any mismatch ("failed
+removal or inventory inconsistency", "inventory inconsistency or unexpected
+disappearance") stops cleanup as an error with the attention alert, never a
+retry. That comparison exists only within one worker run: if the worker dies
+or the run ends between a chunk's delete and its check listing, the next
+run's fresh listing is the new baseline. Trashed objects stay in iCloud
+Drive's Recently Deleted for about 30 days. The real-rclone cases in
+`pi/tests/backup/test_time_machine_orphan_delete.py` pin these semantics to
+the Pi's rclone version (they run in the Linux lane); rerun them whenever the
+Pi's rclone changes.
 
 **Leftover-file audit.** Once a week, on an ordinary run where no copy is due
 (and cleanup is settled: nothing pending, `retention_done_for` current, no newer

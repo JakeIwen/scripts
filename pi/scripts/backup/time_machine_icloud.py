@@ -29,6 +29,7 @@ import icloud_uplink_hold as uplink_hold
 from icloud_progress import RetentionProgress
 import time_machine_store as store
 import time_machine_staging as staging
+import time_machine_orphan_delete as orphan_delete
 import backup_priority as priority
 import mac_capture_control
 import upload_speed_log
@@ -43,6 +44,8 @@ MOUNT = Path('/mnt/mbp2tbkup')
 SOURCE = MOUNT / store.BUNDLE
 ROOT = MOUNT / 'archive' / 'icloud-time-machine-v1'
 DRAIN = Path('/run/lock/vanpi-samba-drain/mbp2tbkup')
+# Volatile (tmpfs): the per-chunk delete list never touches the SD card or the store root.
+DELETE_LIST_DIR = Path('/run/vanpi-time-machine-icloud')
 SERVICE = 'vanpi-time-machine-icloud.service'
 
 
@@ -492,10 +495,12 @@ def delete_unreferenced(cfg, remote, referenced, progress):
             raise RuntimeError('unknown object name; garbage collection refused')
     unreferenced = sorted(objects.keys() - referenced)
     progress.listed(len(objects), len(unreferenced), sum(object_size(objects[d]) for d in unreferenced))
-    for digest in unreferenced:
-        network(cfg, 'deletefile', remote + '/objects/' + digest, progress=progress.tick)
-        uplink_hold.note_advancement()
-        progress.deleted(object_size(objects[digest]))
+    if unreferenced:
+        private_directory(DELETE_LIST_DIR)
+    orphan_delete.delete_orphans(
+        cfg, remote + '/objects', unreferenced, {d: object_size(objects[d]) for d in unreferenced}, set(objects),
+        network=network, relist=lambda: cloud.remote_inventory(cfg, remote + '/objects', progress=progress.tick),
+        list_path=DELETE_LIST_DIR / orphan_delete.LIST_NAME, progress=progress)
     progress.local()
     # Source capture cache can be invalidated safely if an old local object is
     # retired. An interrupted capture/upload is never present during retention.

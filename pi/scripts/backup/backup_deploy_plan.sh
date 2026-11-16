@@ -39,6 +39,7 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/openwrt_backup.sh|/home/pi/scripts/backup/openwrt_backup.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/abort_backup.sh|/home/pi/scripts/backup/abort_backup.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/clone_now.sh|/home/pi/scripts/backup/clone_now.sh|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/time_machine_orphan_delete.py|/home/pi/scripts/backup/time_machine_orphan_delete.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/time_machine_icloud.py|/home/pi/scripts/backup/time_machine_icloud.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/time_machine_icloud.sh|/home/pi/scripts/backup/time_machine_icloud.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/time_machine_pipeline.py|/home/pi/scripts/backup/time_machine_pipeline.py|revision|pi:pi|750|new'

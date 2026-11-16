@@ -1189,7 +1189,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   setting, deadline, restart policy for killed commands, the `uplink_hold`
   heartbeat reporter and the run's durable-advancement flag); `icloud_backup`
   wires it into worker paths only. `icloud_progress.RetentionProgress` owns the Time
-  Machine worker's advisory `retention_progress` record.
+  Machine worker's advisory `retention_progress` record, and
+  `icloud_progress.COMPLETIONS` the per-command rclone completion records
+  (`RcloneStats.drain` reads them after a client is reaped).
+  `time_machine_orphan_delete.py` owns batched cloud orphan deletion (chunked
+  `rclone delete --files-from-raw`, cap, tripwire, per-chunk check listing);
+  `time_machine_icloud.delete_unreferenced` chooses the names.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification
