@@ -448,7 +448,8 @@ class ProgressTests(ClientMonitoringTests):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'source';source.mkdir();dest=root/'dest'
             value=b'\x01'*(1024*1024);(source/'fixture').write_bytes(value)
-            with mock.patch.object(backup,'guard',return_value=('127.0.0.1','local-test')), mock.patch.object(backup,'check_work_allowed'):
+            with mock.patch.object(backup,'guard',return_value=('127.0.0.1','local-test')), mock.patch.object(backup,'check_work_allowed'), \
+                    mock.patch.object(backup,'check_running_uplink'):
                 backup.run([backup.RCLONE,'copy',str(source),str(dest),'--disable','Copy'],cfg,network=True,progress=samples.append)
             self.assertEqual((dest/'fixture').read_bytes(),value)
             self.assertTrue(any(s.get('bytes',0)>0 for s in samples),samples)

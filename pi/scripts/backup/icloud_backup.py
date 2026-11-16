@@ -293,7 +293,9 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
     Worker commands (network, parked, non-interactive) hold through an unknown
     verdict: a running client is killed at its first unknown verdict and the
     command restarts from scratch once the uplink is verified again, within the
-    grace. Manual commands (login, verify-login) keep the three-probe check.
+    grace. The grace runs from the command's first loss, so a flapping uplink
+    cannot restart it forever. Manual commands (login, verify-login) keep the
+    three-probe check.
     """
     held = network and parked and not interactive
     operation = args[1] if len(args) > 1 else 'command'
@@ -307,7 +309,7 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
             if operation not in RESTART_EXITS:
                 raise UplinkUnknown(exc.reason) from None
             print(f'Stopped rclone {operation}: {exc.reason}; it restarts once the uplink is verified', flush=True)
-            lost = exc
+            lost = exc if lost is None else UplinkLost(exc.reason, lost.started, lost.since)
 
 
 def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,

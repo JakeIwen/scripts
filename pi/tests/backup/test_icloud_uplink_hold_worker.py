@@ -152,6 +152,15 @@ class WorkerHoldTests(unittest.TestCase):
         self.assertNotIn(mock.call(first.pid, signal.SIGCONT), self.kill.call_args_list)
         self.assertIn(mock.call(second.pid, signal.SIGCONT), self.kill.call_args_list)
 
+    def test_a_flapping_uplink_cannot_restart_a_command_past_the_first_loss_grace(self):
+        self.cfg['uplink_unknown_grace_seconds'] = 1
+        started = time.monotonic()
+        self.verdicts = [lambda: OK if len(self.probes) % 2 else LOST]  # permitted, then lost, forever
+        with self.assertRaises(backup.UplinkUnknown):
+            self.run_with([Child() for _ in range(100)])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertGreater(self.popen.call_count, 1)
+
     def test_grace_zero_kills_and_defers_without_another_probe(self):
         self.cfg['uplink_unknown_grace_seconds'] = 0
         self.verdicts = [OK, LOST]
