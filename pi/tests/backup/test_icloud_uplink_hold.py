@@ -26,7 +26,7 @@ class HoldTests(unittest.TestCase):
         self.clock = Clock()
         self.reports, self.logs, self.checks, self.probes = [], [], [], []
 
-    def hold(self, grace, verdicts, lost=None, probe_seconds=1, work_check=None):
+    def hold(self, grace, verdicts, lost=None, probe_seconds=1, work_check=None, revalidate=None):
         verdicts = list(verdicts)
         def probe():
             self.probes.append(self.clock.now)
@@ -40,13 +40,13 @@ class HoldTests(unittest.TestCase):
         value = UplinkHold(grace, check, self.reports.append, 60, lost=lost,
                            log=lambda text, flush: self.logs.append(text),
                            clock=self.clock, wall=self.clock, sleep=self.clock.sleep)
-        return value.admit(probe)
+        return value.admit(probe, revalidate or (lambda evidence: (True, 'unmetered')))
 
     def test_recovers_inside_the_grace_with_a_work_check_before_each_retry(self):
         evidence, reason = self.hold(90, [(False, UNKNOWN), (False, UNKNOWN), (True, 'unmetered')])
         self.assertEqual((evidence, reason), ({'ok': True}, None))
         self.assertEqual(len(self.probes), 3)
-        self.assertEqual(len(self.checks), 2)
+        self.assertEqual(len(self.checks), 3)  # before each retry, and after the permitted probe
         self.assertEqual(self.clock.sleeps, [RECHECK_SECONDS, RECHECK_SECONDS])
         self.assertIsNone(self.reports[-1])
         beats = [r for r in self.reports if r]
@@ -96,6 +96,26 @@ class HoldTests(unittest.TestCase):
         beats = [r for r in self.reports if r]
         self.assertEqual(len(beats), 8)
         self.assertEqual(sorted(r['checked_at'] for r in beats), [r['checked_at'] for r in beats])
+
+
+class RevalidationTests(HoldTests):
+    def test_proof_that_goes_stale_during_the_final_work_check_is_re_probed(self):
+        def slow():
+            self.clock.now += 20
+        decisions = iter([(False, 'stale uplink evidence'), (True, 'unmetered')])
+        seen = []
+        def revalidate(evidence):
+            seen.append(self.clock.now)
+            return next(decisions)
+        self.assertEqual(self.hold(90, [(True, 'unmetered')] * 2, work_check=slow, revalidate=revalidate),
+                         ({'ok': True}, None))
+        self.assertEqual(len(self.probes), 2)
+        self.assertTrue(all(when > probe for when, probe in zip(seen, self.probes)))
+
+    def test_stale_proof_with_no_grace_left_refuses(self):
+        stale = lambda evidence: (False, 'stale uplink evidence')
+        self.assertEqual(self.hold(0, [(True, 'unmetered')], revalidate=stale), (None, 'stale uplink evidence'))
+        self.assertEqual(self.hold(90, [(True, 'unmetered')], revalidate=lambda e: (False, METERED)), (None, METERED))
 
 
 class ConfigurationTests(unittest.TestCase):

@@ -206,7 +206,7 @@ def guard(cfg, hold=None):
     if hold is None:
         return uplink_proof(permitted_uplink_evidence(uplink_consumer(cfg)))
     consumer = uplink_consumer(cfg)
-    evidence, reason = hold.admit(lambda: probe_uplink(consumer))
+    evidence, reason = hold.admit(lambda: probe_uplink(consumer), lambda value: decide(value, consumer_id=consumer))
     if evidence is None:
         raise (UplinkUnknown if uplink_unknown(reason) else Deferred)(reason)
     return uplink_proof(evidence)
@@ -251,8 +251,8 @@ def check_running_uplink(cfg, proof, held):
             raise Deferred(uplink_hold.CHANGED_PATH)
         return
     consumer = uplink_consumer(cfg)
-    uplink_hold.check_running(lambda: probe_uplink(consumer), uplink_proof, proof,
-                              lambda: check_work_allowed(cfg), Deferred)
+    uplink_hold.check_running(lambda: probe_uplink(consumer), lambda value: decide(value, consumer_id=consumer),
+                              uplink_proof, proof, lambda: check_work_allowed(cfg), Deferred)
 
 
 def monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
@@ -323,11 +323,9 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
         check_work_allowed(cfg)
     if network and on_activity is not None:
         on_activity(TransferActivity.NETWORK_CHECK)
+    # A worker hold ends with the parking/priority check and a fresh decision on
+    # the same evidence, so nothing stands between them and Popen below.
     proof = guard(cfg, hold) if network else None
-    if hold is not None:
-        # The final probe may have taken its full timeout: re-check parking and
-        # priority immediately before any client starts.
-        check_work_allowed(cfg)
     if on_activity is not None:
         on_activity(TransferActivity.CONNECTING)
     source = proof[0] if network else None

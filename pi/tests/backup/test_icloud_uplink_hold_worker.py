@@ -52,7 +52,9 @@ class Child:
         return self.returncode
 
 
-class WorkerHoldTests(unittest.TestCase):
+class WorkerHoldFixture(unittest.TestCase):
+    """Fake probes, policy, priority and clients around the real run() and guard()."""
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
@@ -95,6 +97,8 @@ class WorkerHoldTests(unittest.TestCase):
     def signals(self, sig):
         return [c for c in self.kill.call_args_list + self.killpg.call_args_list if c.args[1] == sig]
 
+
+class WorkerHoldTests(WorkerHoldFixture):
     def test_no_client_starts_while_the_verdict_stays_unknown(self):
         self.verdicts = [LOST]
         started = time.monotonic()
@@ -238,6 +242,61 @@ class WorkerHoldTests(unittest.TestCase):
                 mock.patch.object(backup.subprocess, 'run'):
             backup.verify_login(self.cfg)
         self.assertEqual(attempts, [(False, None)] * 3)
+
+
+class ProofFreshnessTests(WorkerHoldFixture):
+    """A slow parking check must not let stale proof start or resume a client (real metering TTL)."""
+
+    def setUp(self):
+        super().setUp()
+        self.now = 1000.0
+        self.enterContext(mock.patch.object(backup, 'decide', side_effect=lambda value, consumer_id:
+                                            decide(value, now=self.now, consumer_id=consumer_id)))
+        def slow_policyctl():
+            self.now += 20  # policyctl at its full 20 s timeout
+        self.enterContext(mock.patch.object(backup, 'check_parked', side_effect=slow_policyctl))
+        self.started_with = []
+
+    def aged(self, seconds):
+        def collect():
+            self.collected_at = self.now - seconds
+            return {**OK, 'checked_at': self.collected_at}
+        return collect
+
+    def starting(self, children):
+        def start(*args, **kwargs):
+            self.started_with.append(self.now)
+            return children.pop(0)
+        return start
+
+    def test_stale_proof_after_the_final_work_check_never_starts_a_client(self):
+        self.cfg['uplink_unknown_grace_seconds'] = 0
+        self.verdicts = [self.aged(20)]  # admitted at 20 s old, 40 s old after the check
+        with self.assertRaisesRegex(backup.UplinkUnknown, 'stale uplink evidence'):
+            self.run_with(self.starting([Child(0)]))
+        self.assertEqual(self.started_with, [])
+
+    def test_stale_proof_is_re_probed_and_only_fresh_proof_starts_the_client(self):
+        self.verdicts = [self.aged(20), self.aged(0)]
+        self.assertEqual(self.run_with(self.starting([Child(0)])), '')
+        self.assertEqual(len(self.started_with), 1)
+        self.assertEqual(len(self.probes), 2)
+        # The client started on proof the real metering TTL (30 s) still accepts.
+        self.assertEqual(decide({**OK, 'checked_at': self.collected_at}, now=self.started_with[0])[0], True)
+
+    def test_stale_proof_after_the_final_work_check_never_resumes_a_client(self):
+        first, second = Child(), Child(0)
+        self.verdicts = [self.aged(0), self.aged(20), self.aged(0)]
+        self.assertEqual(self.run_with(self.starting([first, second])), '')
+        self.assertNotIn(mock.call(first.pid, signal.SIGCONT), self.kill.call_args_list)
+        self.assertIn(mock.call(first.pid, signal.SIGTERM), self.killpg.call_args_list)
+        self.assertEqual(len(self.started_with), 2)
+        self.cfg['uplink_unknown_grace_seconds'] = 0
+        self.verdicts = [self.aged(0), self.aged(20)]
+        third = Child()
+        with self.assertRaisesRegex(backup.UplinkUnknown, 'stale uplink evidence'):
+            self.run_with(self.starting([third]))
+        self.assertNotIn(mock.call(third.pid, signal.SIGCONT), self.kill.call_args_list)
 
 
 class HeartbeatStateTests(unittest.TestCase):

@@ -81,20 +81,26 @@ def fan_out(on_hold=None):
     return report
 
 
-def check_running(probe, proof_of, proof, work_check, refuse):
+def check_running(probe, revalidate, proof_of, proof, work_check, refuse):
     """One probe for a stopped client; return only when it may resume.
 
-    An unknown verdict raises UplinkLost so the caller kills the client and
-    holds with nothing running: a client never resumes after one.
+    An unknown verdict, including evidence that went stale during the work
+    check, raises UplinkLost so the caller kills the client and holds with
+    nothing running: a client never resumes after one.
     """
     evidence, allowed, reason = probe()
-    if not allowed:
-        if uplink_unknown(reason):
-            raise UplinkLost(reason, time.monotonic(), time.time())
-        raise refuse(reason)
-    if proof_of(evidence) != proof:
-        raise refuse(CHANGED_PATH)
-    work_check()
+    if allowed:
+        if proof_of(evidence) != proof:
+            raise refuse(CHANGED_PATH)
+        work_check()
+        # The work check can block (policyctl) past the evidence's freshness;
+        # decide again on it so only still-valid proof resumes the client.
+        allowed, reason = revalidate(evidence)
+        if allowed:
+            return
+    if uplink_unknown(reason):
+        raise UplinkLost(reason, time.monotonic(), time.time())
+    raise refuse(reason)
 
 
 def apply_grace(cfg):
@@ -143,8 +149,13 @@ class UplinkHold:
     def deadline(self):
         return self.started + self.grace
 
-    def admit(self, probe):
-        """Return (evidence, None) once permitted, else (None, the refusal reason)."""
+    def admit(self, probe, revalidate):
+        """Return (evidence, None) once permitted, else (None, the refusal reason).
+
+        A permitted probe is followed by the work check and then a fresh decision
+        on the same evidence, immediately before the caller starts a client; proof
+        that went stale meanwhile counts as an unknown verdict and is re-probed.
+        """
         outcome = 'stopped'
         try:
             while True:
@@ -160,6 +171,9 @@ class UplinkHold:
                         return None, self.reason
                     self.heartbeat()
                 evidence, allowed, reason = probe()
+                if allowed:
+                    self.work_check()
+                    allowed, reason = revalidate(evidence)
                 if allowed:
                     outcome = 'verified again'
                     return evidence, None
