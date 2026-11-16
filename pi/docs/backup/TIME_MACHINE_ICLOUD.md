@@ -212,8 +212,8 @@ advisory: `retention_done_for` alone records completion.
 objects are deleted with one `rclone delete --files-from-raw <list>
 --max-delete <n>` call per chunk of at most 100, instead of a `deletefile`
 per object: on iclouddrive each `deletefile` lists the whole objects folder
-three times (about 90 s each on 13k objects), while a batch lists it once and
-then trashes each listed object. Never add `--no-traverse` here: with a file
+three times (about 30 s per listing on 13k objects, so about 90 s per object),
+while a batch lists it once and then trashes each listed object. Never add `--no-traverse` here: with a file
 list it makes iclouddrive list the folder once per name. The list holds only
 validated SHA-256 names from the same listing that found them unreferenced,
 and lives in the volatile `/run/vanpi-time-machine-icloud/` (removed after
