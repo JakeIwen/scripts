@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import queue
 import signal
 import subprocess
 import sys
@@ -12,8 +13,13 @@ import unittest
 from unittest import mock
 
 import icloud_backup as backup
+import icloud_status
+import icloud_uplink
 import icloud_uplink_hold
 from pi.tests.backup.metered_fixtures import decide
+import time_machine_pipeline as pipeline
+from time_machine_downloads import VerificationMeter
+from time_machine_verification import CHECKPOINT, ObjectVerifier
 
 REPO = Path(__file__).resolve().parents[3]
 UNKNOWN = 'selected uplink identity is unknown'
@@ -244,16 +250,17 @@ class WorkerHoldTests(WorkerHoldFixture):
         self.assertEqual(attempts, [(False, None)] * 3)
 
 
-class ProofFreshnessTests(WorkerHoldFixture):
-    """A slow parking check must not let stale proof start or resume a client (real metering TTL)."""
+class ProofFreshnessFixture(WorkerHoldFixture):
+    """A clock that advances with every parking check, judged by the real metering TTL."""
 
     def setUp(self):
         super().setUp()
         self.now = 1000.0
         self.enterContext(mock.patch.object(backup, 'decide', side_effect=lambda value, consumer_id:
                                             decide(value, now=self.now, consumer_id=consumer_id)))
+        self.policy_seconds = 20  # policyctl at its full 20 s timeout
         def slow_policyctl():
-            self.now += 20  # policyctl at its full 20 s timeout
+            self.now += self.policy_seconds
         self.enterContext(mock.patch.object(backup, 'check_parked', side_effect=slow_policyctl))
         self.started_with = []
 
@@ -268,6 +275,10 @@ class ProofFreshnessTests(WorkerHoldFixture):
             self.started_with.append(self.now)
             return children.pop(0)
         return start
+
+
+class ProofFreshnessTests(ProofFreshnessFixture):
+    """A slow parking check must not let stale proof start or resume a client (real metering TTL)."""
 
     def test_stale_proof_after_the_final_work_check_never_starts_a_client(self):
         self.cfg['uplink_unknown_grace_seconds'] = 0
@@ -297,6 +308,81 @@ class ProofFreshnessTests(WorkerHoldFixture):
         with self.assertRaisesRegex(backup.UplinkUnknown, 'stale uplink evidence'):
             self.run_with(self.starting([third]))
         self.assertNotIn(mock.call(third.pid, signal.SIGCONT), self.kill.call_args_list)
+
+
+class VerifierCallbackFreshnessTests(ProofFreshnessFixture):
+    """The verifier's activity callback runs a parking check; it must never sit between
+    the final admission decision and Popen or SIGCONT."""
+
+    def follower_activity(self):
+        follower = object.__new__(pipeline.Follower)
+        follower.cfg, follower.parent_pid = self.cfg, os.getppid()
+        follower.meter, follower.updates = VerificationMeter(), queue.Queue(maxsize=2)
+        follower.verifier = ObjectVerifier({}, self.root / CHECKPOINT)
+        follower.ready, follower.downloaded, follower.batch_start, follower.last_report = set(), 0, 0, 0
+        return follower.activity  # the real Follower.activity -> report -> check -> check_work_allowed
+
+    def assert_fresh(self, moments):
+        for moment in moments:
+            self.assertTrue(decide({**OK, 'checked_at': self.collected_at}, now=moment)[0],
+                            f'started or resumed on evidence {moment - self.collected_at:.0f}s old')
+
+    def test_a_slow_activity_callback_cannot_start_a_client_on_stale_proof(self):
+        self.verdicts = [self.aged(0)]  # 20 s work check + 20 s callback: always stale by Popen
+        with self.assertRaisesRegex(backup.UplinkUnknown, 'stale uplink evidence'):
+            self.run_with(self.starting([Child(0)]), 'hashsum', on_activity=self.follower_activity())
+        self.assertEqual(self.started_with, [])
+
+    def test_a_client_starts_after_the_callback_on_proof_still_fresh(self):
+        self.policy_seconds = 10
+        self.verdicts = [self.aged(0)]
+        self.assertEqual(self.run_with(self.starting([Child(0)]), 'hashsum',
+                                       on_activity=self.follower_activity()), '')
+        self.assert_fresh(self.started_with)
+
+    def test_nothing_blocking_runs_between_the_final_decision_and_sigcont(self):
+        resumed = []
+        def kill(pid, sig):
+            if sig == signal.SIGCONT:  # judged at the moment of resuming, against its own probe
+                resumed.append(decide({**OK, 'checked_at': self.collected_at}, now=self.now))
+        self.kill.side_effect = kill
+        self.verdicts = [self.aged(0)]
+        self.policy_seconds = 10  # lets the start through; resumes then face the full 20 s check
+        start = self.starting([Child(0, polls=3)])
+        def start_then_slow(*args, **kwargs):
+            self.policy_seconds = 20
+            return start(*args, **kwargs)
+        self.assertEqual(self.run_with(start_then_slow, 'lsjson', on_activity=self.follower_activity()), '')
+        self.assertTrue(resumed)
+        self.assertEqual({verdict for verdict in resumed}, {(True, 'unmetered')})
+
+
+class HoldSlackTests(unittest.TestCase):
+    def test_status_stays_fresh_through_the_slowest_final_iteration(self):
+        clock, reports = [0.0], []
+        verdicts = iter([(False, UNKNOWN), (True, 'unmetered')])
+        def probe():
+            allowed, reason = next(verdicts)
+            if allowed:
+                clock[0] += icloud_uplink.PROBE_TIMEOUT_SECONDS  # the final probe at its full timeout
+            return ({'ok': True} if allowed else None), allowed, reason
+        checks = iter([4.9, backup.COMMAND_TIMEOUT_SECONDS])  # the final check lands just before the deadline
+        def work_check():
+            clock[0] += next(checks)
+        def revalidate(evidence):
+            clock[0] += icloud_uplink.ADMIT_TIMEOUT_SECONDS  # the final admission at its full timeout
+            return True, 'unmetered'
+        def sleep(seconds):
+            clock[0] += seconds
+        hold = icloud_uplink_hold.UplinkHold(10, work_check, reports.append, backup.HOLD_SLACK_SECONDS,
+                                             log=lambda *a, **k: None, clock=lambda: clock[0],
+                                             wall=lambda: clock[0], sleep=sleep)
+        self.assertEqual(hold.admit(probe, revalidate), ({'ok': True}, None))
+        last = [r for r in reports if r][-1]
+        ended = clock[0]
+        self.assertGreater(ended, last['since'] + 10 + 60)  # past the old, too-small budget
+        state = {'uplink_hold': last}
+        self.assertIsNotNone(icloud_status.active_uplink_hold(state, True, ended))
 
 
 class HeartbeatStateTests(unittest.TestCase):

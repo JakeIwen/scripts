@@ -25,7 +25,7 @@ import uuid
 
 import backup_locks
 import backup_admission as admission
-from icloud_uplink import decide, uplink_unknown, HELPER_TIMEOUT_SECONDS, PROBE_TIMEOUT_SECONDS
+from icloud_uplink import decide, uplink_unknown, ADMIT_TIMEOUT_SECONDS, HELPER_TIMEOUT_SECONDS, PROBE_TIMEOUT_SECONDS
 import icloud_uplink_hold as uplink_hold
 from icloud_uplink_hold import GRACE_KEY, RESTART_EXITS, UplinkHold, UplinkLost, apply_grace
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
@@ -50,6 +50,11 @@ CHILD = None
 CHILD_INTERACTIVE = False
 # capture()'s default timeout, which bounds one parked/priority work check.
 COMMAND_TIMEOUT_SECONDS = 20
+# How far a hold's last permitted iteration can run past its deadline: one
+# probe, the work check, and the final admission decision on that evidence.
+# Worker-state holds pass no blocking `prepare` callback (only the verifier,
+# which writes no heartbeat, does), so it is not budgeted here.
+HOLD_SLACK_SECONDS = PROBE_TIMEOUT_SECONDS + COMMAND_TIMEOUT_SECONDS + ADMIT_TIMEOUT_SECONDS
 UPLOAD_SPEED = upload_speed_log.UploadSpeedSampler()
 
 
@@ -199,14 +204,16 @@ def uplink_consumer(cfg):
     return consumers[cfg.get('priority_job', priority.PriorityMode.PI)]
 
 
-def guard(cfg, hold=None):
+def guard(cfg, hold=None, prepare=None):
     """Proof of a permitted uplink. Without a hold (manual commands) this is the
     three-probe check; worker paths pass worker_hold() so an unknown verdict is
-    re-probed for the grace instead of deferring at once."""
+    re-probed for the grace instead of deferring at once, and `prepare` runs
+    before the final admission decision."""
     if hold is None:
         return uplink_proof(permitted_uplink_evidence(uplink_consumer(cfg)))
     consumer = uplink_consumer(cfg)
-    evidence, reason = hold.admit(lambda: probe_uplink(consumer), lambda value: decide(value, consumer_id=consumer))
+    evidence, reason = hold.admit(lambda: probe_uplink(consumer), lambda value: decide(value, consumer_id=consumer),
+                                  prepare)
     if evidence is None:
         raise (UplinkUnknown if uplink_unknown(reason) else Deferred)(reason)
     return uplink_proof(evidence)
@@ -216,7 +223,7 @@ def worker_hold(cfg, on_hold=None, lost=None):
     """The worker-path hold: parked/priority checks between probes, heartbeat to state."""
     # A configuration that skipped apply_grace (an ad-hoc caller) gets no hold.
     return UplinkHold(cfg.get(GRACE_KEY, 0), lambda: check_work_allowed(cfg), uplink_hold.fan_out(on_hold),
-                      PROBE_TIMEOUT_SECONDS + COMMAND_TIMEOUT_SECONDS, lost=lost)
+                      HOLD_SLACK_SECONDS, lost=lost)
 
 
 def uplink_proof(evidence):
@@ -323,11 +330,16 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
         check_work_allowed(cfg)
     if network and on_activity is not None:
         on_activity(TransferActivity.NETWORK_CHECK)
-    # A worker hold ends with the parking/priority check and a fresh decision on
-    # the same evidence, so nothing stands between them and Popen below.
-    proof = guard(cfg, hold) if network else None
-    if on_activity is not None:
-        on_activity(TransferActivity.CONNECTING)
+    connecting = (lambda: on_activity(TransferActivity.CONNECTING)) if on_activity is not None else None
+    if network and hold is not None:
+        # The activity callback can block (the verifier's runs a parking check),
+        # so it runs inside the hold, before the final admission decision:
+        # nothing that can block stands between that decision and Popen below.
+        proof = guard(cfg, hold, connecting)
+    else:
+        proof = guard(cfg) if network else None
+        if connecting is not None:
+            connecting()
     source = proof[0] if network else None
     env = os.environ.copy()
     if network:

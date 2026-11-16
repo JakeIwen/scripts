@@ -149,12 +149,14 @@ class UplinkHold:
     def deadline(self):
         return self.started + self.grace
 
-    def admit(self, probe, revalidate):
+    def admit(self, probe, revalidate, prepare=None):
         """Return (evidence, None) once permitted, else (None, the refusal reason).
 
-        A permitted probe is followed by the work check and then a fresh decision
-        on the same evidence, immediately before the caller starts a client; proof
-        that went stale meanwhile counts as an unknown verdict and is re-probed.
+        A permitted probe is followed by the work check, then the caller's
+        `prepare` (anything that may block before its client starts, such as an
+        activity callback), then a fresh decision on the same evidence. That
+        decision is the last step before the caller starts a client; proof that
+        went stale meanwhile counts as an unknown verdict and is re-probed.
         """
         outcome = 'stopped'
         try:
@@ -173,6 +175,8 @@ class UplinkHold:
                 evidence, allowed, reason = probe()
                 if allowed:
                     self.work_check()
+                    if prepare is not None:
+                        prepare()
                     allowed, reason = revalidate(evidence)
                 if allowed:
                     outcome = 'verified again'
