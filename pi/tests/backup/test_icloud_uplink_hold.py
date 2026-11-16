@@ -132,4 +132,5 @@ class RestartPolicyTests(unittest.TestCase):
     def test_only_idempotent_commands_restart_and_only_deletes_accept_not_found(self):
         self.assertNotIn('hashsum', RESTART_EXITS)
         self.assertEqual(RESTART_EXITS['deletefile'], {4})
+        self.assertEqual(RESTART_EXITS['delete'], set())  # a batch re-lists; gone objects exit 0
         self.assertEqual(RESTART_EXITS['lsjson'], set())

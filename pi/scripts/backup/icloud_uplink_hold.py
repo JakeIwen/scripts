@@ -28,6 +28,8 @@ RESTART_EXITS = {
     'copyto': frozenset(),
     'mkdir': frozenset(),
     'deletefile': frozenset({4}),
+    # A restarted batch delete re-lists and skips objects already gone (exit 0).
+    'delete': frozenset(),
     'rmdir': frozenset({3}),
     'purge': frozenset({3}),
 }

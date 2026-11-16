@@ -40,6 +40,18 @@ class RetentionProgressTests(unittest.TestCase):
         progress.local(); progress.finished()
         self.assertEqual(len(self.saves), steps + 3)
 
+    def test_a_listing_settles_event_counts_at_once(self):
+        progress = self.recorder()
+        progress.listing()
+        progress.listed(10, 4, 4000)
+        progress.deleted(1000); progress.deleted(1000); progress.deleted(1000)
+        writes = len(self.saves)
+        progress.settle(2, 2000)  # one reported delete did not happen, one more is left
+        record = self.state['retention_progress']
+        self.assertEqual((record['remaining_objects'], record['remaining_bytes'],
+                          record['deleted_objects'], record['deleted_bytes']), (2, 2000, 2, 2000))
+        self.assertEqual(len(self.saves), writes + 1)
+
     def test_listing_counter_and_duration_are_recorded(self):
         progress = self.recorder()
         progress.listing()

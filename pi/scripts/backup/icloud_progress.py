@@ -21,6 +21,11 @@ COPY_COMPLETIONS = frozenset({
     'Copied (Rcat, new)', 'Copied (Rcat, replaced existing)',
     'Multi-thread Copied (new)', 'Multi-thread Copied (replaced existing)',
 })
+# rclone logs "Deleted" (info) only after the backend's remove returned; a dry
+# run's "Skipped delete" record is notice level and never counts.
+DELETE_COMPLETIONS = frozenset({'Deleted'})
+# The info-level messages that report one finished object, by rclone command.
+COMPLETIONS = {'copy': COPY_COMPLETIONS, 'delete': DELETE_COMPLETIONS}
 
 
 class ProgressWatch:
@@ -48,11 +53,12 @@ class ProgressWatch:
 
 
 class RcloneStats:
-    def __init__(self, on_completed=None):
+    def __init__(self, on_completed=None, operation='copy'):
         self.offset = 0
         self.partial = b''
         self.counters = {}
         self.on_completed = on_completed
+        self.completions = COMPLETIONS.get(operation, COPY_COMPLETIONS)
 
     def read(self, fd):
         # pread does not move the file offset shared with the child's stderr.
@@ -70,7 +76,7 @@ class RcloneStats:
             if self.on_completed is not None and isinstance(value, dict):
                 message, name = value.get('msg'), value.get('object')
                 if (value.get('level') == 'info' and isinstance(name, str) and isinstance(message, str)
-                        and message.split(' to: ', 1)[0] in COPY_COMPLETIONS):
+                        and message.split(' to: ', 1)[0] in self.completions):
                     self.on_completed(name)
             stats = value.get('stats') if isinstance(value, dict) else None
             if not isinstance(stats, dict):
@@ -82,6 +88,22 @@ class RcloneStats:
                 value = stats.get(key)
                 if type(value) is int and value >= 0:
                     self.counters[key] = value
+        return dict(self.counters)
+
+    def drain(self, fd):
+        """Read a finished client's log to EOF, after it was reaped.
+
+        Records written after the last poll (the last completions before exit,
+        or anything logged while the client was being stopped) still reach
+        `on_completed`. An unterminated trailing fragment, which only a SIGKILL
+        mid-write can leave, is discarded rather than trusted.
+        """
+        while True:
+            offset = self.offset
+            self.read(fd)
+            if self.offset == offset:
+                break
+        self.partial = b''
         return dict(self.counters)
 
 
@@ -232,6 +254,17 @@ class RetentionProgress:
             self.log(f"Retention: deleted {values['deleted_objects']:,} / {record['planned_objects']:,} "
                      f"({values['remaining_bytes'] / 1024**3:.1f} GiB left)", flush=True)
         self.update(force=False, **values)
+
+    def settle(self, remaining_objects, remaining_bytes):
+        """Replace event-based counts with a fresh listing's truth, at once."""
+        record = self.record
+        planned, planned_bytes = record.get('planned_objects'), record.get('planned_bytes')
+        values = {'remaining_objects': remaining_objects, 'remaining_bytes': remaining_bytes}
+        if type(planned) is int:
+            values['deleted_objects'] = max(0, planned - remaining_objects)
+        if type(planned_bytes) is int:
+            values['deleted_bytes'] = max(0, planned_bytes - remaining_bytes)
+        self.update(**values)
 
     def local(self):
         self.update(step=RetentionStep.LOCAL.value)

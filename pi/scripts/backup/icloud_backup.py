@@ -97,7 +97,7 @@ def command_failure(program, operation, returncode, stderr):
                 'Apple password privately with icloud_backup.sh --login')
     if failure is None:
         safe_operation = operation if operation in {
-            'config', 'copy', 'copyto', 'cat', 'deletefile', 'lsjson', 'check', 'purge',
+            'config', 'copy', 'copyto', 'cat', 'delete', 'deletefile', 'lsjson', 'check', 'purge',
             'with-lock'} else 'command'
         failure = RuntimeError(f'{base} {safe_operation} failed (exit {returncode})')
     failure.detail = command_failure_detail(stderr)
@@ -294,15 +294,15 @@ def monitor_child(cfg, program, operation, proof, parked, network, interactive, 
 
 
 def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None,
-        on_completed=None, on_activity=None, account=False, repository_fd=None, on_hold=None):
+        on_completed=None, on_activity=None, account=False, repository_fd=None, on_hold=None, restart_args=None):
     """Guard every network command, including retries, checks and retention.
 
     Worker commands (network, parked, non-interactive) hold through an unknown
     verdict: a running client is killed at its first unknown verdict and the
     command restarts from scratch once the uplink is verified again, within the
     grace. The grace runs from the command's first loss, so a flapping uplink
-    cannot restart it forever. Manual commands (login, verify-login) keep the
-    three-probe check.
+    cannot restart it forever. `restart_args`, when given, maps the argv before
+    each restart. Manual commands (login, verify-login) keep the three-probe check.
     """
     held = network and parked and not interactive
     operation = args[1] if len(args) > 1 else 'command'
@@ -317,6 +317,7 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
                 raise UplinkUnknown(exc.reason) from None
             print(f'Stopped rclone {operation}: {exc.reason}; it restarts once the uplink is verified', flush=True)
             lost = exc if lost is None else UplinkLost(exc.reason, lost.started, lost.since)
+            args = args if restart_args is None else restart_args(args)
 
 
 def admit_client(cfg, network, hold, on_activity):
@@ -362,7 +363,7 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
                 ['--stats', '5s', '--stats-log-level', 'NOTICE', '--use-json-log']) + args[1:]
     terminal = termios.tcgetattr(sys.stdin.fileno()) if interactive and sys.stdin.isatty() else None
     watch = ProgressWatch(cfg.get('no_progress_timeout_seconds', 900))
-    stats, io = RcloneStats(on_completed), ProcessIO()
+    stats, io = RcloneStats(on_completed, operation), ProcessIO()
     with tempfile.TemporaryFile(mode='w+t') as output, tempfile.TemporaryFile(mode='w+t') as errors:
         CHILD_INTERACTIVE = interactive
         CHILD = subprocess.Popen(args, stdin=None if interactive else subprocess.DEVNULL,
@@ -405,6 +406,8 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
                 reader.stream.close()
             if terminal is not None:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, terminal)
+            if network:  # Last: a callback's error (a tripwire) then replaces any other outcome.
+                stats.drain(errors.fileno())
 
 
 def exact_mount(mount, label):
