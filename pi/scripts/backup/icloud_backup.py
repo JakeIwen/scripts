@@ -163,26 +163,40 @@ def capture(args, timeout=20):
     return result.stdout
 
 
-def permitted_uplink_evidence(consumer_id='pi.icloud_backup'):
+def probe_uplink(consumer_id):
+    """One fresh evidence collection and metering decision: (evidence, allowed, reason)."""
     helper = Path(__file__).with_name('icloud_uplink.py')
+    try:
+        evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
+                                       '/usr/bin/python3', str(helper)], timeout=35))
+        allowed, reason = decide(evidence, consumer_id=consumer_id)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        evidence, allowed, reason = None, False, 'cannot verify current uplinks'
+    return evidence, allowed, reason
+
+
+def permitted_uplink_evidence(consumer_id='pi.icloud_backup'):
     for attempt in range(3):
         if attempt:
             time.sleep(5)
-        try:
-            evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
-                                           '/usr/bin/python3', str(helper)], timeout=35))
-            allowed, reason = decide(evidence, consumer_id=consumer_id)
-        except (OSError, ValueError, subprocess.SubprocessError):
-            allowed, reason = False, 'cannot verify current uplinks'
+        evidence, allowed, reason = probe_uplink(consumer_id)
         if allowed:
             return evidence
     raise Deferred(reason)
 
 
-def guard(cfg):
+def uplink_consumer(cfg):
     consumers = {priority.PriorityMode.PI: 'pi.icloud_backup',
                  priority.PriorityMode.TIME_MACHINE: 'pi.time_machine_cloud'}
-    evidence = permitted_uplink_evidence(consumers[cfg.get('priority_job', priority.PriorityMode.PI)])
+    return consumers[cfg.get('priority_job', priority.PriorityMode.PI)]
+
+
+def guard(cfg):
+    return uplink_proof(permitted_uplink_evidence(uplink_consumer(cfg)))
+
+
+def uplink_proof(evidence):
+    """The bind address and the path signature a running transfer must keep."""
     selected = sorted((m['name'], m['percent']) for m in evidence['router']['route_members'] if m['percent'] > 0)
     identities = [(name, evidence['ubnt']['ssid_verified'] if name == 'wan' else evidence['wireless_uplinks'][name]['ssid_verified']) for name, weight in selected]
     # Restart connections on ANY path/association change. Existing conntrack
@@ -241,6 +255,13 @@ def monitor_child(cfg, program, operation, proof, parked, network, interactive, 
 def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None,
         on_completed=None, on_activity=None, account=False, repository_fd=None):
     """Guard every network command, including retries, checks and retention."""
+    return run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
+                       on_completed, on_activity, account, repository_fd)
+
+
+def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
+                on_completed, on_activity, account, repository_fd):
+    """Admit, start and supervise one client process."""
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
     operation = args[1] if len(args) > 1 else 'command'

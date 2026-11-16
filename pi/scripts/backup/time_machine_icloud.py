@@ -466,7 +466,11 @@ def retention(cfg, current):
             network(cfg, 'rmdir', base)
         manifests.pop(name, None)
     store.atomic_json(journal_path, [])
-    referenced = {key for manifest in manifests.values() for key in manifest}
+    delete_unreferenced(cfg, remote, {key for manifest in manifests.values() for key in manifest})
+
+
+def delete_unreferenced(cfg, remote, referenced):
+    """Garbage-collect cloud and local objects no kept manifest references."""
     objects = cloud.remote_inventory(cfg, remote + '/objects')
     for digest in objects:
         if not store.DIGEST.fullmatch(digest):
