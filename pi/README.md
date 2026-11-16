@@ -39,6 +39,10 @@ normally live under `/home/pi/scripts/`.
 - Van TV — YouTube cast receiver, DIAL on port 8794 and status/TV-code pairing
   page on LAN port 8795; standalone source in `~/dev/castit/youtube/`.
 
+## Display and audio
+
+- [HDMI audio (EDID, boot unit, kernel command line)](docs/display/hdmi-audio.md)
+
 ## Testing
 
 - [Test suite layout and commands](tests/README.md)
