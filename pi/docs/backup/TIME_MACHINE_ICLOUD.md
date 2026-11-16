@@ -158,7 +158,8 @@ worker holds and re-probes every five seconds for `uplink_unknown_grace_seconds`
 between probes and immediately before any client starts or resumes. If the
 uplink is verified again in time, the killed command restarts from scratch
 (`icloud_uplink_hold.RESTART_EXITS`; a restarted delete that finds its object
-already gone counts as done; `hashsum` batches are not restarted). An expired
+already gone counts as done; `hashsum` batches are not restarted). Its grace
+counts from its first loss, so a flapping uplink cannot restart it forever. An expired
 hold defers with `UplinkUnknown`, retried after five minutes at most three runs
 in a row without durable advancement (an object uploaded, verified or deleted).
 While holding, `uplink_hold` in the state file keeps the status non-stale and
