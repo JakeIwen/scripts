@@ -25,6 +25,7 @@ from time_machine_verification import ObjectVerifier
 class ResultKind(str, Enum):
     COMPLETE = 'complete'
     DEFERRED = 'deferred'
+    UPLINK_UNKNOWN = 'uplink-unknown'
     AUTHENTICATION = 'authentication'
     ERROR = 'error'
     OS_ERROR = 'os-error'
@@ -38,7 +39,7 @@ class VerifierResult(TypedDict):
 
 
 class Follower:
-    def __init__(self, cfg, root, expected, rows, parent_pid, completed, updates, done):
+    def __init__(self, cfg, root, expected, rows, parent_pid, completed, updates, done, parent_hold=None):
         self.cfg = {**cfg, 'bandwidth_limit': cfg.get('verification_bandwidth_limit', cfg['bandwidth_limit'])}
         self.remote = cfg['remote'] + '/objects'
         self.verifier = ObjectVerifier(expected, root / 'verified-objects.json')
@@ -46,6 +47,7 @@ class Follower:
         self.rows = rows
         self.ready = {k for k in expected if self.verifier.available(k, rows)}
         self.parent_pid, self.completed, self.updates, self.done = parent_pid, completed, updates, done
+        self.parent_hold = parent_hold
         self.last_report = 0
         self.last_inventory = 0
         self.meter = VerificationMeter()
@@ -73,6 +75,13 @@ class Follower:
         with suppress(Full):
             self.updates.put_nowait(values)
         self.last_report = now
+
+    def wait_for_parent(self):
+        """Start no verifier command while the uploader holds for an unknown uplink."""
+        while self.parent_hold is not None and self.parent_hold.is_set():
+            self.check()
+            self.meter.activity = TransferActivity.NETWORK_CHECK
+            time.sleep(1)
 
     def network(self, operation, path, *args, **kwargs):
         self.check()
@@ -109,6 +118,7 @@ class Follower:
                 # Follow the sorted upload list rather than spending the
                 # catch-up window on hundreds of tiny metadata requests.
                 names = sorted(available)[:128]
+                self.wait_for_parent()
                 self.batch_start = self.verifier.counters()['verified_bytes']
                 download_batch(self.cfg, self.remote, names, self.verifier, self.rows,
                                lambda counters: self.report(counters, force=True), self.activity)
@@ -122,6 +132,7 @@ class Follower:
                 self.report(force=True)
                 return
             elif pending and time.monotonic() - self.last_inventory >= 15:
+                self.wait_for_parent()
                 self.inventory()
             else:
                 self.meter.activity = TransferActivity.WAITING if not pending else TransferActivity.INVENTORY
@@ -130,8 +141,10 @@ class Follower:
 
 
 def verification_worker(cfg, root, expected, rows, parent_pid, completed, updates, done,
-                        result_reader, result_writer, admission):
+                        result_reader, result_writer, admission, parent_hold=None):
     result_reader.close()
+    # Forked from the worker: only the parent writes worker state.
+    cloud.set_hold_reporter(None)
     result: VerifierResult = {'kind': ResultKind.COMPLETE, 'message': '', 'errno': None, 'detail': ''}
     try:
         with suppress(PermissionError):
@@ -139,9 +152,11 @@ def verification_worker(cfg, root, expected, rows, parent_pid, completed, update
         signal.signal(signal.SIGTERM, cloud.abort)
         signal.signal(signal.SIGINT, cloud.abort)
         with backup_admission.use(admission):
-            Follower(cfg, root, expected, rows, parent_pid, completed, updates, done).run()
+            Follower(cfg, root, expected, rows, parent_pid, completed, updates, done, parent_hold).run()
     except cloud.AuthenticationRequired as exc:
         result.update(kind=ResultKind.AUTHENTICATION, message=str(exc), detail=getattr(exc, 'detail', ''))
+    except cloud.UplinkUnknown as exc:
+        result.update(kind=ResultKind.UPLINK_UNKNOWN, message=str(exc))
     except cloud.Deferred as exc:
         result.update(kind=ResultKind.DEFERRED, message=str(exc))
     except OSError as exc:
@@ -172,12 +187,13 @@ class VerificationPipeline:
         self.completed = context.Queue(maxsize=16)
         self.updates = context.Queue(maxsize=2)
         self.done = context.Event()
+        self.hold = context.Event()
         self.reader, writer = context.Pipe(duplex=False)
         self.pending, self.sent = deque(), set()
         self.latest, self.result = {}, None
         self.process = context.Process(target=verification_worker,
             args=(cfg, root, expected, rows, os.getpid(), self.completed, self.updates, self.done,
-                  self.reader, writer, admission), daemon=True)
+                  self.reader, writer, admission, self.hold), daemon=True)
         self.process.start()
         writer.close()
 
@@ -212,6 +228,7 @@ class VerificationPipeline:
             kind = self.result['kind']
             message = self.result['message']
             if kind == ResultKind.AUTHENTICATION: raise self.failure(cloud.AuthenticationRequired(message))
+            if kind == ResultKind.UPLINK_UNKNOWN: raise cloud.UplinkUnknown(message)
             if kind == ResultKind.DEFERRED: raise cloud.Deferred(message)
             if kind == ResultKind.OS_ERROR: raise OSError(self.result['errno'], 'background verification storage error')
             if kind != ResultKind.COMPLETE: raise self.failure(RuntimeError(message))
@@ -219,6 +236,10 @@ class VerificationPipeline:
         elif stopped:
             raise RuntimeError('background verification worker stopped unexpectedly')
         return {**self.latest, 'verification_copy_events': len(self.sent)}
+
+    def parent_hold(self, value):
+        """The uploader's hold heartbeat: pause new verifier commands while it holds."""
+        (self.hold.set if value is not None else self.hold.clear)()
 
     def failure(self, exc):
         # The worker's rclone error text crosses the process boundary with the
@@ -266,11 +287,25 @@ def upload_and_follow(cfg, root, expected, rows, files, state):
         verification_bytes_per_second=None, verification_idle_seconds=0,
         verification_waiting=False, **cloud.upload_progress(expected, rows, {}))
     with VerificationPipeline(cfg, root, expected, rows, admission=backup_admission.current()) as pipeline:
+        verified = [None]
+        def observe(values):
+            # Checkpointed objects from earlier runs set the baseline; only newly
+            # verified ones count as this run's durable advancement.
+            count = values.get('verified_files')
+            if type(count) is int:
+                if verified[0] is not None and count > verified[0]:
+                    cloud.note_advancement()
+                verified[0] = count if verified[0] is None else max(verified[0], count)
+            return values
         def report(counters):
-            cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, counters),
-                                  **pipeline.progress())
+            values = observe(pipeline.progress())
+            cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, counters), **values)
+        def completed(digest):
+            cloud.note_advancement()
+            pipeline.completed_object(digest)
         cloud.run([cloud.RCLONE, 'copy', str(root / 'objects'), cfg['remote'] + '/objects',
                    '--files-from-raw', str(files), '--immutable', '--size-only', '--log-level', 'INFO'],
-                  cfg, network=True, progress=report, on_completed=pipeline.completed_object)
+                  cfg, network=True, progress=report, on_completed=completed, on_hold=pipeline.parent_hold)
         pipeline.finish(lambda values: cloud.record_progress(state, 'verifying',
-            upload_estimated_bytes=total, command_idle_seconds=values.get('verification_idle_seconds', 0), **values))
+            upload_estimated_bytes=total, command_idle_seconds=values.get('verification_idle_seconds', 0),
+            **observe(values)))

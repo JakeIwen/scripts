@@ -89,6 +89,53 @@ class WorkerCleanupTests(unittest.TestCase):
         self.assertEqual(raised.exception.detail, 'Failed to hashsum: dial tcp: i/o timeout: chunk-1')
 
 
+class UplinkHoldBoundaryTests(unittest.TestCase):
+    def test_uplink_unknown_keeps_its_type_across_the_worker_boundary(self):
+        reader, writer = mock.Mock(), mock.Mock()
+        with mock.patch.object(pipeline.os, 'nice'), mock.patch.object(pipeline.signal, 'signal'), \
+                mock.patch.object(pipeline.backup_admission, 'use', return_value=nullcontext()), \
+                mock.patch.object(pipeline, 'Follower') as follower, \
+                mock.patch.object(cloud, 'stop_child'):
+            follower.return_value.run.side_effect = cloud.UplinkUnknown('selected uplink identity is unknown')
+            pipeline.verification_worker({}, Path('.'), {}, {}, 1, None, None, None, reader, writer, None)
+        result = writer.send.call_args.args[0]
+        self.assertEqual(result['kind'], pipeline.ResultKind.UPLINK_UNKNOWN)
+        parent = object.__new__(VerificationPipeline)
+        parent.pending, parent.sent, parent.latest, parent.result = [], set(), {}, None
+        parent.updates = mock.Mock(**{'get_nowait.side_effect': pipeline.Empty})
+        parent.process = mock.Mock(exitcode=0)
+        parent.reader = mock.Mock(**{'poll.return_value': True, 'recv.return_value': result})
+        with self.assertRaisesRegex(cloud.UplinkUnknown, 'identity is unknown'):
+            parent.progress()
+
+    def test_forked_verifier_never_writes_worker_hold_state(self):
+        cloud.set_hold_reporter(mock.Mock())
+        self.addCleanup(cloud.set_hold_reporter, None)
+        with mock.patch.object(pipeline.os, 'nice'), mock.patch.object(pipeline.signal, 'signal'), \
+                mock.patch.object(pipeline.backup_admission, 'use', return_value=nullcontext()), \
+                mock.patch.object(pipeline, 'Follower'), mock.patch.object(cloud, 'stop_child'):
+            pipeline.verification_worker({}, Path('.'), {}, {}, 1, None, None, None, mock.Mock(), mock.Mock(), None)
+        self.assertIsNone(cloud.HOLD_REPORTER)
+
+    def test_follower_starts_no_command_while_the_uploader_holds(self):
+        import threading
+        hold = threading.Event(); hold.set()
+        follower = object.__new__(pipeline.Follower)
+        follower.parent_hold, follower.meter = hold, mock.Mock()
+        checks = []
+        def check():
+            checks.append(1)
+            if len(checks) == 3:
+                hold.clear()
+        follower.check = check
+        with mock.patch.object(pipeline.time, 'sleep'):
+            follower.wait_for_parent()
+        self.assertEqual(len(checks), 3)
+        follower.parent_hold = None
+        follower.wait_for_parent()
+        self.assertEqual(len(checks), 3)
+
+
 @unittest.skipUnless(sys.platform.startswith('linux'), 'admission proof requires Linux fdinfo')
 class PipelineTests(unittest.TestCase):
     def setUp(self):

@@ -25,6 +25,7 @@ import icloud_backup as cloud
 import cloud_backup_requests
 import backup_settings
 import icloud_status as history
+from icloud_uplink_hold import apply_grace
 import time_machine_store as store
 import time_machine_staging as staging
 import backup_priority as priority
@@ -63,7 +64,7 @@ def config():
                           ('capture_max_seconds', 600, 43200)):
         if type(cfg.get(key)) is not int or not low <= cfg[key] <= high:
             raise ValueError('invalid Time Machine setting: ' + key)
-    return cfg
+    return apply_grace(cfg)
 
 
 def worker_alive(request, process_root=Path('/proc')):
@@ -357,6 +358,8 @@ def transfer(cfg, manifest, state):
                 '--files-from-raw', str(files), '--immutable', '--size-only',
                 progress=lambda counters: cloud.record_progress(state, 'uploading',
                     **cloud.upload_progress(expected, rows, counters)))
+        if missing:
+            cloud.note_advancement()
     total = sum(x['bytes'] for x in expected.values())
     cloud.record_progress(state, 'verifying', upload_estimated_bytes=total,
                           parallel_verification=False, verification_bytes_per_second=None)
@@ -409,6 +412,7 @@ def verify_objects(cfg, expected, state):
         verifier.verify(digest, rows[digest], lambda key: network(cfg, 'cat', remote + '/' + key,
             stream_hash=True, progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0),
                                                        command_idle_seconds=c.get('idle_seconds', 0))))
+        cloud.note_advancement()
         report(current_file_bytes=0)
     if verifier.invalidate_changed(cloud.remote_inventory(cfg, remote)):
         raise cloud.Deferred('cloud objects changed during verification; checkpoints invalidated')
@@ -491,7 +495,7 @@ def audit_ready(cfg):
     if not cloud.credentials_ready(cfg) or not (AUTH / 'authenticated.json').is_file() or (AUTH / 'authentication-error.json').exists():
         raise cloud.Deferred('iCloud login is required; use the existing Pi login command')
     cloud.check_work_allowed(cfg)
-    cloud.guard(cfg)
+    cloud.guard(cfg, cloud.worker_hold(cfg))
 
 
 def require_network_ready(cfg):
@@ -691,8 +695,12 @@ def _main(args):
         # maintenance-only run would otherwise keep showing.
         state.pop('attempt_id', None)
         state['failure_code'] = None
+    uplink_retry_counted = False
     try:
         state.update(worker_pid=os.getpid(), phase='checking', last_attempt_at=time.time(), last_error=None, retry_at=None)
+        state.pop('uplink_hold', None)
+        cloud.set_hold_reporter(cloud.state_hold_reporter(state))
+        cloud.ADVANCED = False
         cloud.record_progress(state, 'checking')
         state['phase'] = weekly(cfg, state)
         return 0
@@ -702,6 +710,13 @@ def _main(args):
         store.atomic_json(AUTH / 'authentication-error.json', {'failed_at': time.time(), 'reason': str(exc)})
         cloud.notify(state, 'Mac Time Machine iCloud login needed', history.ICLOUD_LOGIN_MESSAGE)
         return 1
+    except cloud.UplinkUnknown as exc:
+        # Its own capped retry; the first-copy retry would bypass the cap.
+        state.update(phase='deferred', last_error=str(exc))
+        history.schedule_uplink_retry(state, cloud.ADVANCED)
+        uplink_retry_counted = True
+        print('Deferred: ' + str(exc), flush=True)
+        return 0
     except cloud.Deferred as exc:
         state.update(phase='deferred', last_error=str(exc))
         schedule_first_copy_retry(state, str(exc))
@@ -713,6 +728,9 @@ def _main(args):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return failed_attempt(state, exc)
     finally:
+        if cloud.ADVANCED and not uplink_retry_counted:
+            # Durable advancement ends a run of no-progress uplink retries.
+            state['uplink_quick_retries'] = 0
         store.atomic_json(STATE / 'state.json', state)
         history.save_attempt(STATE, state, finished=True)
         priority.complete_job(priority.PriorityMode.TIME_MACHINE, state)

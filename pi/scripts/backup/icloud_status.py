@@ -94,6 +94,21 @@ def schedule_quick_retry(state, now=None):
     return True
 
 
+def schedule_uplink_retry(state, advanced, now=None):
+    """Retry an expired uplink hold in five minutes, at most QUICK_RETRY_LIMIT times in a row
+    without durable advancement (an object uploaded, verified or deleted). Separate from
+    quick_retries, which every transfer start resets."""
+    used = 0 if advanced else state.get('uplink_quick_retries', 0)
+    if type(used) is not int or used < 0:
+        used = QUICK_RETRY_LIMIT
+    if used >= QUICK_RETRY_LIMIT:
+        state.update(uplink_quick_retries=used, retry_at=None)
+        return False
+    state.update(uplink_quick_retries=used + 1,
+                 retry_at=(time.time() if now is None else now) + QUICK_RETRY_SECONDS)
+    return True
+
+
 def transfer_started(state):
     """Checks passed and the transfer client started: interruptions may retry quickly again."""
     state['quick_retries'] = 0
@@ -369,6 +384,17 @@ def add_verification_progress(result, state, matching, now):
         and updated is not None and 0 <= now - updated <= 60 else None)
 
 
+def active_uplink_hold(state, matching, now):
+    """The running worker's hold heartbeat, while within its own freshness bound."""
+    hold = state.get('uplink_hold')
+    if not matching or not isinstance(hold, dict):
+        return None
+    since, fresh_until = number(hold.get('since')), number(hold.get('fresh_until'))
+    if since is None or fresh_until is None or not since <= now <= fresh_until:
+        return None
+    return hold
+
+
 def build_status(state, history, cfg, service, next_check_at, now=None, auth_error=False):
     now = time.time() if now is None else now
     live = service.get('ActiveState') in ('active', 'activating', 'deactivating') and int(service.get('MainPID') or 0) > 0
@@ -398,12 +424,16 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
         elif row.get('ended_at') is None:
             row.update(phase='interrupted', message='Worker stopped without a final status.')
         attempts.append(row)
+    hold = active_uplink_hold(state, matching, now)
+    message = reason(current)
+    if hold is not None:
+        message = 'Paused: checking the uplink (since ' + time.strftime('%H:%M', time.localtime(hold['since'])) + ').'
     return {'available': True, 'running': live, 'phase': current_phase, 'stalled': stalled,
-            'message': reason(current), 'last_work_phase': phase(state.get('last_work_phase', 'checking')),
+            'message': message, 'last_work_phase': phase(state.get('last_work_phase', 'checking')),
             'generation': generation(state.get('pending') or state.get('last_generation')),
             'last_success_at': last_success, 'next_check_at': next_check_at,
             'next_due_at': last_success + interval * 86400 if last_success else None,
-            'updated_at': updated, 'progress_stale': bool(live and (not matching or updated is None or now - updated > 60)),
+            'updated_at': updated, 'progress_stale': bool(live and hold is None and (not matching or updated is None or now - updated > 60)),
             'attention': stalled or last_success is None or now - last_success > (interval + 1) * 86400 or current_phase in ('error', 'authentication_required', 'interrupted', 'unavailable'),
             'interval_days': interval, 'keep_generations': cfg.get('keep_generations', 8),
             'progress': current_progress, 'history_started_at': number(history.get('started_at')),

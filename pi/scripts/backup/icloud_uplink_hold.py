@@ -62,11 +62,11 @@ class UplinkHold:
     as the heartbeat's freshness limit.
     """
 
-    def __init__(self, grace, work_check, report, slack, lost=None, log=print,
+    def __init__(self, grace, work_check, report, slack, lost=None, log=None,
                  clock=None, wall=None, sleep=None):
         self.grace, self.work_check, self.report, self.slack = grace, work_check, report, slack
-        self.log = log
-        # Resolved now, not at definition, so tests can patch the time module.
+        # Resolved now, not at definition, so tests can patch print and the time module.
+        self.log = log or print
         self.clock, self.wall, self.sleep = clock or time.monotonic, wall or time.time, sleep or time.sleep
         self.started = lost.started if lost else None
         self.since = lost.since if lost else None

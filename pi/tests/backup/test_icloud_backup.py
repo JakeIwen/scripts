@@ -288,7 +288,10 @@ class SnapshotTests(ClientMonitoringTests):
             def poll(self): return self.returncode
             def wait(self, timeout=None): self.returncode=-15; return -15
         child=Client()
-        with mock.patch.object(backup,'guard',side_effect=[('192.168.6.103','wan'),backup.Deferred('Starlink')]), \
+        starlink = evidence(); starlink['ubnt']['ssid_verified'] = 'denlink'
+        with mock.patch.object(backup,'capture',side_effect=[json.dumps(evidence()), json.dumps(starlink)]), \
+             mock.patch.object(backup, 'decide', side_effect=lambda value, consumer_id:
+                               decide(value, now=1000, consumer_id=consumer_id)), \
              mock.patch.object(backup,'check_parked'), \
              mock.patch.object(backup.admission, 'client_fds', return_value=(9, 11, 12)), \
              mock.patch.object(backup.subprocess,'Popen',return_value=child) as popen, \
@@ -303,8 +306,10 @@ class SnapshotTests(ClientMonitoringTests):
     def test_changed_route_proof_is_not_retried(self):
         child = mock.Mock(pid=987654, returncode=None)
         child.poll.return_value = None
-        with mock.patch.object(backup, 'guard', side_effect=[('192.168.6.103', 'old'),
-                                                           ('192.168.6.103', 'new')]) as guard, \
+        changed = evidence(); changed['ubnt']['ssid_verified'] = 'OtherWifi'
+        with mock.patch.object(backup, 'capture', side_effect=[json.dumps(evidence()), json.dumps(changed)]) as guard, \
+                mock.patch.object(backup, 'decide', side_effect=lambda value, consumer_id:
+                                  decide(value, now=1000, consumer_id=consumer_id)), \
                 mock.patch.object(backup, 'check_parked'), \
                 mock.patch.object(backup.subprocess, 'Popen', return_value=child), \
                 mock.patch.object(backup.time, 'sleep'), \

@@ -235,6 +235,62 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(state['phase'], 'deferred')
         self.assertGreater(state['retry_at'], time.time() + 295)
 
+    def run_uplink_deferral(self, weekly):
+        self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
+        with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
+                mock.patch.object(cloud, 'STATE_DIR', self.directory), \
+                mock.patch.object(job, 'config', return_value={'interval_days': 7}), \
+                mock.patch.object(job.signal, 'signal'), mock.patch('builtins.print'), \
+                mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                mock.patch.object(job, 'weekly', side_effect=weekly):
+            self.assertEqual(job.main(), 0)
+        return store.read_json(self.directory / 'state.json')
+
+    def test_uplink_quick_retries_are_capped_without_durable_advancement(self):
+        for initial in ({'last_success_at': 100}, {'pending': GEN}):  # a first copy cannot bypass the cap
+            with self.subTest(initial=initial):
+                store.atomic_json(self.directory / 'state.json', initial)
+                def prerequisites_then_unknown(cfg, state):
+                    # Reaching the transfer resets quick_retries, never the uplink cap.
+                    job.history.transfer_started(state)
+                    raise cloud.UplinkUnknown('selected uplink identity is unknown')
+                for attempt in range(job.history.QUICK_RETRY_LIMIT):
+                    state = self.run_uplink_deferral(prerequisites_then_unknown)
+                    self.assertGreater(state['retry_at'], time.time() + 295, attempt)
+                    self.assertEqual(state['uplink_quick_retries'], attempt + 1)
+                state = self.run_uplink_deferral(prerequisites_then_unknown)
+                self.assertIsNone(state['retry_at'])
+                self.assertEqual(state['phase'], 'deferred')
+
+    def test_durable_advancement_resets_the_uplink_retry_cap(self):
+        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100, 'uplink_quick_retries': 3})
+        def deleted_then_unknown(cfg, state):
+            cloud.note_advancement()
+            raise cloud.UplinkUnknown('router is unreachable')
+        state = self.run_uplink_deferral(deleted_then_unknown)
+        self.assertEqual(state['uplink_quick_retries'], 1)
+        self.assertGreater(state['retry_at'], time.time() + 295)
+        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100, 'uplink_quick_retries': 3})
+        def advanced_and_finished(cfg, state):
+            cloud.note_advancement()
+            return 'complete'
+        self.assertEqual(self.run_uplink_deferral(advanced_and_finished)['uplink_quick_retries'], 0)
+
+    def test_stale_hold_heartbeat_is_cleared_and_a_live_one_reaches_state(self):
+        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100,
+                          'uplink_hold': {'reason': 'old', 'since': 1, 'checked_at': 1, 'fresh_until': 2}})
+        seen = []
+        def holds(cfg, state):
+            seen.append(dict(state))
+            cloud.HOLD_REPORTER({'reason': 'stale uplink evidence', 'since': 5, 'checked_at': 6, 'fresh_until': 7})
+            seen.append(store.read_json(self.directory / 'state.json')['uplink_hold']['reason'])
+            cloud.HOLD_REPORTER(None)
+            return 'not due'
+        state = self.run_uplink_deferral(holds)
+        self.assertNotIn('uplink_hold', seen[0])
+        self.assertEqual(seen[1], 'stale uplink evidence')
+        self.assertNotIn('uplink_hold', state)
+
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         control.control('pause', '60', self.directory, command=self.command)

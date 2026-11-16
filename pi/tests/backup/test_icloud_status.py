@@ -36,6 +36,46 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(self.build({'phase': 'verifying', 'worker_pid': 123,
                                    'progress_updated_at': 900}, live=True)['progress_stale'])
 
+    def test_active_uplink_hold_is_reported_and_never_stale_within_its_bound(self):
+        # A 90 s grace plus probe and work-check slack, started at 900; progress last moved at 880.
+        hold = {'reason': 'selected uplink identity is unknown', 'since': 900, 'checked_at': 900,
+                'fresh_until': 900 + 90 + 60}
+        for now in range(900, 1051, 10):
+            with self.subTest(now=now):
+                result = status.build_status(
+                    {'phase': 'retention', 'worker_pid': 123, 'progress_updated_at': 880, 'uplink_hold': hold},
+                    {}, {'interval_days': 7}, {'ActiveState': 'activating', 'MainPID': '123'}, 1100, now=now)
+                self.assertFalse(result['progress_stale'])
+                self.assertTrue(result['message'].startswith('Paused: checking the uplink (since '))
+        past = status.build_status(
+            {'phase': 'retention', 'worker_pid': 123, 'progress_updated_at': 880, 'uplink_hold': hold},
+            {}, {'interval_days': 7}, {'ActiveState': 'activating', 'MainPID': '123'}, 1100, now=1051)
+        self.assertTrue(past['progress_stale'])
+        self.assertFalse(past['message'].startswith('Paused: checking the uplink'))
+
+    def test_orphaned_or_malformed_uplink_hold_is_ignored(self):
+        hold = {'reason': 'x', 'since': 990, 'checked_at': 990, 'fresh_until': 2000}
+        other_worker = self.build({'phase': 'retention', 'worker_pid': 122, 'uplink_hold': hold}, live=True)
+        self.assertFalse(other_worker['message'].startswith('Paused: checking'))
+        dead = self.build({'phase': 'retention', 'worker_pid': 123, 'uplink_hold': hold})
+        self.assertFalse(dead['message'].startswith('Paused: checking'))
+        for bad in ({'since': 'x', 'fresh_until': 2000}, {'since': 990}, 'held', {'since': 1001, 'fresh_until': 2000}):
+            result = self.build({'phase': 'retention', 'worker_pid': 123, 'progress_updated_at': 995,
+                                 'uplink_hold': bad}, live=True)
+            self.assertFalse(result['message'].startswith('Paused: checking'), bad)
+
+    def test_uplink_retry_cap_counts_only_runs_without_advancement(self):
+        state = {}
+        for expected in (1, 2, 3):
+            self.assertTrue(status.schedule_uplink_retry(state, False, now=0))
+            self.assertEqual((state['uplink_quick_retries'], state['retry_at']), (expected, status.QUICK_RETRY_SECONDS))
+        self.assertFalse(status.schedule_uplink_retry(state, False, now=0))
+        self.assertIsNone(state['retry_at'])
+        self.assertTrue(status.schedule_uplink_retry(state, True, now=0))
+        self.assertEqual(state['uplink_quick_retries'], 1)
+        for bad in (True, -1, 'x'):
+            self.assertFalse(status.schedule_uplink_retry({'uplink_quick_retries': bad}, False, now=0))
+
     def test_new_worker_does_not_inherit_old_progress(self):
         result = self.build({'phase': 'uploading', 'worker_pid': 122,
                              'progress': {'command_bytes': 123}}, live=True)

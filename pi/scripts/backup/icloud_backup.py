@@ -25,7 +25,8 @@ import uuid
 
 import backup_locks
 import backup_admission as admission
-from icloud_uplink import decide
+from icloud_uplink import decide, uplink_unknown, HELPER_TIMEOUT_SECONDS, PROBE_TIMEOUT_SECONDS
+from icloud_uplink_hold import GRACE_KEY, RESTART_EXITS, UplinkHold, UplinkLost, apply_grace
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
 from icloud_status import (ICLOUD_LOGIN_MESSAGE, begin_attempt, command_failure_detail,
@@ -46,11 +47,23 @@ ORPHAN_AUDIT_RETRY = 86400
 ORPHAN_ALERT_BYTES = 5 * 1024**3
 CHILD = None
 CHILD_INTERACTIVE = False
+# Worker-registered writer of the uplink-hold heartbeat (None in manual
+# commands and in the forked verifier, which never write worker state).
+HOLD_REPORTER = None
+# Set once this run durably advanced (an object uploaded, verified or
+# deleted); prerequisite reads never set it. Caps uplink quick retries.
+ADVANCED = False
+# capture()'s default timeout, which bounds one parked/priority work check.
+COMMAND_TIMEOUT_SECONDS = 20
 UPLOAD_SPEED = upload_speed_log.UploadSpeedSampler()
 
 
 class Deferred(Exception):
     pass
+
+
+class UplinkUnknown(Deferred):
+    """The uplink stayed unclassifiable for the whole grace; never a metered verdict."""
 
 
 class MountIdentityError(RuntimeError):
@@ -126,7 +139,7 @@ def load_config(path=CONFIG, apply_preferences=True):
             raise ValueError('invalid setting: ' + k)
     if not re.fullmatch(r'[1-9][0-9]*[kM]', cfg['bandwidth_limit']):
         raise ValueError('invalid bandwidth_limit')
-    return cfg
+    return apply_grace(cfg)
 
 
 def stop_child():
@@ -157,7 +170,7 @@ def abort(signum, frame):
     raise Deferred('stopped for disk lifecycle or service shutdown')
 
 
-def capture(args, timeout=20):
+def capture(args, timeout=COMMAND_TIMEOUT_SECONDS):
     result = subprocess.run(args, check=True, capture_output=True, text=True,
                             timeout=timeout)
     return result.stdout
@@ -168,7 +181,7 @@ def probe_uplink(consumer_id):
     helper = Path(__file__).with_name('icloud_uplink.py')
     try:
         evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
-                                       '/usr/bin/python3', str(helper)], timeout=35))
+                                       '/usr/bin/python3', str(helper)], timeout=HELPER_TIMEOUT_SECONDS))
         allowed, reason = decide(evidence, consumer_id=consumer_id)
     except (OSError, ValueError, subprocess.SubprocessError):
         evidence, allowed, reason = None, False, 'cannot verify current uplinks'
@@ -191,8 +204,51 @@ def uplink_consumer(cfg):
     return consumers[cfg.get('priority_job', priority.PriorityMode.PI)]
 
 
-def guard(cfg):
-    return uplink_proof(permitted_uplink_evidence(uplink_consumer(cfg)))
+def guard(cfg, hold=None):
+    """Proof of a permitted uplink. Without a hold (manual commands) this is the
+    three-probe check; worker paths pass worker_hold() so an unknown verdict is
+    re-probed for the grace instead of deferring at once."""
+    if hold is None:
+        return uplink_proof(permitted_uplink_evidence(uplink_consumer(cfg)))
+    consumer = uplink_consumer(cfg)
+    evidence, reason = hold.admit(lambda: probe_uplink(consumer))
+    if evidence is None:
+        raise (UplinkUnknown if uplink_unknown(reason) else Deferred)(reason)
+    return uplink_proof(evidence)
+
+
+def set_hold_reporter(reporter):
+    global HOLD_REPORTER
+    HOLD_REPORTER = reporter
+
+
+def state_hold_reporter(state):
+    """Write the hold heartbeat into worker state; not transfer progress."""
+    def report(value):
+        if value is None:
+            if state.pop('uplink_hold', None) is None:
+                return
+        else:
+            state['uplink_hold'] = value
+        atomic_json(STATE_DIR / 'state.json', state)
+    return report
+
+
+def note_advancement():
+    global ADVANCED
+    ADVANCED = True
+
+
+def worker_hold(cfg, on_hold=None, lost=None):
+    """The worker-path hold: parked/priority checks between probes, heartbeat to state."""
+    def report(value):
+        if HOLD_REPORTER is not None:
+            HOLD_REPORTER(value)
+        if on_hold is not None:
+            on_hold(value)
+    # A configuration that skipped apply_grace (an ad-hoc caller) gets no hold.
+    return UplinkHold(cfg.get(GRACE_KEY, 0), lambda: check_work_allowed(cfg), report,
+                      PROBE_TIMEOUT_SECONDS + COMMAND_TIMEOUT_SECONDS, lost=lost)
 
 
 def uplink_proof(evidence):
@@ -220,8 +276,26 @@ def check_work_allowed(cfg):
         raise Deferred('yielding to selected ' + priority.JOBS[selected].label + ' priority')
 
 
+def check_running_uplink(cfg, proof, held):
+    """Re-verify the uplink for a stopped client; return only when it may resume."""
+    if not held:
+        if guard(cfg) != proof:
+            raise Deferred('uplink or association changed during transfer')
+        return
+    # Worker paths never resume a client after an unknown verdict: the caller
+    # kills it, holds with no client running, and restarts the command.
+    evidence, allowed, reason = probe_uplink(uplink_consumer(cfg))
+    if not allowed:
+        if uplink_unknown(reason):
+            raise UplinkLost(reason, time.monotonic(), time.time())
+        raise Deferred(reason)
+    if uplink_proof(evidence) != proof:
+        raise Deferred('uplink or association changed during transfer')
+    check_work_allowed(cfg)
+
+
 def monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
-                  stats, io, reader, errors, watch, next_check, on_activity):
+                  stats, io, reader, errors, watch, next_check, on_activity, held=False):
     while CHILD.poll() is None:
         time.sleep(0.25)
         counters = stats.read(errors.fileno()) if network else io.sample(CHILD.pid)
@@ -241,8 +315,7 @@ def monitor_child(cfg, program, operation, proof, parked, network, interactive, 
                 os.kill(CHILD.pid, signal.SIGSTOP)
             if on_activity is not None:
                 on_activity(TransferActivity.NETWORK_CHECK)
-            if guard(cfg) != proof:
-                raise Deferred('uplink or association changed during transfer')
+            check_running_uplink(cfg, proof, held)
             # A failed check leaves the client stopped until termination.
             if CHILD.poll() is None:
                 with suppress(ProcessLookupError):
@@ -253,14 +326,31 @@ def monitor_child(cfg, program, operation, proof, parked, network, interactive, 
 
 
 def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None,
-        on_completed=None, on_activity=None, account=False, repository_fd=None):
-    """Guard every network command, including retries, checks and retention."""
-    return run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
-                       on_completed, on_activity, account, repository_fd)
+        on_completed=None, on_activity=None, account=False, repository_fd=None, on_hold=None):
+    """Guard every network command, including retries, checks and retention.
+
+    Worker commands (network, parked, non-interactive) hold through an unknown
+    verdict: a running client is killed at its first unknown verdict and the
+    command restarts from scratch once the uplink is verified again, within the
+    grace. Manual commands (login, verify-login) keep the three-probe check.
+    """
+    held = network and parked and not interactive
+    operation = args[1] if len(args) > 1 else 'command'
+    lost = None
+    while True:
+        hold = worker_hold(cfg, on_hold, lost) if held else None
+        try:
+            return run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
+                               on_completed, on_activity, account, repository_fd, hold, lost is not None)
+        except UplinkLost as exc:
+            if operation not in RESTART_EXITS:
+                raise UplinkUnknown(exc.reason) from None
+            print(f'Stopped rclone {operation}: {exc.reason}; it restarts once the uplink is verified', flush=True)
+            lost = exc
 
 
 def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
-                on_completed, on_activity, account, repository_fd):
+                on_completed, on_activity, account, repository_fd, hold=None, restarted=False):
     """Admit, start and supervise one client process."""
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
@@ -270,7 +360,11 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
         check_work_allowed(cfg)
     if network and on_activity is not None:
         on_activity(TransferActivity.NETWORK_CHECK)
-    proof = guard(cfg) if network else None
+    proof = guard(cfg, hold) if network else None
+    if hold is not None:
+        # The final probe may have taken its full timeout: re-check parking and
+        # priority immediately before any client starts.
+        check_work_allowed(cfg)
     if on_activity is not None:
         on_activity(TransferActivity.CONNECTING)
     source = proof[0] if network else None
@@ -299,10 +393,14 @@ def run_attempt(args, cfg, network, interactive, parked, stream_hash, progress,
         next_check = time.monotonic() + cfg['guard_interval_seconds']
         try:
             monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
-                          stats, io, reader, errors, watch, next_check, on_activity)
+                          stats, io, reader, errors, watch, next_check, on_activity, held=hold is not None)
             rc = CHILD.returncode
             output.seek(0)
             data = output.read()
+            if rc and restarted and rc in RESTART_EXITS.get(operation, ()):
+                # The killed attempt finished server-side before it was stopped.
+                print(f'Restarted rclone {operation} found its work already done (exit {rc})', flush=True)
+                rc = 0
             if rc:
                 size = os.fstat(errors.fileno()).st_size
                 tail = os.pread(errors.fileno(), 65536, max(0, size - 65536)).decode(errors='replace')
@@ -450,8 +548,9 @@ def verification_plan(payload, generation):
     return expected, hashlib.sha256(raw).hexdigest()
 
 
-def remote_inventory(cfg, destination):
-    return parse_inventory(run([RCLONE, 'lsjson', destination, '--recursive', '--files-only'], cfg, network=True))
+def remote_inventory(cfg, destination, progress=None):
+    return parse_inventory(run([RCLONE, 'lsjson', destination, '--recursive', '--files-only'], cfg, network=True,
+                               progress=progress))
 
 
 def record_progress(state, phase, **values):
@@ -655,7 +754,7 @@ def require_cloud_ready(cfg):
     if (STATE_DIR / 'authentication-error.json').is_file():
         raise Deferred('iCloud authentication needs attention; inspect icloud_backup.sh --status before retrying')
     check_work_allowed(cfg)
-    guard(cfg)
+    guard(cfg, worker_hold(cfg))
 
 
 @contextmanager
@@ -915,6 +1014,19 @@ def verify_login(cfg):
     subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'vanpi-icloud-backup.service'], check=True)
 
 
+def preflight(cfg):
+    """Diagnostic: the current verdict at once, with no hold and no parked or priority check."""
+    result = {'credentials_ready': credentials_ready(cfg), 'remote': cfg['remote'],
+              'keep_generations': cfg['keep_generations'],
+              'no_progress_timeout_seconds': cfg['no_progress_timeout_seconds']}
+    try:
+        result['bind_address'] = guard(cfg)[0]
+        result['uplink_allowed'] = True
+    except Deferred as exc:
+        result.update(uplink_allowed=False, reason=str(exc))
+    return result
+
+
 def _main(mode):
     os.umask(0o077)
     signal.signal(signal.SIGTERM, abort)
@@ -936,15 +1048,7 @@ def _main(mode):
         return 0
     try:
         if mode == '--preflight':
-            result = {'credentials_ready': credentials_ready(cfg), 'remote': cfg['remote'],
-                      'keep_generations': cfg['keep_generations'],
-                      'no_progress_timeout_seconds': cfg['no_progress_timeout_seconds']}
-            try:
-                result['bind_address'] = guard(cfg)[0]
-                result['uplink_allowed'] = True
-            except Deferred as exc:
-                result.update(uplink_allowed=False, reason=str(exc))
-            print(json.dumps(result, sort_keys=True))
+            print(json.dumps(preflight(cfg), sort_keys=True))
             return 0
         if mode == '--login':
             login(cfg)
@@ -961,6 +1065,8 @@ def _main(mode):
         else:
             state.pop('attempt_id', None)
         state.update(last_attempt_at=time.time(), last_error=None, phase='checking', worker_pid=os.getpid())
+        state.pop('uplink_hold', None)
+        set_hold_reporter(state_hold_reporter(state))
         atomic_json(STATE_DIR / 'state.json', state)
         result = weekly(cfg, state)
         state.update(phase=result, last_attempt_at=time.time(), last_error=None)
