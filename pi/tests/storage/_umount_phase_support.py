@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -59,6 +60,7 @@ class Scenario:
     hd_idle: Mapping[str, Result] = field(default_factory=dict)
     all_mounts: Result = Result()
     report_mounts: Result = Result()
+    blkid: Result = Result(2)
 
 
 def _quote(value: object) -> str:
@@ -110,6 +112,8 @@ def _scenario_config(scenario: Scenario) -> str:
         f"ALL_MOUNTS_OUTPUT={_quote(scenario.all_mounts.output)}",
         f"REPORT_MOUNTS_STATUS={scenario.report_mounts.status}",
         f"REPORT_MOUNTS_OUTPUT={_quote(scenario.report_mounts.output)}",
+        f"BLKID_STATUS={scenario.blkid.status}",
+        f"BLKID_OUTPUT={_quote(scenario.blkid.output)}",
     ]
 
     field_groups = (
@@ -208,6 +212,17 @@ export UMOUNT_DISKS_LIBRARY_ONLY=1
 source "$HARNESS_DIR/umount_disks.sh"
 source "$HARNESS_DIR/scenario.sh"
 samba_share_control=fake_samba_share_control
+
+unexpected_external() {
+  printf 'unexpected external command: %s\n' "$*" >> "$HARNESS_DIR/unexpected"
+  printf 'unexpected external command: %s\n' "$*" >&2
+  exit 99
+}
+# Absolute command paths are denied by default, including commands inside
+# substitutions; no PATH lookup may escape to the host either.
+source "$HARNESS_DIR/external_guards.sh"
+PATH=
+command_not_found_handle() { unexpected_external "$@"; }
 
 trace() {
   printf '%s\n' "$*" >> "$TRACE_FILE"
@@ -400,6 +415,15 @@ ud_fake_hd_idle() {
 
 ud_write_spindown_state() { trace "write-state:$*"; }
 
+function /usr/bin/timeout() {
+  if [[ "$*" != '--kill-after=2 3 /usr/bin/sudo -n /sbin/blkid -s LABEL -o value -- /dev/sdx1' ]]; then
+    unexpected_external /usr/bin/timeout "$@"
+  fi
+  trace "blkid:/dev/sdx1:status=$BLKID_STATUS"
+  emit_output "$BLKID_OUTPUT"
+  return "$BLKID_STATUS"
+}
+
 ud_fake_all_mounts() {
   trace "all-mounts:status=$ALL_MOUNTS_STATUS"
   emit_output "$ALL_MOUNTS_OUTPUT"
@@ -466,6 +490,19 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
         )
         (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
         _write_backup_libraries(harness)
+        guarded_text = source_text + DISK_POLICY_STUB + "".join(
+            path.read_text(encoding="utf-8") for path in (harness / "backup").glob("*.sh")
+        )
+        command_paths = sorted(set(re.findall(
+            r"/(?:usr/)?s?bin/[A-Za-z0-9_.-]+", guarded_text
+        )))
+        (harness / "external_guards.sh").write_text(
+            "".join(
+                f'function {path}() {{ unexpected_external {path} "$@"; }}\n'
+                for path in command_paths
+            ),
+            encoding="utf-8",
+        )
         (harness / "scenario.sh").write_text(
             _scenario_config(scenario), encoding="utf-8"
         )
@@ -488,6 +525,8 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
             capture_output=True,
             check=False,
         )
+        if (harness / "unexpected").exists():
+            raise AssertionError((harness / "unexpected").read_text(encoding="utf-8"))
         trace = trace_file.read_text(encoding="utf-8") if trace_file.exists() else ""
         marker = "$TMP"
         return {

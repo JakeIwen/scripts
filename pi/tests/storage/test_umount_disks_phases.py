@@ -157,6 +157,22 @@ SCENARIOS: tuple[Scenario, ...] = (
         report_mounts=Result(0, "/dev/sdx1 /mnt/unknown"),
     ),
     Scenario(
+        "all_unknown_mount_label_success",
+        args=("--all",),
+        mount_labels=(),
+        manual_mount_labels=(),
+        all_mounts=Result(0, "/dev/sdx1 /mnt/unknown"),
+        blkid=Result(0, "unknown"),
+    ),
+    Scenario(
+        "all_unknown_mount_label_timeout",
+        args=("--all",),
+        mount_labels=(),
+        manual_mount_labels=(),
+        all_mounts=Result(0, "/dev/sdx1 /mnt/unknown"),
+        blkid=Result(124),
+    ),
+    Scenario(
         "all_final_discovery_failure",
         args=("--all",),
         mount_labels=("movingparts",),
@@ -178,6 +194,13 @@ def _make_case_test(scenario: Scenario):
         self.assertEqual(actual["returncode"], 0 if scenario.name in successful else 1)
         trace = actual["trace"]
         events = trace.splitlines()
+        if scenario.name.startswith("all_unknown_mount"):
+            self.assertIn(f"blkid:/dev/sdx1:status={scenario.blkid.status}", events)
+            if scenario.blkid.status == 0:
+                self.assertIn("unmount it first: s umount_disks unknown", actual["stderr"])
+            else:
+                self.assertIn("/dev/sdx1 is still mounted at /mnt/unknown; unmount it first", actual["stderr"])
+                self.assertNotIn("s umount_disks", actual["stderr"])
         if scenario.name == "spindown_success":
             self.assertIn("hd-idle:/dev/sdz:status=0:output=none", events)
             self.assertLess(events.index("abort-backup:normal"),

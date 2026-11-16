@@ -342,13 +342,13 @@ disk_policy_is_manual_mount_label() {
   return 1
 }
 
-# Labels become path components, never options or traversal. Use a byte bound
-# and printable ASCII so diagnostics and shell commands cannot hide controls.
+# Keep labels literal in udev paths and findmnt output: neither escaping
+# scheme is decoded here. Labels also become path components, never options.
 disk_policy_validate_label() {
   local LC_ALL=C label=$1
   if [[ -z "$label" || ${#label} -gt 64 || "$label" == -* ||
-        "$label" == . || "$label" == */* || "$label" == *..* || "$label" == *[!\ -~]* ]]; then
-    printf 'ERROR: unsafe disk label: %q\n' "$label" >&2
+        "$label" == .* || "$label" == *..* || "$label" == *[!A-Za-z0-9._-]* ]]; then
+    printf 'ERROR: unsafe disk label: %q; use 1-64 characters from A-Z, a-z, 0-9, dot (.), underscore (_) or hyphen (-), with no leading dot/hyphen or consecutive dots; labels with other characters can be mounted by hand\n' "$label" >&2
     return 1
   fi
 }

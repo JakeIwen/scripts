@@ -860,6 +860,13 @@ ud_unmount_adhoc() {
   fi
   (( dry_run )) && { echo "dry run: would unmount $label at $target"; return 0; }
   ud_sync_mount "$target" || return 1
+  # Sync can wait on the device; do not unmount a replacement at this path.
+  source=$(ud_findmnt_exact_source "$target" 2>&1)
+  rc=$?
+  if (( rc != 0 )) || [[ "$source" != "$device" ]]; then
+    ud_record_failure "$label mount changed during sync at $target; refusing unmount: $source"
+    return 1
+  fi
   output=$(ud_normal_unmount "$target" 2>&1)
   rc=$?
   if (( rc != 0 )); then
@@ -870,6 +877,12 @@ ud_unmount_adhoc() {
   rc=$?
   if (( rc != 1 )) || [[ -n "$output" ]]; then
     ud_record_failure "cannot verify $label is unmounted: $output"
+    return 1
+  fi
+  output=$(ud_findmnt_exact_source "$target" 2>&1)
+  rc=$?
+  if (( rc != 1 )) || [[ -n "$output" ]]; then
+    ud_record_failure "cannot verify $target is unmounted: $output"
     return 1
   fi
   # rmdir is the final emptiness check; never recurse or follow a symlink.
@@ -884,7 +897,8 @@ ud_report_remaining_mounts() {
     label=${target#/mnt/}
     if [[ -z "$extra" && "$target" == /mnt/* ]] &&
         disk_policy_validate_label "$label" 2>/dev/null &&
-        actual=$(/usr/bin/sudo /sbin/blkid -s LABEL -o value -- "$device") &&
+        actual=$(/usr/bin/timeout --kill-after=2 3 /usr/bin/sudo -n \
+          /sbin/blkid -s LABEL -o value -- "$device" 2>/dev/null) &&
         [[ "$actual" == "$label" ]]; then
       printf -v actual 's umount_disks %q' "$label"
       ud_record_failure "$label ($device) is still mounted at $target; unmount it first: $actual"
