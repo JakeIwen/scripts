@@ -142,3 +142,102 @@ class StreamDigest:
         if self.thread.is_alive() or self.error:
             raise RuntimeError('could not finish hashing the downloaded file')
         return {'bytes': self.bytes_read, 'sha256': self.sha.hexdigest()}
+
+
+RETENTION_PROGRESS_WRITE_SECONDS = 30
+RETENTION_LOG_EVERY = 50
+
+
+class RetentionStep(str, Enum):
+    RETIRING = 'retiring'
+    LISTING = 'listing'
+    DELETING = 'deleting'
+    LOCAL = 'local'
+    COMPLETE = 'complete'
+
+
+class RetentionProgress:
+    """Advisory orphan-cleanup counts in worker state (`retention_progress`).
+
+    An episode is one generation's cleanup under one keep_generations value,
+    stored when it starts; counts accumulate across interrupted runs of the same
+    episode. Never used to authorize a deletion or to decide completion:
+    retention_done_for stays the only completion record.
+    """
+
+    def __init__(self, state, generation, keep_generations, save, log=None, clock=None, monotonic=None):
+        self.save, self.log = save, log or print
+        self.clock, self.monotonic = clock or time.time, monotonic or time.monotonic
+        self.last_write = None
+        self.listing_started = None
+        record = state.get('retention_progress')
+        if not (isinstance(record, dict) and record.get('generation') == generation
+                and record.get('keep_generations') == keep_generations):
+            record = self.new_episode(generation, keep_generations)
+        self.record = state['retention_progress'] = record
+        self.update(step=RetentionStep.RETIRING.value)
+
+    def new_episode(self, generation, keep_generations):
+        return {'generation': generation, 'keep_generations': keep_generations,
+                'episode_started_at': self.clock(), 'listings': 0, 'planned_objects': None,
+                'planned_bytes': None, 'remaining_objects': None, 'remaining_bytes': None,
+                'deleted_objects': 0, 'deleted_bytes': 0, 'completed_at': None}
+
+    def update(self, force=True, **values):
+        self.record.update(values)
+        now = self.monotonic()
+        if force or self.last_write is None or now - self.last_write >= RETENTION_PROGRESS_WRITE_SECONDS:
+            self.record['updated_at'] = self.clock()
+            self.last_write = now
+            self.save()
+
+    def listing(self):
+        self.listing_started = self.monotonic()
+        self.record['listings'] = self.record.get('listings', 0) + 1
+        self.log('Retention: listing cloud objects', flush=True)
+        self.update(step=RetentionStep.LISTING.value, listing_started_at=self.clock(),
+                    listing_finished_at=None, listing_seconds=None, listed_objects=None, completed_at=None)
+
+    def tick(self, counters=None):
+        """Throttled heartbeat from a running command's progress callback."""
+        listed = (counters or {}).get('listed')
+        if self.record.get('step') == RetentionStep.LISTING.value and type(listed) is int:
+            self.record['listed_objects'] = listed
+        self.update(force=False)
+
+    def listed(self, total, objects, size):
+        record, previous = self.record, self.record.get('remaining_objects')
+        if record.get('planned_objects') is None or (type(previous) is int and objects > previous):
+            if type(previous) is int and objects > previous:
+                # More left than last time: a different cleanup set, so restart the count.
+                self.log(f'Retention: {objects:,} unreferenced objects now, more than the '
+                         f'{previous:,} left before; counting a new cleanup', flush=True)
+                record.update(self.new_episode(record['generation'], record['keep_generations']), listings=1)
+            record.update(planned_objects=objects, planned_bytes=size)
+        seconds = round(self.monotonic() - self.listing_started, 1) if self.listing_started is not None else None
+        self.log(f'Retention: listed {total:,} objects in {seconds}s; {objects:,} unreferenced '
+                 f'({size / 1024**3:.1f} GiB) to delete', flush=True)
+        self.update(step=RetentionStep.DELETING.value, listing_finished_at=self.clock(), listing_seconds=seconds,
+                    remaining_objects=objects, remaining_bytes=size,
+                    deleted_objects=record['planned_objects'] - objects,
+                    deleted_bytes=max(0, record['planned_bytes'] - size))
+
+    def deleted(self, size):
+        record = self.record
+        values = {'remaining_objects': record['remaining_objects'] - 1,
+                  'remaining_bytes': max(0, record['remaining_bytes'] - size),
+                  'deleted_objects': record['deleted_objects'] + 1,
+                  'deleted_bytes': record['deleted_bytes'] + size}
+        if values['deleted_objects'] % RETENTION_LOG_EVERY == 0:
+            self.log(f"Retention: deleted {values['deleted_objects']:,} / {record['planned_objects']:,} "
+                     f"({values['remaining_bytes'] / 1024**3:.1f} GiB left)", flush=True)
+        self.update(force=False, **values)
+
+    def local(self):
+        self.update(step=RetentionStep.LOCAL.value)
+
+    def finished(self):
+        record = self.record
+        self.log(f"Retention: deleted {record.get('deleted_objects', 0):,} unreferenced objects "
+                 f"({record.get('deleted_bytes', 0) / 1024**3:.1f} GiB); cleanup complete", flush=True)
+        self.update(step=RetentionStep.COMPLETE.value, completed_at=self.clock())

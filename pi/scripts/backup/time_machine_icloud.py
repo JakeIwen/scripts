@@ -26,6 +26,7 @@ import cloud_backup_requests
 import backup_settings
 import icloud_status as history
 from icloud_uplink_hold import apply_grace
+from icloud_progress import RetentionProgress
 import time_machine_store as store
 import time_machine_staging as staging
 import backup_priority as priority
@@ -418,9 +419,12 @@ def verify_objects(cfg, expected, state):
         raise cloud.Deferred('cloud objects changed during verification; checkpoints invalidated')
 
 
-def retention(cfg, current):
+def retention(cfg, current, state=None):
     """Validate all manifests before retiring copies; never prune to make space."""
     remote = cfg['remote']
+    # Advisory counts only; with no worker state (direct callers) they go nowhere.
+    progress = RetentionProgress({} if state is None else state, current, cfg['keep_generations'],
+                                 (lambda: None) if state is None else (lambda: cloud.record_progress(state, 'retention')))
     rows = json.loads(network(cfg, 'lsjson', remote + '/generations', '--dirs-only'))
     journal_path = ROOT / 'retiring.json'
     retiring = store.read_json(journal_path, [])
@@ -470,17 +474,28 @@ def retention(cfg, current):
             network(cfg, 'rmdir', base)
         manifests.pop(name, None)
     store.atomic_json(journal_path, [])
-    delete_unreferenced(cfg, remote, {key for manifest in manifests.values() for key in manifest})
+    delete_unreferenced(cfg, remote, {key for manifest in manifests.values() for key in manifest}, progress)
+    progress.finished()
 
 
-def delete_unreferenced(cfg, remote, referenced):
+def object_size(row):
+    return row['Size'] if type(row.get('Size')) is int and row['Size'] >= 0 else 0
+
+
+def delete_unreferenced(cfg, remote, referenced, progress):
     """Garbage-collect cloud and local objects no kept manifest references."""
-    objects = cloud.remote_inventory(cfg, remote + '/objects')
+    progress.listing()
+    objects = cloud.remote_inventory(cfg, remote + '/objects', progress=progress.tick)
     for digest in objects:
         if not store.DIGEST.fullmatch(digest):
             raise RuntimeError('unknown object name; garbage collection refused')
-    for digest in objects.keys() - referenced:
-        network(cfg, 'deletefile', remote + '/objects/' + digest)
+    unreferenced = sorted(objects.keys() - referenced)
+    progress.listed(len(objects), len(unreferenced), sum(object_size(objects[d]) for d in unreferenced))
+    for digest in unreferenced:
+        network(cfg, 'deletefile', remote + '/objects/' + digest, progress=progress.tick)
+        cloud.note_advancement()
+        progress.deleted(object_size(objects[digest]))
+    progress.local()
     # Source capture cache can be invalidated safely if an old local object is
     # retired. An interrupted capture/upload is never present during retention.
     cloud.exact_mount(MOUNT, 'mbp2tbkup')
@@ -505,7 +520,7 @@ def require_network_ready(cfg):
 
 def run_retention(cfg, state, name):
     cloud.record_progress(state, 'retention')
-    retention(cfg, name)
+    retention(cfg, name, state)
     # Completion, not intent: success is recorded before retention runs, so only
     # this key tells a later run that the object cleanup was interrupted.
     state['retention_done_for'] = name

@@ -307,6 +307,10 @@ def reason(state):
         return 'No-progress watchdog stopped the attempt; it will retry.'
     if state.get('phase') == 'deferred':
         return 'Paused by a safety check; saved work will be reused.'
+    if state.get('phase') == 'retention':
+        cleanup = retention_message(state.get('retention_progress'), state.get('last_generation'))
+        if cleanup:
+            return cleanup
     if state.get('phase') == 'error':
         return 'Attempt failed; see the private service log for details.'
     return {'checking': 'Checking backup prerequisites.',
@@ -319,6 +323,22 @@ def reason(state):
             'not due': 'Waiting for the next weekly recovery copy.',
             'interrupted': 'Worker is no longer running; saved work can be resumed.'
             }.get(state.get('phase'), 'Local iCloud status is unavailable.')
+
+
+def retention_message(record, generation):
+    """Advisory orphan-cleanup counts from the Time Machine worker, or None."""
+    if not isinstance(record, dict) or generation is None or record.get('generation') != generation:
+        return None
+    step = record.get('step')
+    if step == 'listing':
+        listed = number(record.get('listed_objects'))
+        return ('Listing cloud files before cleanup' +
+                (f': {int(listed):,} so far.' if listed is not None else '.'))
+    planned, deleted = number(record.get('planned_objects')), number(record.get('deleted_objects'))
+    left = number(record.get('remaining_bytes'))
+    if step == 'deleting' and None not in (planned, deleted, left):
+        return f'Deleting unused cloud files: {int(deleted):,} / {int(planned):,} ({left / 1024**3:.1f} GiB left).'
+    return None
 
 
 def progress(state):
