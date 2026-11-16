@@ -18,6 +18,7 @@ ISW_SLEEP=${ISW_SLEEP:-/usr/bin/sleep}
 ISW_QBIT_PROCESS=${ISW_QBIT_PROCESS:-qbittorrent-nox}
 ISW_QBIT_BINARY=${ISW_QBIT_BINARY:-/usr/bin/qbittorrent-nox}
 ISW_MOUNT_DISKS=${ISW_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
+ISW_DISK_POLICY=${ISW_DISK_POLICY:-/home/pi/scripts/disk_policy.sh}
 ISW_ABORT_BACKUP=${ISW_ABORT_BACKUP:-/home/pi/scripts/backup/abort_backup.sh}
 ISW_SAMBA_SHARE_CONTROL=${ISW_SAMBA_SHARE_CONTROL:-/home/pi/scripts/samba_share_control.sh}
 POLICY_DISKS_ENABLED=""
@@ -264,8 +265,15 @@ start_torrent_client() {
 
 isw_close_stale_mount_consumers() { # <validated-label ...>
   local label needs_torrent_stop=0
+  # Normally already loaded through mount_disks.sh; load it here otherwise and
+  # fail closed rather than skip the torrent stop.
+  declare -F disk_policy_needs_qbittorrent_stopped >/dev/null ||
+    . "$ISW_DISK_POLICY" || {
+      echo "ERROR: cannot load $ISW_DISK_POLICY; refusing stale-mount recovery" >&2
+      return 1
+    }
   for label in "$@"; do
-    [[ "$label" == movingparts ]] && needs_torrent_stop=1
+    disk_policy_needs_qbittorrent_stopped "$label" && needs_torrent_stop=1
   done
   if (( needs_torrent_stop )) && ! kill_torrent_client; then
     echo "ERROR: qBittorrent did not stop; refusing stale-mount recovery" >&2

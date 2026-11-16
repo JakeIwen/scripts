@@ -647,7 +647,7 @@ ud_preflight() {
         fi
       done <<< "$UD_MOUNTS"
       mounted_labels+=("$label")
-      [[ "$label" == "movingparts" ]] && needs_torrent_stop=1
+      disk_policy_needs_qbittorrent_stopped "$label" && needs_torrent_stop=1
     fi
   done
 

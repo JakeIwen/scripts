@@ -46,6 +46,20 @@ HDD_LABELS=(
   FORT-MPLS-5TB
 )
 
+# qBittorrent keeps its downloads on movingparts and holds the mount busy, so
+# unmounting or recovering that label must stop the client first.
+QBITTORRENT_DISK_LABELS=(
+  movingparts
+)
+
+disk_policy_needs_qbittorrent_stopped() { # <label>
+  local candidate
+  for candidate in "${QBITTORRENT_DISK_LABELS[@]}"; do
+    [[ "$candidate" == "$1" ]] && return 0
+  done
+  return 1
+}
+
 # Static Samba share names for disk-backed exports.  Keep this mapping aligned
 # with configs/smb.conf.  Labels without a Samba export deliberately return 1.
 disk_policy_samba_share_name() {

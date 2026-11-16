@@ -402,6 +402,19 @@ printf 'second=%s,%s,%s\\n' "$second_rc" "$DISK_POLICY_PARENT_DISK" "$DISK_POLIC
                 } else (2 if case.adapter == "umount" else 1)
                 self.assertEqual(result["status"], expected)
 
+    def test_qbittorrent_stop_rule_names_only_movingparts(self) -> None:
+        script = """source "$POLICY"
+for label in movingparts mbp2tbkup bigboi EXFAT512 hdd1tb FORT-MPLS-5TB '' unknown; do
+  if disk_policy_needs_qbittorrent_stopped "$label"; then echo "$label=stop"; else echo "$label=keep"; fi
+done
+"""
+        result = run_bash(script, {"POLICY": str(POLICY)})
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["movingparts=stop", "mbp2tbkup=keep", "bigboi=keep", "EXFAT512=keep",
+             "hdd1tb=keep", "FORT-MPLS-5TB=keep", "=keep", "unknown=keep"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
