@@ -1675,6 +1675,16 @@ The active design is represented by:
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.
   `pi/scripts/backup/umount_disks_fence.sh` (sourced by `umount_disks.sh`, shipped
   with the backup payload) stops and claims backup jobs' disks before unmount or spindown.
+- Hand mounts by agents (Jacob, 2026-11-15): an agent may mount and unmount a
+  disk by label (`s mount_disks <label>`, `s umount_disks <label>`) without
+  asking when all of these hold, checked just before each step: the ignition
+  flag `/home/pi/hooks/ignition_is_on` is absent; no backup job is running
+  (`cd /home/pi/scripts/backup && python3 -B -c 'import backup_locks as b;
+  print(b.active_jobs())'` prints `{}`), because the unmount TERMs any job
+  holding that disk; and the disk was unmounted when the agent found it, so it
+  leaves it unmounted again. Mounting alone is harmless. Disks in `MOUNT_LABELS`
+  belong to the policy reconcile: leave them as found. Never pass `--spindown`
+  or force an unmount that refuses a busy consumer.
 
 An older mount-directory cleanup implementation once treated a failed filesystem
 probe as proof that a mount was absent, then recursively deleted the live mount.
