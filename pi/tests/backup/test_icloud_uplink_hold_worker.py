@@ -212,8 +212,8 @@ class WorkerHoldTests(unittest.TestCase):
     def test_manual_paths_never_hold_or_check_parking(self):
         self.flag.touch(); self.policy = '0 0 0'
         self.verdicts = [OK]
-        with mock.patch.object(backup, 'credentials_ready', return_value=True):
-            result = backup.preflight(self.cfg)
+        self.enterContext(mock.patch.object(backup, 'credentials_ready', return_value=True))
+        result = backup.preflight(self.cfg)
         self.assertTrue(result['uplink_allowed'])
         self.verdicts = [LOST]
         with mock.patch.object(backup.time, 'sleep'):
@@ -225,7 +225,6 @@ class WorkerHoldTests(unittest.TestCase):
             attempts.append((parked, rest[-2]))
             return next(self.root.glob('canary-*.txt')).read_text() if args[1] == 'cat' else ''
         with mock.patch.object(backup, 'STATE_DIR', self.root), \
-                mock.patch.object(backup, 'credentials_ready', return_value=True), \
                 mock.patch.object(backup, 'run_attempt', side_effect=attempt), \
                 mock.patch.object(backup.subprocess, 'run'):
             backup.verify_login(self.cfg)
