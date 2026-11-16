@@ -77,6 +77,12 @@ SCENARIOS: tuple[Scenario, ...] = (
         findmnt_sources={"/dev/sdz1": (Result(1),)},
     ),
     Scenario(
+        "old_policy_without_qbittorrent_helper",
+        args=("movingparts",),
+        resolutions={"movingparts": (MOUNTED,)},
+        old_policy=True,
+    ),
+    Scenario(
         "unmount_failure_continues_independent_disk",
         args=("--all",),
         mount_labels=("movingparts", "bigboi"),
@@ -210,6 +216,9 @@ def _make_case_test(scenario: Scenario):
             self.assertNotIn("write-state:", trace)
         else:
             self.assertNotIn("hd-idle:", trace)
+        if scenario.old_policy:
+            self.assertIn("lacks disk_policy_needs_qbittorrent_stopped", actual["stderr"])
+            self.assertNotIn("qbit", trace)
         if scenario.name == "qbit_failure_continues":
             required = ("samba:drain:movingparts", "abort-backup:normal",
                         "samba:close:movingparts", "sync:/mnt/movingparts",

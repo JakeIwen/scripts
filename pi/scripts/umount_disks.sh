@@ -595,6 +595,11 @@ ud_preflight() {
     echo "ERROR: ud_preflight may only be called by umount_disks_main" >&2
     return 1
   fi
+  # An older deployed disk_policy.sh would make the torrent-stop check fail open.
+  if ! declare -F disk_policy_needs_qbittorrent_stopped >/dev/null; then
+    echo "ERROR: disk_policy.sh lacks disk_policy_needs_qbittorrent_stopped; refusing disk changes" >&2
+    return 1
+  fi
 
   # Prove that both root-run backup cleanup and the pi-run ignition service can
   # share completion state before changing any disk. This prevents a successful

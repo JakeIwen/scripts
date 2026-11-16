@@ -57,6 +57,7 @@ class Scenario:
     findmnt_sources: Mapping[str, tuple[Result, ...]] = field(default_factory=dict)
     holder_summaries: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     parent_checks: Mapping[str, ParentCheck] = field(default_factory=dict)
+    old_policy: bool = False  # deployed disk_policy.sh without the qBittorrent helper
     hd_idle: Mapping[str, Result] = field(default_factory=dict)
     all_mounts: Result = Result()
     report_mounts: Result = Result()
@@ -488,7 +489,14 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
         (harness / "umount_disks.sh").write_text(
             _transform_source(source_text), encoding="utf-8"
         )
-        (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
+        policy_text = DISK_POLICY_STUB
+        if scenario.old_policy:
+            policy_text = re.sub(
+                r"disk_policy_needs_qbittorrent_stopped\(\) \{.*?\n\}\n", "",
+                policy_text, flags=re.S,
+            )
+            assert "disk_policy_needs_qbittorrent_stopped()" not in policy_text
+        (harness / "disk_policy.sh").write_text(policy_text, encoding="utf-8")
         _write_backup_libraries(harness)
         guarded_text = source_text + DISK_POLICY_STUB + "".join(
             path.read_text(encoding="utf-8") for path in (harness / "backup").glob("*.sh")

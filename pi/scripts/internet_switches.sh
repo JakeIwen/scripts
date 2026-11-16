@@ -265,13 +265,15 @@ start_torrent_client() {
 
 isw_close_stale_mount_consumers() { # <validated-label ...>
   local label needs_torrent_stop=0
-  # Normally already loaded through mount_disks.sh; load it here otherwise and
-  # fail closed rather than skip the torrent stop.
+  # Normally already loaded through mount_disks.sh. Verify the helper after
+  # loading: an older disk_policy.sh sources fine but would make the check fail
+  # open (status 127 read as "no torrent stop needed").
   declare -F disk_policy_needs_qbittorrent_stopped >/dev/null ||
-    . "$ISW_DISK_POLICY" || {
-      echo "ERROR: cannot load $ISW_DISK_POLICY; refusing stale-mount recovery" >&2
-      return 1
-    }
+    . "$ISW_DISK_POLICY" 2>/dev/null
+  if ! declare -F disk_policy_needs_qbittorrent_stopped >/dev/null; then
+    echo "ERROR: $ISW_DISK_POLICY lacks disk_policy_needs_qbittorrent_stopped; refusing stale-mount recovery" >&2
+    return 1
+  fi
   for label in "$@"; do
     disk_policy_needs_qbittorrent_stopped "$label" && needs_torrent_stop=1
   done

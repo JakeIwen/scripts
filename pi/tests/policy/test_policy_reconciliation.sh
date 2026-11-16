@@ -192,6 +192,21 @@ fi
   fail "stale recovery unmounted after Samba close failed"
 unset TEST_SAMBA_CONTROL_STATUS
 
+# A deployed disk_policy.sh without the qBittorrent helper must refuse recovery
+# before Samba is closed, not read "command not found" as "no torrent stop".
+sed '/^disk_policy_needs_qbittorrent_stopped()/,/^}/d' \
+  "$repo_root/pi/scripts/disk_policy.sh" > "$test_root/old_disk_policy.sh"
+! grep -q disk_policy_needs_qbittorrent_stopped "$test_root/old_disk_policy.sh" ||
+  fail "old-policy fixture still defines the helper"
+: > "$TEST_STALE_RECOVERY_CALLS"
+(
+  unset -f disk_policy_needs_qbittorrent_stopped
+  ISW_DISK_POLICY="$test_root/old_disk_policy.sh"
+  isw_close_stale_mount_consumers movingparts
+) >/dev/null 2>&1 && fail "stale recovery proceeded with an old disk_policy.sh"
+assert_eq "" "$(cat "$TEST_STALE_RECOVERY_CALLS")" \
+  "old disk_policy.sh must stop recovery before the torrent stop or Samba close"
+
 ACTION=""
 kill_torrent_client() { ACTION="${ACTION:+$ACTION }kill-torrent"; }
 stop_service() { ACTION="${ACTION:+$ACTION }stop:$1"; }
