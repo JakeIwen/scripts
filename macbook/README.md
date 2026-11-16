@@ -240,6 +240,12 @@ window to its display's size; tabs opened later in that window get the chosen
 size too, until the window moves to the other display. Those keys are iTerm2
 global key bindings (Settings > Keys > Key Bindings) that invoke a function the
 follower registers, so while the follower is down they do nothing.
+In iTerm 3.7.7 a font change on a Claude Code workgroup tab drops the title
+Claude sent and shows the session's explicit name instead ("Chat"), so the
+follower puts a session's name back when resizing changed it. That also makes
+the restored title the session's explicit name: a size changed outside the
+follower (the View menu, a profile edit) can bring back that older title, or
+"Chat" on a tab the follower never restored, until Claude sends a new one.
 It runs as the LaunchAgent `com.jacobr.iterm-screen-fonts` from its own venv
 (`~/.local/share/iterm-screen-fonts/venv`), talks to iTerm2's Python API, and
 idles while iTerm2 is closed.

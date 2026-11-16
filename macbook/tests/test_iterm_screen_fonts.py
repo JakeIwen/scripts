@@ -1,4 +1,5 @@
-"""Display matching, settle decisions, and shared settings for the iTerm font follower."""
+"""Display matching, settle decisions, kept session names, and shared settings for the iTerm font follower."""
+import asyncio
 import importlib.util
 import json
 import os
@@ -173,6 +174,73 @@ class FontAndSettingsTests(unittest.TestCase):
             plist = plistlib.load(source)
         self.assertEqual(plist["EnvironmentVariables"]["PYTHONPATH"],
                          str(Path(plist["WorkingDirectory"]) / "shared/python"))
+
+
+class _Session:
+    """A session as iTerm behaves: a profile change drops back to the explicit name."""
+
+    def __init__(self, shown, explicit, sent=None):
+        self.shown, self.explicit = shown, explicit
+        self.sent = shown if sent is None else sent  # the program's last title
+        self.during_write = []  # "title:<text>" and "reset" events, in order
+        self.profile_writes = []
+        self.name_writes = []
+
+    async def async_get_variable(self, name):
+        return {fonts.SESSION_NAME_FORMAT: self.shown, fonts.PROGRAM_TITLE: self.sent}[name]
+
+    async def async_set_profile_properties(self, change):
+        self.profile_writes.append(change)
+        for event in self.during_write or ["reset"]:
+            if event == "reset" and self.explicit is not None:
+                self.shown = self.explicit
+            elif event.startswith("title:"):
+                self.shown = self.sent = event[len("title:"):]
+
+    async def async_set_name(self, name):
+        self.name_writes.append(name)
+        self.shown = self.explicit = name
+
+
+class SessionNameTests(unittest.TestCase):
+    def write(self, session):
+        asyncio.run(fonts.write_keeping_name(session, "font change"))
+        self.assertEqual(session.profile_writes, ["font change"])
+
+    def test_a_title_the_font_change_dropped_is_put_back(self):
+        session = _Session(shown="Fuel first wake queue", explicit="Chat")
+        self.write(session)
+        self.assertEqual(session.shown, "Fuel first wake queue")
+
+    def test_a_name_the_font_change_left_alone_is_not_rewritten(self):
+        session = _Session(shown="fuel signal mapping", explicit=None)
+        self.write(session)
+        self.assertEqual(session.name_writes, [])
+        self.assertEqual(session.shown, "fuel signal mapping")
+
+    def test_a_session_with_no_name_is_not_given_one(self):
+        session = _Session(shown=None, explicit="Chat", sent="")
+        self.write(session)
+        self.assertEqual(session.name_writes, [])
+
+    def test_a_title_sent_during_the_font_change_is_not_replaced_by_the_old_one(self):
+        session = _Session(shown="Old title", explicit="Chat")
+        session.during_write = ["reset", "title:New title"]
+        self.write(session)
+        self.assertEqual(session.shown, "New title")
+        self.assertEqual(session.name_writes, [])
+
+    def test_a_title_sent_just_before_the_drop_is_the_one_put_back(self):
+        session = _Session(shown="Old title", explicit="Chat")
+        session.during_write = ["title:New title", "reset"]
+        self.write(session)
+        self.assertEqual(session.shown, "New title")
+
+    def test_a_hand_set_name_survives_a_stale_program_title(self):
+        session = _Session(shown="my notes", explicit="my notes", sent="zsh")
+        self.write(session)
+        self.assertEqual(session.name_writes, [])
+        self.assertEqual(session.shown, "my notes")
 
 
 if __name__ == "__main__":

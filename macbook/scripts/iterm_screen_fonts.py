@@ -51,6 +51,10 @@ WINDOW_FONT_KEYS = {
 # The name of the RPC follow() registers; iTerm invokes RPCs by function name.
 STEP_FUNCTION = "iterm_window_font_step"
 INVOKE_SCRIPT_FUNCTION = 60  # iterm2.BindingAction.INVOKE_SCRIPT_FUNCTION
+# The session variable holding the name a tab shows, as an escaped format.
+SESSION_NAME_FORMAT = "autoNameFormat"
+# The session variable holding the title the running program last sent.
+PROGRAM_TITLE = "terminalIconName"
 GLOBAL_KEY_MAP = "GlobalKeyMap"
 # iTerm uses this map until the global key bindings are first edited.
 DEFAULT_GLOBAL_KEY_MAP = Path("/Applications/iTerm.app/Contents/Resources/DefaultGlobalKeyMap.plist")
@@ -230,6 +234,26 @@ def _frame_tuple(frame) -> tuple[float, float, float, float]:
     return (frame.origin.x, frame.origin.y, frame.size.width, frame.size.height)
 
 
+async def write_keeping_name(session, change) -> None:
+    """Apply a profile change to one session without losing the name its tab shows.
+
+    In iTerm 3.7.7 a font change on a Claude Code workgroup session drops the
+    title the program sent and shows the session's explicit name, the pane's
+    ("Chat"). Claude sends its title only when it changes, so the tab would
+    stay "Chat". Sessions whose name the write leaves alone are not touched.
+    Names are read back and written verbatim: iTerm already escaped them.
+    """
+    name = await session.async_get_variable(SESSION_NAME_FORMAT)
+    sent = await session.async_get_variable(PROGRAM_TITLE)
+    await session.async_set_profile_properties(change)
+    # A title the program sent while the write was in flight is newer than
+    # the name read before it, so that title is the one to keep.
+    now_sent = await session.async_get_variable(PROGRAM_TITLE)
+    wanted = now_sent if now_sent and now_sent != sent else name
+    if wanted and await session.async_get_variable(SESSION_NAME_FORMAT) != wanted:
+        await session.async_set_name(wanted)
+
+
 async def _apply_size(window, session_ids: set[str], size: float) -> int:
     import iterm2
 
@@ -244,7 +268,7 @@ async def _apply_size(window, session_ids: set[str], size: float) -> int:
             change.set_normal_font(font_with_size(profile.normal_font, size))
             if profile.use_non_ascii_font and profile.non_ascii_font:
                 change.set_non_ascii_font(font_with_size(profile.non_ascii_font, size))
-            await session.async_set_profile_properties(change)
+            await write_keeping_name(session, change)
             changed += 1
     # Keep the window exactly where and how big it was, whatever iTerm's
     # "Adjust window when changing font size" setting says.
