@@ -153,7 +153,13 @@ Cloud workers submit their freshly collected legacy probe envelope to
 `vanpi-metered admit pi.icloud_backup` or `admit pi.time_machine_cloud`, receiving
 `{allowed, reason}`. The short-lived package reader avoids pinning a package
 release for a potentially multi-day flat cloud worker. The guarded workers still
-pause transfers during probes and restart on a changed routing signature.
+pause transfers during probes and restart on a changed routing signature. A
+refusal whose reasons are all in `icloud_uplink.UNKNOWN_UPLINK_REASONS` (no
+verdict could be reached) is held, never permitted: the worker kills any running
+client and re-probes for `uplink_unknown_grace_seconds` (90 s by default), like
+the Mac side's 90 s grace for late Pi evidence. Every other refusal defers at
+once. `pi/tests/backup/test_icloud_uplink.py` fails when a new refusal literal
+appears in the shared rules without a classification.
 
 ## Mac controller
 

@@ -1183,7 +1183,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   each completed hash before checkpointing, and measures a rolling rate including
   waits. `icloud_progress.TransferActivity` defines safe verification activities.
   `icloud_uplink.py` collects only fresh route/selected-association evidence;
-  never substitute cached dashboard health or skip selected antenna checks.
+  never substitute cached dashboard health or skip selected antenna checks. It
+  also owns `UNKNOWN_UPLINK_REASONS`, the refusals that mean "could not
+  classify". `icloud_uplink_hold.py` owns the bounded hold on those (grace
+  setting, deadline, restart policy for killed commands); `icloud_backup` wires
+  it into worker paths only. `icloud_progress.RetentionProgress` owns the Time
+  Machine worker's advisory `retention_progress` record.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification

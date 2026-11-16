@@ -147,11 +147,24 @@ Fresh network checks still stop each transfer every configured guard interval.
 The collector combines router routing/SSID inspection in one query and inspects
 the antenna association whenever that uplink is selected. It skips unrelated
 dashboard diagnostics and unused antenna probes, without caching route evidence
-or extending the permitted transfer interval. Failed or disallowed evidence is
-re-probed up to twice, five seconds apart, before deferring; the transfer stays
-paused throughout these bounded checks. A changed route still stops the worker
-immediately, and a route that remains unverifiable or disallowed stops it after
-the final probe.
+or extending the permitted transfer interval. A verified metered verdict
+(Starlink included), ignition, HDD policy, priority yield or SIGTERM stops the
+worker at once, and so does a changed route. An *unknown* verdict (the set in
+`icloud_uplink.UNKNOWN_UPLINK_REASONS`: identity unknown, helper failure, stale
+or incomplete evidence, unreachable router) never permits anything: a running
+client is killed at its first unknown verdict and no new client starts, but the
+worker holds and re-probes every five seconds for `uplink_unknown_grace_seconds`
+(default 90, 0-300; 0 means defer at once), re-checking parking and priority
+between probes and immediately before any client starts or resumes. If the
+uplink is verified again in time, the killed command restarts from scratch
+(`icloud_uplink_hold.RESTART_EXITS`; a restarted delete that finds its object
+already gone counts as done; `hashsum` batches are not restarted). An expired
+hold defers with `UplinkUnknown`, retried after five minutes at most three runs
+in a row without durable advancement (an object uploaded, verified or deleted).
+While holding, `uplink_hold` in the state file keeps the status non-stale and
+shows "Paused: checking the uplink". The parallel verifier starts no new
+command while the uploader holds. Login, verify-login and `--preflight` keep the
+plain three-probe check with no hold and no parking check.
 The read-only probes reuse SSH connections for up to 30 seconds idle through a
 validated, private `.vanpi-icloud-uplink` directory in the probe user's home.
 Every invocation executes fresh commands; no routing or association results are
@@ -177,7 +190,13 @@ verification (for example a dropped route) resumes on the next admitted run,
 even when no new copy is due and never while a capture is pending; until then
 the leftover objects count against the store budget. The resumed cleanup first
 reads the cloud store's owner marker and refuses, deleting nothing, when it is
-missing or foreign; it never claims a store.
+missing or foreign; it never claims a store. The state file's
+`retention_progress` records the cleanup step (retiring, listing, deleting,
+local, complete), the listing's start, end, duration and live count, and the
+planned, deleted and remaining objects and bytes, accumulated across
+interrupted runs of one episode (generation plus `keep_generations`). The status
+text shows "Deleting unused cloud files: N / M (X GiB left)". The counts are
+advisory: `retention_done_for` alone records completion.
 
 **Leftover-file audit.** Once a week, on an ordinary run where no copy is due
 (and cleanup is settled: nothing pending, `retention_done_for` current, no newer

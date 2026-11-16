@@ -210,8 +210,12 @@ and deploying it; the Codex update job reads the same judgment from the uplink e
 Each rclone operation binds to the verified Pi IPv4 address and ignores proxy
 environment overrides. The route is checked before every cloud operation and
 every five seconds during it, including retries, verification, and retention.
-The client is paused during the inspection, then terminated if evidence fails,
-indicates Starlink, or shows any route/association change. Restarting even for
+The client is paused during the inspection, then terminated if evidence
+indicates Starlink or another metered uplink, is unknown, or shows any
+route/association change. An unknown verdict holds the job for
+`uplink_unknown_grace_seconds` (default 90) with no client running, then
+restarts the command if the uplink is verified again; see the uplink section of
+`TIME_MACHINE_ICLOUD.md`, which both workers share. Restarting even for
 an allowed route change prevents an existing connection from remaining pinned
 to the old uplink through connection tracking. This is a polling guard: it cannot guarantee zero bytes
 in flight during an abrupt uplink switch. Detection includes the sampling gap
