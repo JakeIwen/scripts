@@ -12,12 +12,49 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import connectivity_status
 
 
+# One probe is the evidence helper (run by the worker) plus this admission call.
+HELPER_TIMEOUT_SECONDS = 35
+ADMIT_TIMEOUT_SECONDS = 5
+PROBE_TIMEOUT_SECONDS = HELPER_TIMEOUT_SECONDS + ADMIT_TIMEOUT_SECONDS
+
+# Refusals that mean the uplink could not be classified, never a verified
+# metered verdict: shared/metered rules.unknown() and evidence.normalize()
+# reasons, admission failures, and the worker's own helper failure. Cloud
+# workers hold and re-probe these for a bounded grace; every other refusal
+# (a metered or forced-metered verdict) defers at once. pi/tests/backup/
+# test_icloud_uplink.py checks every producer's literals against this set.
+UNKNOWN_UPLINK_REASONS = frozenset({
+    'selected uplink identity is unknown',
+    'selected uplink is not online',
+    'stale uplink evidence',
+    'incomplete default-policy evidence',
+    'unrecognized Pi route or VPN route',
+    'source-specific routing rules need review',
+    'IPv6 routing is unverified or unsupported',
+    'router is unreachable',
+    'unrecognized selected uplink',
+    'incomplete uplink evidence',
+    'incomplete uplink evidence or invalid metering policy',
+    'metering admission is unavailable',
+    'cannot verify current uplinks',
+})
+# rules.dendelion_verdict joins several evidence.normalize() reasons with this.
+REASON_SEPARATOR = '; '
+
+
+def uplink_unknown(reason):
+    """True when every part of an admission refusal says 'could not tell'."""
+    parts = reason.split(REASON_SEPARATOR) if isinstance(reason, str) else []
+    return bool(parts) and all(part in UNKNOWN_UPLINK_REASONS for part in parts)
+
+
 def decide(evidence, consumer_id='pi.icloud_backup', command=subprocess.run):
     # Keep long-lived flat cloud workers outside immutable package releases.
     # Only the short-lived admission CLI imports the shared metering policy.
     try:
         result = command(['/home/pi/scripts/vanpi-metered', 'admit', consumer_id],
-                         input=json.dumps(evidence), capture_output=True, text=True, timeout=5)
+                         input=json.dumps(evidence), capture_output=True, text=True,
+                         timeout=ADMIT_TIMEOUT_SECONDS)
         payload = json.loads(result.stdout)
         if (result.returncode or not isinstance(payload, dict)
                 or type(payload.get('allowed')) is not bool or not isinstance(payload.get('reason'), str)):

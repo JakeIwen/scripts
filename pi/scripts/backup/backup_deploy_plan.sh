@@ -71,6 +71,7 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/icloud_progress.py|/home/pi/scripts/backup/icloud_progress.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_inventory.py|/home/pi/scripts/backup/icloud_inventory.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_uplink.py|/home/pi/scripts/backup/icloud_uplink.py|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/icloud_uplink_hold.py|/home/pi/scripts/backup/icloud_uplink_hold.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_backup_control.py|/home/pi/scripts/backup/icloud_backup_control.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/mac_capture_control.py|/home/pi/scripts/backup/mac_capture_control.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_priority_control.py|/home/pi/scripts/backup/backup_priority_control.py|revision|pi:pi|750|new'
