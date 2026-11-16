@@ -16,6 +16,7 @@ from typing import TypedDict
 import backup_locks
 import backup_admission
 import icloud_backup as cloud
+import icloud_uplink_hold as uplink_hold
 from icloud_inventory import parse_inventory
 from icloud_progress import TransferActivity
 from time_machine_downloads import download_batch, VerificationMeter
@@ -144,7 +145,7 @@ def verification_worker(cfg, root, expected, rows, parent_pid, completed, update
                         result_reader, result_writer, admission, parent_hold=None):
     result_reader.close()
     # Forked from the worker: only the parent writes worker state.
-    cloud.set_hold_reporter(None)
+    uplink_hold.set_reporter(None)
     result: VerifierResult = {'kind': ResultKind.COMPLETE, 'message': '', 'errno': None, 'detail': ''}
     try:
         with suppress(PermissionError):
@@ -294,14 +295,14 @@ def upload_and_follow(cfg, root, expected, rows, files, state):
             count = values.get('verified_files')
             if type(count) is int:
                 if verified[0] is not None and count > verified[0]:
-                    cloud.note_advancement()
+                    uplink_hold.note_advancement()
                 verified[0] = count if verified[0] is None else max(verified[0], count)
             return values
         def report(counters):
             values = observe(pipeline.progress())
             cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, counters), **values)
         def completed(digest):
-            cloud.note_advancement()
+            uplink_hold.note_advancement()
             pipeline.completed_object(digest)
         cloud.run([cloud.RCLONE, 'copy', str(root / 'objects'), cfg['remote'] + '/objects',
                    '--files-from-raw', str(files), '--immutable', '--size-only', '--log-level', 'INFO'],

@@ -26,6 +26,7 @@ import uuid
 import backup_locks
 import backup_admission as admission
 from icloud_uplink import decide, uplink_unknown, HELPER_TIMEOUT_SECONDS, PROBE_TIMEOUT_SECONDS
+import icloud_uplink_hold as uplink_hold
 from icloud_uplink_hold import GRACE_KEY, RESTART_EXITS, UplinkHold, UplinkLost, apply_grace
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
@@ -47,12 +48,6 @@ ORPHAN_AUDIT_RETRY = 86400
 ORPHAN_ALERT_BYTES = 5 * 1024**3
 CHILD = None
 CHILD_INTERACTIVE = False
-# Worker-registered writer of the uplink-hold heartbeat (None in manual
-# commands and in the forked verifier, which never write worker state).
-HOLD_REPORTER = None
-# Set once this run durably advanced (an object uploaded, verified or
-# deleted); prerequisite reads never set it. Caps uplink quick retries.
-ADVANCED = False
 # capture()'s default timeout, which bounds one parked/priority work check.
 COMMAND_TIMEOUT_SECONDS = 20
 UPLOAD_SPEED = upload_speed_log.UploadSpeedSampler()
@@ -217,37 +212,10 @@ def guard(cfg, hold=None):
     return uplink_proof(evidence)
 
 
-def set_hold_reporter(reporter):
-    global HOLD_REPORTER
-    HOLD_REPORTER = reporter
-
-
-def state_hold_reporter(state):
-    """Write the hold heartbeat into worker state; not transfer progress."""
-    def report(value):
-        if value is None:
-            if state.pop('uplink_hold', None) is None:
-                return
-        else:
-            state['uplink_hold'] = value
-        atomic_json(STATE_DIR / 'state.json', state)
-    return report
-
-
-def note_advancement():
-    global ADVANCED
-    ADVANCED = True
-
-
 def worker_hold(cfg, on_hold=None, lost=None):
     """The worker-path hold: parked/priority checks between probes, heartbeat to state."""
-    def report(value):
-        if HOLD_REPORTER is not None:
-            HOLD_REPORTER(value)
-        if on_hold is not None:
-            on_hold(value)
     # A configuration that skipped apply_grace (an ad-hoc caller) gets no hold.
-    return UplinkHold(cfg.get(GRACE_KEY, 0), lambda: check_work_allowed(cfg), report,
+    return UplinkHold(cfg.get(GRACE_KEY, 0), lambda: check_work_allowed(cfg), uplink_hold.fan_out(on_hold),
                       PROBE_TIMEOUT_SECONDS + COMMAND_TIMEOUT_SECONDS, lost=lost)
 
 
@@ -280,18 +248,11 @@ def check_running_uplink(cfg, proof, held):
     """Re-verify the uplink for a stopped client; return only when it may resume."""
     if not held:
         if guard(cfg) != proof:
-            raise Deferred('uplink or association changed during transfer')
+            raise Deferred(uplink_hold.CHANGED_PATH)
         return
-    # Worker paths never resume a client after an unknown verdict: the caller
-    # kills it, holds with no client running, and restarts the command.
-    evidence, allowed, reason = probe_uplink(uplink_consumer(cfg))
-    if not allowed:
-        if uplink_unknown(reason):
-            raise UplinkLost(reason, time.monotonic(), time.time())
-        raise Deferred(reason)
-    if uplink_proof(evidence) != proof:
-        raise Deferred('uplink or association changed during transfer')
-    check_work_allowed(cfg)
+    consumer = uplink_consumer(cfg)
+    uplink_hold.check_running(lambda: probe_uplink(consumer), uplink_proof, proof,
+                              lambda: check_work_allowed(cfg), Deferred)
 
 
 def monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
@@ -1066,7 +1027,7 @@ def _main(mode):
             state.pop('attempt_id', None)
         state.update(last_attempt_at=time.time(), last_error=None, phase='checking', worker_pid=os.getpid())
         state.pop('uplink_hold', None)
-        set_hold_reporter(state_hold_reporter(state))
+        uplink_hold.start_run(uplink_hold.state_reporter(state, lambda: atomic_json(STATE_DIR / 'state.json', state)))
         atomic_json(STATE_DIR / 'state.json', state)
         result = weekly(cfg, state)
         state.update(phase=result, last_attempt_at=time.time(), last_error=None)

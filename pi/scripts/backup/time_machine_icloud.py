@@ -25,7 +25,7 @@ import icloud_backup as cloud
 import cloud_backup_requests
 import backup_settings
 import icloud_status as history
-from icloud_uplink_hold import apply_grace
+import icloud_uplink_hold as uplink_hold
 from icloud_progress import RetentionProgress
 import time_machine_store as store
 import time_machine_staging as staging
@@ -65,7 +65,7 @@ def config():
                           ('capture_max_seconds', 600, 43200)):
         if type(cfg.get(key)) is not int or not low <= cfg[key] <= high:
             raise ValueError('invalid Time Machine setting: ' + key)
-    return apply_grace(cfg)
+    return uplink_hold.apply_grace(cfg)
 
 
 def worker_alive(request, process_root=Path('/proc')):
@@ -360,7 +360,7 @@ def transfer(cfg, manifest, state):
                 progress=lambda counters: cloud.record_progress(state, 'uploading',
                     **cloud.upload_progress(expected, rows, counters)))
         if missing:
-            cloud.note_advancement()
+            uplink_hold.note_advancement()
     total = sum(x['bytes'] for x in expected.values())
     cloud.record_progress(state, 'verifying', upload_estimated_bytes=total,
                           parallel_verification=False, verification_bytes_per_second=None)
@@ -413,7 +413,7 @@ def verify_objects(cfg, expected, state):
         verifier.verify(digest, rows[digest], lambda key: network(cfg, 'cat', remote + '/' + key,
             stream_hash=True, progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0),
                                                        command_idle_seconds=c.get('idle_seconds', 0))))
-        cloud.note_advancement()
+        uplink_hold.note_advancement()
         report(current_file_bytes=0)
     if verifier.invalidate_changed(cloud.remote_inventory(cfg, remote)):
         raise cloud.Deferred('cloud objects changed during verification; checkpoints invalidated')
@@ -493,7 +493,7 @@ def delete_unreferenced(cfg, remote, referenced, progress):
     progress.listed(len(objects), len(unreferenced), sum(object_size(objects[d]) for d in unreferenced))
     for digest in unreferenced:
         network(cfg, 'deletefile', remote + '/objects/' + digest, progress=progress.tick)
-        cloud.note_advancement()
+        uplink_hold.note_advancement()
         progress.deleted(object_size(objects[digest]))
     progress.local()
     # Source capture cache can be invalidated safely if an old local object is
@@ -714,8 +714,7 @@ def _main(args):
     try:
         state.update(worker_pid=os.getpid(), phase='checking', last_attempt_at=time.time(), last_error=None, retry_at=None)
         state.pop('uplink_hold', None)
-        cloud.set_hold_reporter(cloud.state_hold_reporter(state))
-        cloud.ADVANCED = False
+        uplink_hold.start_run(uplink_hold.state_reporter(state, lambda: store.atomic_json(STATE / 'state.json', state)))
         cloud.record_progress(state, 'checking')
         state['phase'] = weekly(cfg, state)
         return 0
@@ -728,7 +727,7 @@ def _main(args):
     except cloud.UplinkUnknown as exc:
         # Its own capped retry; the first-copy retry would bypass the cap.
         state.update(phase='deferred', last_error=str(exc))
-        history.schedule_uplink_retry(state, cloud.ADVANCED)
+        history.schedule_uplink_retry(state, uplink_hold.ADVANCED)
         uplink_retry_counted = True
         print('Deferred: ' + str(exc), flush=True)
         return 0
@@ -743,7 +742,7 @@ def _main(args):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return failed_attempt(state, exc)
     finally:
-        if cloud.ADVANCED and not uplink_retry_counted:
+        if uplink_hold.ADVANCED and not uplink_retry_counted:
             # Durable advancement ends a run of no-progress uplink retries.
             state['uplink_quick_retries'] = 0
         store.atomic_json(STATE / 'state.json', state)

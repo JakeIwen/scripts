@@ -33,6 +33,70 @@ RESTART_EXITS = {
 }
 
 
+# Worker-registered writer of the hold heartbeat. None in manual commands and
+# in the forked verifier, which never write worker state.
+REPORTER = None
+# Set once this run durably advanced (an object uploaded, verified or deleted);
+# prerequisite reads never set it. It caps the quick retry of an expired hold.
+ADVANCED = False
+CHANGED_PATH = 'uplink or association changed during transfer'
+
+
+def set_reporter(reporter):
+    global REPORTER
+    REPORTER = reporter
+
+
+def note_advancement():
+    global ADVANCED
+    ADVANCED = True
+
+
+def start_run(reporter):
+    """A worker run begins: no advancement yet, heartbeat to this reporter."""
+    global ADVANCED
+    ADVANCED = False
+    set_reporter(reporter)
+
+
+def state_reporter(state, write):
+    """Keep the heartbeat in worker state as `uplink_hold`; not transfer progress."""
+    def report(value):
+        if value is None:
+            if state.pop('uplink_hold', None) is None:
+                return
+        else:
+            state['uplink_hold'] = value
+        write()
+    return report
+
+
+def fan_out(on_hold=None):
+    """One hold's heartbeat to the registered reporter and an optional listener."""
+    def report(value):
+        if REPORTER is not None:
+            REPORTER(value)
+        if on_hold is not None:
+            on_hold(value)
+    return report
+
+
+def check_running(probe, proof_of, proof, work_check, refuse):
+    """One probe for a stopped client; return only when it may resume.
+
+    An unknown verdict raises UplinkLost so the caller kills the client and
+    holds with nothing running: a client never resumes after one.
+    """
+    evidence, allowed, reason = probe()
+    if not allowed:
+        if uplink_unknown(reason):
+            raise UplinkLost(reason, time.monotonic(), time.time())
+        raise refuse(reason)
+    if proof_of(evidence) != proof:
+        raise refuse(CHANGED_PATH)
+    work_check()
+
+
 def apply_grace(cfg):
     """Default and validate the grace after every configuration overlay."""
     cfg.setdefault(GRACE_KEY, DEFAULT_GRACE_SECONDS)

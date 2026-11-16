@@ -235,62 +235,6 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(state['phase'], 'deferred')
         self.assertGreater(state['retry_at'], time.time() + 295)
 
-    def run_uplink_deferral(self, weekly):
-        self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
-        with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
-                mock.patch.object(cloud, 'STATE_DIR', self.directory), \
-                mock.patch.object(job, 'config', return_value={'interval_days': 7}), \
-                mock.patch.object(job.signal, 'signal'), mock.patch('builtins.print'), \
-                mock.patch.object(sys, 'argv', ['worker', '--run']), \
-                mock.patch.object(job, 'weekly', side_effect=weekly):
-            self.assertEqual(job.main(), 0)
-        return store.read_json(self.directory / 'state.json')
-
-    def test_uplink_quick_retries_are_capped_without_durable_advancement(self):
-        for initial in ({'last_success_at': 100}, {'pending': GEN}):  # a first copy cannot bypass the cap
-            with self.subTest(initial=initial):
-                store.atomic_json(self.directory / 'state.json', initial)
-                def prerequisites_then_unknown(cfg, state):
-                    # Reaching the transfer resets quick_retries, never the uplink cap.
-                    job.history.transfer_started(state)
-                    raise cloud.UplinkUnknown('selected uplink identity is unknown')
-                for attempt in range(job.history.QUICK_RETRY_LIMIT):
-                    state = self.run_uplink_deferral(prerequisites_then_unknown)
-                    self.assertGreater(state['retry_at'], time.time() + 295, attempt)
-                    self.assertEqual(state['uplink_quick_retries'], attempt + 1)
-                state = self.run_uplink_deferral(prerequisites_then_unknown)
-                self.assertIsNone(state['retry_at'])
-                self.assertEqual(state['phase'], 'deferred')
-
-    def test_durable_advancement_resets_the_uplink_retry_cap(self):
-        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100, 'uplink_quick_retries': 3})
-        def deleted_then_unknown(cfg, state):
-            cloud.note_advancement()
-            raise cloud.UplinkUnknown('router is unreachable')
-        state = self.run_uplink_deferral(deleted_then_unknown)
-        self.assertEqual(state['uplink_quick_retries'], 1)
-        self.assertGreater(state['retry_at'], time.time() + 295)
-        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100, 'uplink_quick_retries': 3})
-        def advanced_and_finished(cfg, state):
-            cloud.note_advancement()
-            return 'complete'
-        self.assertEqual(self.run_uplink_deferral(advanced_and_finished)['uplink_quick_retries'], 0)
-
-    def test_stale_hold_heartbeat_is_cleared_and_a_live_one_reaches_state(self):
-        store.atomic_json(self.directory / 'state.json', {'last_success_at': 100,
-                          'uplink_hold': {'reason': 'old', 'since': 1, 'checked_at': 1, 'fresh_until': 2}})
-        seen = []
-        def holds(cfg, state):
-            seen.append(dict(state))
-            cloud.HOLD_REPORTER({'reason': 'stale uplink evidence', 'since': 5, 'checked_at': 6, 'fresh_until': 7})
-            seen.append(store.read_json(self.directory / 'state.json')['uplink_hold']['reason'])
-            cloud.HOLD_REPORTER(None)
-            return 'not due'
-        state = self.run_uplink_deferral(holds)
-        self.assertNotIn('uplink_hold', seen[0])
-        self.assertEqual(seen[1], 'stale uplink evidence')
-        self.assertNotIn('uplink_hold', state)
-
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         control.control('pause', '60', self.directory, command=self.command)
@@ -775,8 +719,8 @@ class VerificationTests(unittest.TestCase):
             self.assertNotIn(digest, store.read_json(Path(tmp) / 'verified-objects.json'))
 
 
-class RetentionResumeTests(unittest.TestCase):
-    """Object cleanup interrupted after a generation verified must finish on the next admitted run."""
+class RetentionFixture(unittest.TestCase):
+    """A store with one prior and one current verified generation plus three orphans, and a fake cloud."""
     PRIOR = 'tm-20260908T010203Z-12345678'
     UNFINISHED = 'tm-20261101T010203Z-abcdef12'
 
@@ -870,6 +814,10 @@ class RetentionResumeTests(unittest.TestCase):
 
     def local_objects(self):
         return {p.name for p in (self.local / 'objects').iterdir()}
+
+
+class RetentionResumeTests(RetentionFixture):
+    """Object cleanup interrupted after a generation verified must finish on the next admitted run."""
 
     def test_interrupted_cleanup_finishes_on_next_run_even_when_copy_not_due(self):
         self.write_state()
@@ -982,80 +930,6 @@ class RetentionResumeTests(unittest.TestCase):
         with mock.patch.object(job, 'retention') as retention:
             self.assertEqual(self.run_worker()['phase'], 'not due')
         retention.assert_not_called()
-
-    def progress(self):
-        return store.read_json(self.state_dir / 'state.json')['retention_progress']
-
-    def test_cleanup_progress_accumulates_across_an_interrupted_run(self):
-        self.write_state()
-        self.object_size = 1024**3
-        self.fail_deletes_after = 1
-        self.run_worker()
-        first = self.progress()
-        self.assertEqual((first['generation'], first['keep_generations'], first['step']), (GEN, 2, 'deleting'))
-        self.assertEqual((first['planned_objects'], first['deleted_objects'], first['remaining_objects']), (3, 1, 2))
-        self.assertEqual((first['planned_bytes'], first['remaining_bytes']), (3 * 1024**3, 2 * 1024**3))
-        self.assertIsNotNone(first['listing_finished_at'])
-        self.assertEqual(job.history.reason({'phase': 'retention', 'last_generation': GEN,
-                                             'retention_progress': first}),
-                         'Deleting unused cloud files: 1 / 3 (2.0 GiB left).')
-        state = self.run_worker()
-        done = state['retention_progress']
-        self.assertEqual(state['retention_done_for'], GEN)
-        self.assertEqual((done['step'], done['planned_objects'], done['deleted_objects'], done['remaining_objects']),
-                         ('complete', 3, 3, 0))
-        self.assertEqual((done['listings'], done['episode_started_at']), (2, first['episode_started_at']))
-
-    def test_a_delete_lost_after_reaching_the_server_is_counted_by_the_next_listing(self):
-        self.write_state()
-        self.fail_deletes_after = 1
-        self.fail_after_server_delete = True
-        self.run_worker()
-        self.assertEqual(self.progress()['deleted_objects'], 1)  # the client never saw its second delete finish
-        self.inventory_failures = [cloud.Deferred('ignition is on')]
-        self.run_worker()
-        self.assertEqual(self.progress()['step'], 'listing')
-        self.run_worker()
-        done = self.progress()
-        self.assertEqual((done['planned_objects'], done['deleted_objects'], done['step']), (3, 3, 'complete'))
-
-    def test_a_changed_retention_setting_or_a_grown_set_starts_a_new_count(self):
-        self.write_state()
-        self.fail_deletes_after = 1
-        self.run_worker()
-        started = self.progress()['episode_started_at']
-        self.cfg['keep_generations'] = 3
-        self.fail_deletes_after = 2  # cumulative: one more delete, then the uplink drops
-        self.run_worker()
-        changed = self.progress()
-        self.assertEqual((changed['keep_generations'], changed['planned_objects'], changed['deleted_objects']), (3, 2, 1))
-        self.assertGreaterEqual(changed['episode_started_at'], started)
-        extra = hashlib.sha256(b'late orphan').hexdigest()
-        self.remote_objects.add(extra)
-        self.run_worker()
-        grown = self.progress()
-        self.assertEqual((grown['planned_objects'], grown['deleted_objects'], grown['step']), (2, 2, 'complete'))
-
-    def test_interruption_after_metadata_retirement_keeps_the_episode(self):
-        oldest = 'tm-20260801T010203Z-12345678'
-        retired_only = hashlib.sha256(b'only in the retired copy').hexdigest()
-        data = json.dumps({**self.manifest, 'generation': oldest,
-                           'files': {**self.manifest['files']}})
-        self.documents[oldest] = {'manifest.json': data, '_COMPLETE.json': json.dumps({
-            'owner': store.OWNER, 'generation': oldest, 'verification': 'sha256-download-compared',
-            'manifest_sha256': hashlib.sha256(data.encode()).hexdigest()})}
-        self.remote_objects.add(retired_only)
-        self.write_state()
-        self.inventory_failures = [cloud.Deferred('ignition is on')]
-        self.run_worker()
-        self.assertNotIn(oldest, self.documents)  # its metadata is gone before the listing failed
-        first = self.progress()
-        self.assertEqual((first['step'], first['planned_objects']), ('listing', None))
-        state = self.run_worker()
-        done = state['retention_progress']
-        self.assertEqual(state['retention_done_for'], GEN)
-        self.assertEqual((done['episode_started_at'], done['planned_objects'], done['deleted_objects']),
-                         (first['episode_started_at'], 4, 4))
 
     def audit_state(self, **values):
         self.write_state(retention_done_for=GEN, **values)

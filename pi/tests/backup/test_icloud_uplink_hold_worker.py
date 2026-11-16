@@ -70,8 +70,8 @@ class WorkerHoldTests(unittest.TestCase):
         self.killpg = self.enterContext(mock.patch.object(backup.os, 'killpg'))
         self.enterContext(mock.patch('builtins.print'))
         self.reports = []
-        backup.set_hold_reporter(self.reports.append)
-        self.addCleanup(backup.set_hold_reporter, None)
+        icloud_uplink_hold.set_reporter(self.reports.append)
+        self.addCleanup(icloud_uplink_hold.set_reporter, None)
         self.cfg = {**json.loads((REPO / 'pi/configs/icloud-backup.json').read_text()),
                     'guard_interval_seconds': 0.01, 'uplink_unknown_grace_seconds': 2,
                     'no_progress_timeout_seconds': 30}
@@ -236,7 +236,8 @@ class HeartbeatStateTests(unittest.TestCase):
     def test_reporter_writes_and_clears_the_hold_without_touching_progress(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(backup, 'STATE_DIR', Path(tmp)):
             state = {'progress_updated_at': 5}
-            report = backup.state_hold_reporter(state)
+            report = icloud_uplink_hold.state_reporter(
+                state, lambda: backup.atomic_json(backup.STATE_DIR / 'state.json', state))
             report({'reason': UNKNOWN, 'since': 1, 'checked_at': 2, 'fresh_until': 3})
             saved = json.loads((Path(tmp) / 'state.json').read_text())
             self.assertEqual((saved['uplink_hold']['reason'], saved['progress_updated_at']), (UNKNOWN, 5))

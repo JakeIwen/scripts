@@ -109,13 +109,13 @@ class UplinkHoldBoundaryTests(unittest.TestCase):
             parent.progress()
 
     def test_forked_verifier_never_writes_worker_hold_state(self):
-        cloud.set_hold_reporter(mock.Mock())
-        self.addCleanup(cloud.set_hold_reporter, None)
+        pipeline.uplink_hold.set_reporter(mock.Mock())
+        self.addCleanup(pipeline.uplink_hold.set_reporter, None)
         with mock.patch.object(pipeline.os, 'nice'), mock.patch.object(pipeline.signal, 'signal'), \
                 mock.patch.object(pipeline.backup_admission, 'use', return_value=nullcontext()), \
                 mock.patch.object(pipeline, 'Follower'), mock.patch.object(cloud, 'stop_child'):
             pipeline.verification_worker({}, Path('.'), {}, {}, 1, None, None, None, mock.Mock(), mock.Mock(), None)
-        self.assertIsNone(cloud.HOLD_REPORTER)
+        self.assertIsNone(pipeline.uplink_hold.REPORTER)
 
     def test_follower_starts_no_command_while_the_uploader_holds(self):
         import threading
