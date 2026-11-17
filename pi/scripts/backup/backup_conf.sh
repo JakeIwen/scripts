@@ -145,6 +145,7 @@ ROOTFS_PATH_BUDGETS_MIB=(
   /var/cache/apt:1024
   /home/pi/youtube-cast/releases:512
   /home/pi/Documents/agent-shared:2048
+  /home/pi/.claude/delegation-nudge:16
 )
 # Per-day path sizes (one bounded line per day) and level/forecast alert state.
 ROOTFS_PATH_HISTORY_FILE="$STAMP_DIR/rootfs_paths.history"
