@@ -184,8 +184,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   60 s); the watcher exits 4 s after the last heartbeat, at 30 min, or when ssh ends, and
   the Pi side exits on stdin EOF. `seek` goes through the watcher's `ctl.sock`, ordered
   by the page's {page, seq}; `media_id` (Van TV instance+video id, or the video
-  library's catalog item id) must still match on the Pi, so a release never seeks a
-  different track; VLC media without a catalog item is not seekable. State and the
+  library's catalog item id) is re-checked on the Pi right before the seek request, so a
+  release won't seek a track that changed during the drag (neither player API takes a
+  conditional seek, so a change in the instant between that check and the request is
+  an accepted race); VLC media without a catalog item is not seekable. State and the
   socket live in `~/.local/state/media-scrub/` (0700). Installer:
   `macbook/bettertouchtool/install_media_scrub.py`; page:
   `macbook/bettertouchtool/media_scrub_control/`.

@@ -9,6 +9,8 @@
   // Safety net only: the ack normally lands within a poll or two; a dead watcher must not
   // pin the thumb to a target forever.
   const ACK_TIMEOUT_MS = 10000;
+  // The CLI's own freshness limit; a stalled poll must not leave the last sample live.
+  const FRESH_MS = 2000;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
   function formatClock(seconds) {
@@ -30,11 +32,13 @@
     let drag = null;                          // {value, media_id}
     let seq = 0, optimistic = null, inFlight = false, queued = null, message = null;
 
-    const seekable = () => Boolean(sample && sample.seekable);
+    // Seekable as reported, and still fresh by page time: elapsed since the sample was
+    // received plus the age it reported.
+    const seekable = () => Boolean(sample && sample.seekable && timers.now() - sampleBase <= FRESH_MS);
     function livePosition(now) {
       if (!sample) return 0;
       if (!sample.seekable || sample.state !== "PLAYING") return sample.position;
-      const moved = sample.rate * (now - sampleBase) / 1000;
+      const moved = sample.rate * Math.min(now - sampleBase, FRESH_MS) / 1000;
       return clamp(sample.position + moved, 0, sample.duration > 0 ? sample.duration : sample.position);
     }
     function setMessage(text) { message = {text, until: timers.now() + MESSAGE_MS}; }
@@ -60,7 +64,7 @@
       });
     }
     function wantsFrames() {
-      return active && sample !== null && sample.seekable && sample.state === "PLAYING";
+      return active && seekable() && sample.state === "PLAYING";
     }
     function syncFrames() {
       if (!wantsFrames()) {

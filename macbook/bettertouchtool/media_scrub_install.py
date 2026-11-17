@@ -105,6 +105,20 @@ def _int(value: Any) -> int:
     return int(value) if isinstance(value, (int, float)) else 0
 
 
+def enabled_patch(node: Dict[str, Any]) -> Dict[str, Any]:
+    """The node's exported enabled flags. BTT defaults an omitted flag to 1 even on a
+    field-only update_trigger, so every such patch carries them (repair_script_paths.js's
+    pathEnabledPatch, which is JXA and cannot be imported here)."""
+    return {key: node[key] for key in ("BTTEnabled", "BTTEnabled2") if key in node}
+
+
+def order_patch(call: Call, uid: str, order: int) -> str:
+    node = read_trigger(call, uid)
+    if node is None:
+        raise RuntimeError("%s disappeared" % uid)
+    return json.dumps(dict(enabled_patch(node), BTTOrder=order))
+
+
 def _enabled(node: Dict[str, Any]) -> bool:
     return all(int(node.get(key, 1)) == 1 for key in ("BTTEnabled", "BTTEnabled2"))
 
@@ -234,7 +248,7 @@ def _write(call: Call, edits: List[Edit], value_key: str) -> None:
         if edit["scope"] == "config":
             patches.setdefault(edit["uuid"], {})[edit["key"]] = edit[value_key]
         else:
-            call("update_trigger", uuid=edit["uuid"], json=json.dumps({"BTTOrder": edit[value_key]}))
+            call("update_trigger", uuid=edit["uuid"], json=order_patch(call, edit["uuid"], edit[value_key]))
     for uid, patch in patches.items():
         call("update_menu_item", uuid=uid, json=json.dumps(patch), persist="true")
 
@@ -386,7 +400,7 @@ def apply_plan(call: Call, plan: Dict[str, Any], *, backup: Callable[[Dict[str, 
                 continue
             if uid != SCRUB and not (uid in moved and same(child.get("BTTOrder"), moved[uid]["old"])):
                 raise RuntimeError("the order of %s changed while installing" % uid)
-            call("update_trigger", uuid=uid, json=json.dumps({"BTTOrder": planned}))
+            call("update_trigger", uuid=uid, json=json.dumps(dict(enabled_patch(child), BTTOrder=planned)))
         verify(call, plan)
         (wait or wait_saved)(saved_check)
     except Exception as error:

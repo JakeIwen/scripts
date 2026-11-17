@@ -62,7 +62,14 @@ class FakeMediaBTT:
             assert parameters["persist"] == "true"
             self.find(parameters["uuid"])["BTTMenuConfig"].update(json.loads(parameters["json"]))
         elif command == "update_trigger":
-            self.find(parameters["uuid"]).update(json.loads(parameters["json"]))
+            node, patch = self.find(parameters["uuid"]), json.loads(parameters["json"])
+            node.update(patch)
+            # Like BTT: an omitted enabled flag becomes 1, and an export omits a flag that is 1.
+            for key in ("BTTEnabled", "BTTEnabled2"):
+                if key not in patch:
+                    node[key] = 1
+                if node[key] == 1:
+                    del node[key]
         elif command == "add_new_trigger":
             item = json.loads(parameters["json"])
             parent = self.find(parameters["parent_uuid"])

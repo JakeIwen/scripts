@@ -262,6 +262,41 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(snapshot(fake), original)
 
 
+class DisabledSiblingTests(unittest.TestCase):
+    def disabled_fake(self, **kwargs):
+        fake = FakeMediaBTT(**kwargs)
+        fake.find("fwd")["BTTEnabled"] = 0
+        fake.find("fwd")["BTTEnabled2"] = 0
+        return fake
+
+    def test_install_keeps_a_disabled_sibling_disabled(self):
+        for renumber in (False, True):
+            with self.subTest(renumber=renumber):
+                fake = self.disabled_fake(renumber=renumber)
+                run_apply(fake, plan_for(fake))
+                self.assertEqual((fake.find("fwd")["BTTEnabled"], fake.find("fwd")["BTTEnabled2"]), (0, 0))
+                self.assertEqual(fake.find("fwd")["BTTOrder"], 4)
+
+    def test_rollback_restores_order_and_leaves_the_sibling_disabled(self):
+        for renumber in (False, True):
+            with self.subTest(renumber=renumber):
+                fake = self.disabled_fake(renumber=renumber)
+                original = snapshot(fake)
+                with self.assertRaises(install.InstallFailed) as caught:
+                    run_apply(fake, plan_for(fake), saved=lambda: ["pending"])
+                self.assertFalse(caught.exception.incomplete)
+                self.assertEqual(snapshot(fake), original)
+                self.assertEqual(fake.find("fwd")["BTTEnabled"], 0)
+
+    def test_every_order_patch_carries_the_exported_flags(self):
+        fake = self.disabled_fake()
+        with self.assertRaises(install.InstallFailed):
+            run_apply(fake, plan_for(fake), saved=lambda: ["pending"])
+        patches = [json.loads(p["json"]) for c, p in fake.log if c == "update_trigger" and p["uuid"] == "fwd"]
+        self.assertTrue(patches)
+        self.assertTrue(all(p["BTTEnabled"] == 0 and p["BTTEnabled2"] == 0 for p in patches))
+
+
 class SavedStoreTests(unittest.TestCase):
     def saved(self, plan, **overrides):
         records = {uid: {"parent": MEDIA, "ZORDER": order, "ZGESTURETYPE": 773, "ZENABLEDNEW": 1, "config": {}}

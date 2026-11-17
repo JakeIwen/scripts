@@ -85,20 +85,38 @@ test('stop cancels the poll timer and animation frame; a start during a pending 
 test('position extrapolates by rate while PLAYING, clamps to duration, and freezes when paused', async () => {
   const h = await playing({position: 100, rate: 2, age: 0.5});
   assert.equal(h.last().value, 101, 'age counts as elapsed playback');
-  h.clock.now += 10_000;
+  h.clock.now += 1000;
   h.runFrames();
-  assert.equal(h.last().value, 121);
-  assert.equal(h.last().elapsed, '2:01');
-  assert.equal(h.last().remaining, '-14:39');
-  h.clock.now += 10_000_000;
+  assert.equal(h.last().value, 103);
+  assert.equal(h.last().elapsed, '1:43');
+  assert.equal(h.last().remaining, '-14:57');
+  h.runTimers();
+  await h.reply(sample({position: 999, rate: 2}));
+  h.clock.now += 1500;
   h.runFrames();
-  assert.equal(h.last().value, 1000);
+  assert.equal(h.last().value, 1000, 'clamped to the duration');
   h.runTimers();
   await h.reply(sample({state: 'PAUSED', position: 300}));
   assert.equal(h.frames.size, 0, 'no frames while paused');
-  h.clock.now += 5000;
+  h.clock.now += 1000;
   h.controller.render();
   assert.equal(h.last().value, 300);
+});
+
+test('a stalled status call lets the last sample go stale: disabled, extrapolation stops', async () => {
+  const h = await playing({position: 100, age: 0.5});
+  h.clock.now += 1000;
+  h.runFrames();
+  assert.equal(h.last().disabled, false);
+  assert.equal(h.last().value, 101.5);
+  h.clock.now += 5000; // the next status call never returns
+  h.runFrames();
+  assert.equal(h.last().disabled, true);
+  assert.equal(h.last().value, 102, 'frozen where freshness ran out (age 0.5 + 1.5 s)');
+  assert.equal(h.frames.size, 0, 'no more frames');
+  h.controller.dragMove(10);
+  h.controller.release(10);
+  assert.equal(h.seekCalls.length, 0);
 });
 
 test('slider is disabled and extrapolation stops when the sample is not seekable', async () => {
@@ -164,9 +182,9 @@ test('the hold is cleared only by an ack for the current seq (other page ids are
   h.runTimers();
   await h.reply(sample({position: 500, seek_ack: {page: PAGE, seq: 1, ok: true, message: ''}}));
   assert.equal(h.last().value, 500);
-  h.clock.now += 5000;
+  h.clock.now += 1000;
   h.controller.render();
-  assert.equal(h.last().value, 505, 'now following the live sample');
+  assert.equal(h.last().value, 501, 'now following the live sample');
 });
 
 test('a CLI ok:false clears the hold at once with its message; no ack is awaited', async () => {
