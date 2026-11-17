@@ -30,7 +30,7 @@ def parser():
     style = commands.add_parser('style', help='inspect/update existing Media appearance')
     style.add_argument('scope', choices=('main', 'transport', 'status'), nargs='?', default='main')
     style.add_argument('--apply', action='store_true')
-    for name, description in [('status', 'playback status script and compact row spacing'),
+    for name, description in [('status', 'compact Media row spacing'),
                               ('notes', 'Recent/Pinned Notes menu setup'),
                               ('escape', 'visible-dropdown-only Escape dismissal')]:
         command = commands.add_parser(name, help='inspect/update '+description)

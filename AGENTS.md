@@ -30,6 +30,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
 | `macbook/scripts/van_lighting.py` | BTT Media > Lighting: Solder SW (`toggle switch.solder_flood`) and the Lighting Colour web view (`lights`, `set`, JSON) | the script; `macbook/bettertouchtool/install_lighting_menu.py` installs both callers |
+| `macbook/scripts/media_scrub.py` (`status [--text]`, `seek --b64`) | BTT Media bar: PPause's content script and the scrub-slider Web View | `macbook/scripts/media_scrub/`; `macbook/bettertouchtool/install_media_scrub.py` installs both callers |
+| `pi/scripts/media_position.py` (`serve` JSON-lines protocol, `status`, `seek`) | the Mac `media_scrub` watcher over one `ssh pi@vanpi.lan` session per Media-bar open | the script; its docstring is the wire contract the Mac side mirrors |
 | `macbook/scripts/iterm_tile.js` | BTT Media > Mac: iTerm↑ (`external`) and iTerm↓ (`builtin`) | the script; `macbook/bettertouchtool/install_mac_menu.py` installs both callers |
 | `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
 | `macbook/scripts/cpu_percent.py` | Mac Panel BTT menu-bar item's script (prints `37%`, whole-machine CPU busy; state in `~/.local/state/cpu-percent/`) | the script; `bettertouchtool/install_mac_panel_menu.py` installs the caller |
@@ -172,6 +174,21 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `macbook/scripts/van_dashboard_http.py` is the Mac's one JSON client for the Pi
   dashboard API (`DASHBOARD_URL`, ok-checked GET and form POST); the cab dimmer and
   `van_lighting.py` use it.
+- `macbook/scripts/media_scrub.py` (stable entry; package `macbook/scripts/media_scrub/`,
+  stdlib, `/usr/bin/python3` 3.9) feeds the BTT Media bar's PPause text and scrub slider.
+  While the bar is open, one detached `watch` process holds a single
+  `ssh pi@vanpi.lan` session running `pi/scripts/media_position.py serve` (0.5 s samples
+  of Van TV, else the video library's VLC; seeks go down the same session's stdin), so
+  the Pi sees one session per menu open instead of an ssh+bash+jq poll per refresh.
+  `status` touches a heartbeat and spawns the watcher (spawn claim, failure backoff up to
+  60 s); the watcher exits 4 s after the last heartbeat, at 30 min, or when ssh ends, and
+  the Pi side exits on stdin EOF. `seek` goes through the watcher's `ctl.sock`, ordered
+  by the page's {page, seq}; `media_id` (Van TV instance+video id, or the video
+  library's catalog item id) must still match on the Pi, so a release never seeks a
+  different track; VLC media without a catalog item is not seekable. State and the
+  socket live in `~/.local/state/media-scrub/` (0700). Installer:
+  `macbook/bettertouchtool/install_media_scrub.py`; page:
+  `macbook/bettertouchtool/media_scrub_control/`.
 - `macbook/scripts/van_lighting.py` drives dashboard lights: `toggle <entity>` flips a
   light or power switch (state from `/api/lights`, write through `/api/lights/power`;
   failures also show a macOS notification), and `lights`/`set` print JSON for the

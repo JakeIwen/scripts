@@ -1,0 +1,12 @@
+:root { color-scheme: light; --text: #111; --muted: #4b4f58; --accent: #3b5bdb; --error: #a61e1e; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { color: var(--text); font: 11px -apple-system, BlinkMacSystemFont, sans-serif; }
+.scrub { height: 40px; padding: 3px 4px 0; display: grid; grid-template-rows: 20px 14px; }
+.row { display: grid; grid-template-columns: 38px 1fr 42px; align-items: center; gap: 4px; }
+.time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.time.right { text-align: right; }
+.slider { width: 100%; margin: 0; accent-color: var(--accent); }
+.slider:disabled { opacity: .4; }
+.line { font-size: 10px; line-height: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.line.message { color: var(--error); }

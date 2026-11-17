@@ -107,17 +107,13 @@ configuration checks do not represent a live sync or physical-key test.
 /usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py status --apply
 ```
 
-This makes a verified private full Media backup before two persistent style
-updates: installs `play_status.js` into the existing PPause content-script setting,
-and reduces the main menu's vertical spacing from 5 to 2.5. It preserves actions,
-submenus, positions, sizes, horizontal spacing, and the working drag/modifier
-settings. Reruns do not halve the spacing again. No restart or menu import.
-
-The status query suppresses only this display query's remote stderr (including
-curl progress/errors from the idle-player fallback). Idle status is blank;
-failed SSH queries become `Status unavailable`. Valid playback
-title/time output is preserved. Queries use the verified LAN hostname, SSH batch
-mode, a connection timeout, and keepalive failure limits. No Pi files are changed.
+This makes a verified private full Media backup and reduces the main menu's
+vertical spacing from 5 to 2.5. It preserves actions, submenus, positions, sizes,
+horizontal spacing, and the working drag/modifier settings. Reruns do not halve the
+spacing again. No restart or menu import. It no longer installs PPause's script:
+`install_media_scrub.py` owns that (PPause runs `macbook/scripts/media_scrub.py
+status --text` locally, fed by one SSH session per Media-bar open, beside the scrub
+slider it adds). Idle status is blank; no fresh sample shows `Status unavailable`.
 `btt.py status` reports the proposed changes without writing a backup or modifying BTT.
 
 ## Persistent submenu recovery

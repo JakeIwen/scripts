@@ -26,7 +26,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `style main` | Main-bar typography, partymode centering, original speaker icons. |
 | `style transport` | Original transport artwork and `20s` / `5m` captions. |
 | `style status` | Center play icon and status-text colors only. |
-| `status` | Playback-status output and compact row spacing. |
+| `status` | Compact Media row spacing (PPause's script belongs to `install_media_scrub.py`). |
 | `notes` | Recent/Pinned Notes setup; `--labels-only --apply` limits edits to labels. |
 | `escape` | Escape dismissal while a Media dropdown is visible (Recent Notes, Pinned Notes, Performance Audio, Lighting Colour). |
 | `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line and Cmd-C copies it; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
@@ -829,6 +829,32 @@ and report identities. Recreate venvs rather than moving them.
   ```sh
   /usr/bin/python3 -B macbook/bettertouchtool/install_mac_menu.py --apply --refresh
   ```
+- `install_media_scrub.py`: guarded installer for the Media track-scrub slider, a 220x40
+  Web View item (type 778, `BTTMenuItemWebViewPlain` 0, `BTTMenuItemKeepActiveInBackground` 0)
+  directly after PPause, built from `media_scrub_control/` (README there). It also points
+  PPause at the local `macbook/scripts/media_scrub.py status --text --wait 2` snapshot
+  (`play_status.js` with this checkout's absolute path) and sets its
+  `BTTMenuScriptUpdateInterval` to 1; `tune_media_status.js` accepts that script or the old
+  ssh one and never writes either. One transaction: `--inspect` (the default) prints the
+  PPause change, the new or updated item and every sibling's `(uuid, old, new)` order; `--apply`
+  backs up the Media export and the SQLite store, writes through BTT's socket CLI (PPause
+  fields, then `add_new_trigger` under Media, or `update_menu_item` when the item exists),
+  converges Media's integer orders on the planned map whether or not BTT renumbers siblings
+  itself (new item at PPause+1, later siblings +1; an installed item keeps its position),
+  reads everything back and waits for the saved store. Each field it may write is recorded
+  first; on failure it deletes only an item it created and restores each field only while it
+  still holds the value this attempt wrote, so a concurrent edit is kept and named. Anything
+  unrestored ends in `ROLLBACK INCOMPLETE` with the backup path and a nonzero exit. It refuses,
+  changing nothing, when Media or PPause differ from the inspected shape (PPause's script must
+  be the old ssh one or a `media_scrub.py` one). Guard is checkpointed after saved verification
+  (`--no-checkpoint` skips). The install logic is `media_scrub_install.py`; tests use the
+  in-memory Media socket `macbook/tests/media_scrub_fake_btt.py`. The paths baked into BTT are
+  this checkout's, so apply it from the checkout BTT should use (the main one), and re-apply
+  after editing `media_scrub_control/` or `play_status.js`.
+
+  ```sh
+  /usr/bin/python3 -B macbook/bettertouchtool/install_media_scrub.py --apply
+  ```
 - `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
   installer for the standard BPM, Rhythm, Convert Video, Interval Analysis and Temp
   Card Printer entries under Media > Tools. Their `install_*_menu.py` paths remain
@@ -837,8 +863,9 @@ and report identities. Recreate venvs rather than moving them.
 - `install_performance_audio_menu.*`, `install_strip_metadata_menu.*`,
   `install_custom_conversion.*`, `build_performance_audio_menu.py`, `tools_menu_style.py`:
   installers and builders with distinct menu-tree or styling behavior.
-- `play_status.js`, `recent_notes_content_script.js`, `btt_widget_spotify.scpt`:
-  content-script sources retained in place. Notes' current provider is
+- `play_status.js` (PPause's content script, a template whose quoted path placeholder
+  `install_media_scrub.py` fills), `recent_notes_content_script.js`,
+  `btt_widget_spotify.scpt`: content-script sources retained in place. Notes' current provider is
   `../scripts/notes_menu.py`; screenshots use `../scripts/capture_btt_menu.zsh`.
 - `btt_touchbar_folder_to_floating_submenu.py` and
   `create_floating_dropdown_from_submenu.py`: reusable offline conversion tools;
