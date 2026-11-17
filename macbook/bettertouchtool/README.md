@@ -847,7 +847,8 @@ and report identities. Recreate venvs rather than moving them.
   unrestored ends in `ROLLBACK INCOMPLETE` with the backup path and a nonzero exit. It refuses,
   changing nothing, when Media or PPause differ from the inspected shape (PPause's script must
   be the old ssh one or a `media_scrub.py` one). Guard is checkpointed after saved verification
-  (`--no-checkpoint` skips). The install logic is `media_scrub_install.py`; tests use the
+  (`--no-checkpoint` skips). The install logic is `media_scrub_install.py`; writes over the socket's ~8 KB limit (the
+  slider's inline page) go through Apple Events via `btt_apple_events.py`. Tests use the
   in-memory Media socket `macbook/tests/media_scrub_fake_btt.py`. The paths baked into BTT are
   this checkout's, so apply it from the checkout BTT should use (the main one), and re-apply
   after editing `media_scrub_control/` or `play_status.js`.

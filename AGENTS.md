@@ -261,6 +261,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
   share read-only inspection and backup helpers; `btt_socket.py/.js` call BTT's
   CLI over its local socket (reuse them instead of another `bttcli` wrapper).
+  The socket truncates messages over ~8 KB, so larger writes go through
+  `btt_apple_events.py` (`routed`, `write_large`; JXA worker `btt_write_large.js`,
+  payload in a private temp file), as the media-scrub installer does.
   `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.
   `macbook/bettertouchtool/btt_guard/` owns explicit known-good checkpoints,
