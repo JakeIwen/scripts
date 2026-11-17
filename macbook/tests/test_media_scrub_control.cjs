@@ -19,7 +19,7 @@ const sample = (extra = {}) => ({ok: true, source: 'vlc', state: 'PLAYING', titl
 // A controller on fake time: timers and frames run only when the test says so.
 function harness(options = {}) {
   const clock = {now: 1_000_000};
-  const timeouts = new Map(), frames = new Map();
+  const timeouts = new Map(), deadlines = new Map(), frames = new Map();
   let next = 1;
   const statusCalls = [], seekCalls = [], views = [];
   const transport = {
@@ -28,13 +28,14 @@ function harness(options = {}) {
   };
   const controller = Controller.create({transport, pageId: PAGE, view: {update: state => views.push(state)},
     timers: {now: () => clock.now,
-      setTimer: (fn, ms) => { const id = next++; timeouts.set(id, {fn, ms}); return id; },
-      clearTimer: id => timeouts.delete(id),
+      setTimer: (fn, ms) => { const id = next++; (ms === Controller.POLL_MS ? timeouts : deadlines).set(id, {fn, ms}); return id; },
+      clearTimer: id => { timeouts.delete(id); deadlines.delete(id); },
       raf: fn => { const id = next++; frames.set(id, fn); return id; },
       caf: id => frames.delete(id)}});
-  const h = {clock, timeouts, frames, statusCalls, seekCalls, views, controller,
+  const h = {clock, timeouts, deadlines, frames, statusCalls, seekCalls, views, controller,
     last: () => views[views.length - 1],
     async reply(value, index = h.statusCalls.length - 1) { h.statusCalls[index].resolve(value); await turn(); },
+    runDeadlines() { const due = [...deadlines.entries()]; deadlines.clear(); due.forEach(([, t]) => t.fn()); },
     runTimers() { const due = [...timeouts.entries()]; timeouts.clear(); due.forEach(([, t]) => t.fn()); },
     runFrames() { const due = [...frames.values()]; frames.clear(); due.forEach(fn => fn()); },
     async seekResult(index, value) { h.seekCalls[index].gate.resolve(value); await turn(); }};
@@ -117,6 +118,40 @@ test('a stalled status call lets the last sample go stale: disabled, extrapolati
   h.controller.dragMove(10);
   h.controller.release(10);
   assert.equal(h.seekCalls.length, 0);
+});
+
+test('a paused sample expires through the deadline timer alone, with no frames and no manual render', async () => {
+  const h = await playing({state: 'PAUSED', position: 300});
+  assert.equal(h.frames.size, 0);
+  assert.equal(h.last().disabled, false);
+  assert.equal(h.deadlines.size, 1);
+  h.clock.now += 3000; // the poll stalls: no reply, no frame
+  h.runDeadlines();
+  assert.equal(h.last().disabled, true);
+  assert.equal(h.deadlines.size, 0, 'nothing left to wait for');
+});
+
+test('the seek-ack timeout fires from its timer when the poll stalls and frames have stopped', async () => {
+  const h = await playing();
+  h.controller.release(500);
+  await h.seekResult(0, {ok: true, message: ''});
+  h.clock.now += 3000;
+  h.runFrames();
+  h.runDeadlines();
+  assert.equal(h.frames.size, 0, 'frames stopped once the sample went stale');
+  assert.equal(h.deadlines.size, 1, 'ack expiry stays armed');
+  h.clock.now += Controller.ACK_TIMEOUT_MS;
+  h.runDeadlines();
+  assert.equal(h.last().message, 'Seek not confirmed');
+  assert.notEqual(h.last().value, 500);
+  assert.equal(h.deadlines.size, 0);
+});
+
+test('stop cancels the deadline timer', async () => {
+  const h = await playing();
+  assert.equal(h.deadlines.size, 1);
+  h.controller.stop();
+  assert.equal(h.deadlines.size, 0);
 });
 
 test('slider is disabled and extrapolation stops when the sample is not seekable', async () => {

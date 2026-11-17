@@ -27,7 +27,7 @@
       setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: id => clearTimeout(id),
       raf: fn => requestAnimationFrame(fn), caf: id => cancelAnimationFrame(id), now: () => Date.now(),
     }, options.timers);
-    let active = false, polling = false, pollTimer = null, frame = null;
+    let active = false, polling = false, pollTimer = null, frame = null, deadlineTimer = null;
     let sample = null, sampleBase = 0;       // sampleBase: page clock when the sample's position was true
     let drag = null;                          // {value, media_id}
     let seq = 0, optimistic = null, inFlight = false, queued = null, message = null;
@@ -73,6 +73,22 @@
         frame = timers.raf(() => { frame = null; if (!active) return; render(); syncFrames(); });
       }
     }
+    // Freshness and the ack timeout are time-based, but a stalled poll and paused playback
+    // leave nothing else to re-render: one cancellable timer fires at the earliest expiry.
+    function scheduleDeadline() {
+      if (deadlineTimer !== null) { timers.clearTimer(deadlineTimer); deadlineTimer = null; }
+      if (!active) return;
+      const now = timers.now(), expiries = [];
+      if (sample && sample.seekable && now - sampleBase <= FRESH_MS) expiries.push(sampleBase + FRESH_MS);
+      if (optimistic && optimistic.confirmedAt !== null) expiries.push(optimistic.confirmedAt + ACK_TIMEOUT_MS);
+      if (!expiries.length) return;
+      deadlineTimer = timers.setTimer(() => {
+        deadlineTimer = null;
+        if (!active) return;
+        render();
+        scheduleDeadline();
+      }, Math.max(0, Math.min(...expiries) - now) + 1);
+    }
     function accept(reply) {
       if (!reply || !reply.ok) { sample = null; return; }
       const ack = reply.seek_ack;
@@ -93,6 +109,7 @@
       accept(reply);
       render();
       syncFrames();
+      scheduleDeadline();
       schedule();
     }
     function schedule() {
@@ -111,6 +128,7 @@
       active = false;
       if (pollTimer !== null) { timers.clearTimer(pollTimer); pollTimer = null; }
       if (frame !== null) { timers.caf(frame); frame = null; }
+      if (deadlineTimer !== null) { timers.clearTimer(deadlineTimer); deadlineTimer = null; }
     }
     async function send(request) {
       inFlight = true;
@@ -124,6 +142,7 @@
       // An older request's outcome never touches newer optimism; the newer one goes next.
       if (queued) { const next = queued; queued = null; send(next); }
       render();
+      scheduleDeadline();
     }
     function dragMove(value) {
       if (!seekable() || !Number.isFinite(value)) return;
