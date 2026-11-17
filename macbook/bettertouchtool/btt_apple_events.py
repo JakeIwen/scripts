@@ -22,12 +22,20 @@ SOCKET_LIMIT = 8000
 WRITE_COMMANDS = ("add_new_trigger", "update_menu_item")
 
 
+def _socket_text(value: Any) -> str:
+    # Socket parameters are key=value text, where booleans are spelled "true"/"false";
+    # str(True) would be "True", which the worker would read as false.
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def write_large(command: str, **parameters: Any) -> None:
     """Send one BTT write over Apple Events; raises unless the worker confirms 'ok'."""
     descriptor, name = tempfile.mkstemp(prefix="btt-large-write-", suffix=".json")  # mode 0600
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump({"command": command, "parameters": {k: str(v) for k, v in parameters.items()}}, handle)
+            json.dump({"command": command, "parameters": {k: _socket_text(v) for k, v in parameters.items()}}, handle)
         result = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", str(WORKER), name],
                                 capture_output=True, text=True, timeout=60)
     finally:

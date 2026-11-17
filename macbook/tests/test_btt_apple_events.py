@@ -45,7 +45,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(events.subprocess, "run", side_effect=fake_run):
             events.write_large("update_menu_item", uuid="u", json="{}", persist=True)
         self.assertEqual(seen["mode"], 0o600)
-        self.assertEqual(seen["request"]["parameters"]["persist"], "True")
+        self.assertEqual(seen["request"]["parameters"]["persist"], "true")
         self.assertFalse(__import__("os").path.exists(seen["path"]))
         with patch.object(events.subprocess, "run", return_value=type(
                 "R", (), {"returncode": 0, "stdout": "", "stderr": ""})()):
