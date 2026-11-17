@@ -29,7 +29,7 @@ rootfs_insert_measurement() {
 }
 
 rootfs_measure_budget_paths() {
-  local entry path budget_mib output result kib measured_mib
+  local entry path budget_mib output result kib measured_mib parent
   local timeout_command=${ROOTFS_TIMEOUT_COMMAND:-/usr/bin/timeout}
   local ionice_command=${ROOTFS_IONICE_COMMAND:-/usr/bin/ionice}
   local nice_command=${ROOTFS_NICE_COMMAND:-/usr/bin/nice}
@@ -38,6 +38,7 @@ rootfs_measure_budget_paths() {
   ROOTFS_MEASURED_MIB=()
   ROOTFS_MEASURED_PATHS=()
   ROOTFS_FAILED_PATHS=()
+  ROOTFS_ABSENT_PATHS=()
 
   for entry in "${ROOTFS_PATH_BUDGETS_MIB[@]}"; do
     path=${entry%:*}
@@ -46,6 +47,17 @@ rootfs_measure_budget_paths() {
           ! "$budget_mib" =~ ^[1-9][0-9]*$ ]]; then
       rootfs_add_problem "invalid rootfs path budget: $entry"
       ROOTFS_FAILED_PATHS+=("$path")
+      continue
+    fi
+
+    # A budget may be declared before its writer is installed (the bounded-
+    # writers rule wants the entry first). A path absent under a searchable
+    # parent uses nothing, so it is listed, not a problem; anything du cannot
+    # read for another reason still is.
+    parent=${path%/*}
+    parent=${parent:-/}
+    if [[ ! -e "$path" && ! -L "$path" && -d "$parent" && -x "$parent" ]]; then
+      ROOTFS_ABSENT_PATHS+=("$path")
       continue
     fi
 
@@ -468,6 +480,11 @@ rootfs_append_context() {
   while (( index < ${#ROOTFS_FAILED_PATHS[@]} )); do
     path=${ROOTFS_FAILED_PATHS[index]}
     context+=" $path=measurement failed;"
+    index=$((index + 1))
+  done
+  index=0
+  while (( index < ${#ROOTFS_ABSENT_PATHS[@]} )); do
+    context+=" ${ROOTFS_ABSENT_PATHS[index]}=absent;"
     index=$((index + 1))
   done
   problems+=("${context%;}")

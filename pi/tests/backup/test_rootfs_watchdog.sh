@@ -106,6 +106,34 @@ all_problems=$(problem_text)
   fail "du failure was absent from rootfs context"
 unset TEST_DU_FAIL_PATH
 
+# A budgeted path that does not exist yet is listed, not a problem; du is never
+# asked (the fake du exits 2 for unknown paths).
+absent_path="$test_root/paths/not-installed-yet"
+ROOTFS_PATH_BUDGETS_MIB=("$TEST_PATH_A:1024" "$TEST_PATH_B:2048" "$absent_path:64")
+run_check
+all_problems=$(problem_text)
+[[ "$all_problems" != *"could not measure rootfs path $absent_path"* ]] ||
+  fail "absent budget path was counted as a measurement failure"
+[[ "$all_problems" == *"$absent_path=absent"* ]] ||
+  fail "absent budget path was missing from rootfs context"
+ROOTFS_PATH_BUDGETS_MIB=("$TEST_PATH_B:2048" "$absent_path:64")
+run_check
+[[ ${#problems[@]} -eq 0 ]] ||
+  fail "absent budget path alone raised problems: $(problem_text)"
+# An absent path under an unreadable parent still has to be measured. Root
+# searches a mode-000 directory anyway, so this case needs an unprivileged runner.
+if (( $(id -u) != 0 )); then
+  mkdir -p "$test_root/locked"
+  chmod 000 "$test_root/locked"
+  ROOTFS_PATH_BUDGETS_MIB=("$test_root/locked/child:64")
+  run_check
+  chmod 700 "$test_root/locked"
+  all_problems=$(problem_text)
+  [[ "$all_problems" == *"could not measure rootfs path $test_root/locked/child"* ]] ||
+    fail "path under an unsearchable parent was treated as absent"
+fi
+ROOTFS_PATH_BUDGETS_MIB=("$TEST_PATH_A:1024" "$TEST_PATH_B:2048")
+
 ROOTFS_PATH_BUDGETS_MIB=("$TEST_PATH_A:4096" "$TEST_PATH_B:4096")
 baseline_epoch=$((now - 7 * 86400))
 baseline_day=$((baseline_epoch / 86400))

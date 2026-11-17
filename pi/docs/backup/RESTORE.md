@@ -250,8 +250,10 @@ newest sample at least seven days old and normalized when a daily run was
 missed. Each configured path is measured with a 300-second timeout, idle I/O
 priority, low CPU priority, and same-filesystem `du -x`. A timeout, failed
 measurement, absolute root limit, growth warning, or over-budget path is a
-watchdog problem. Every rootfs alert includes all successfully measured path
-sizes, largest first, plus explicit measurement failures.
+watchdog problem. A budgeted path that does not exist under a searchable parent
+is not: a budget may be declared before its writer is installed. Every rootfs
+alert includes all successfully measured path sizes, largest first, plus
+explicit measurement failures and absent paths.
 
 Edit the single `ROOTFS_PATH_BUDGETS_MIB` array in `backup_conf.sh`; values are
 MiB so fractional-GiB limits are exact:
@@ -267,6 +269,10 @@ MiB so fractional-GiB limits are exact:
 | `/var/cache/apt` | 1GiB |
 | `/home/pi/youtube-cast/releases` | 0.5GiB |
 | `/home/pi/Documents/agent-shared` | 2GiB |
+| `/home/pi/.claude/delegation-nudge` | 16MiB |
+| `/var/lib/vanresearch.img` | 232MiB |
+| `/var/lib/van-telemetry-advisor` | 160MiB |
+| `/opt/van-research-cli` | 1GiB |
 
 Each run also appends the measured sizes to
 `/home/pi/backups/stamps/rootfs_paths.history` (`<utc-day> <epoch>

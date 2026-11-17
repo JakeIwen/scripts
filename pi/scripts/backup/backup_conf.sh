@@ -76,6 +76,13 @@ BORG_EXCLUDES=(
   '/home/pi/.codex/packages'
   '/home/pi/.codex/logs_2.sqlite*'
   '/home/pi/.local/share/claude/versions'
+  # obd-things' DTC research service: its image holds only churn and the
+  # service's own sign-in (signing in again is two commands), and the pinned
+  # CLI copy is re-created by its install command. Its research records under
+  # /var/lib/van-telemetry-advisor stay backed up.
+  /var/lib/vanresearch.img
+  /var/lib/vanresearch
+  /opt/van-research-cli
 )
 
 # state + notifications
@@ -146,6 +153,9 @@ ROOTFS_PATH_BUDGETS_MIB=(
   /home/pi/youtube-cast/releases:512
   /home/pi/Documents/agent-shared:2048
   /home/pi/.claude/delegation-nudge:16
+  /var/lib/vanresearch.img:232
+  /var/lib/van-telemetry-advisor:160
+  /opt/van-research-cli:1024
 )
 # Per-day path sizes (one bounded line per day) and level/forecast alert state.
 ROOTFS_PATH_HISTORY_FILE="$STAMP_DIR/rootfs_paths.history"
