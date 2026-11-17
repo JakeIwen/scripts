@@ -3,12 +3,14 @@
 Models the calls the installer makes (get_trigger, update_menu_item, update_trigger,
 add_new_trigger with parent_uuid, delete_trigger). `renumber` switches between the two
 insert behaviours the installer must converge on: BTT shifting later siblings itself,
-or leaving every order as written.
+or leaving every order as written. Like real BTT's bttcli, the socket (`__call__`) fails
+any write over SOCKET_LIMIT; `write_large` is the Apple Events path and has no limit.
 """
 import copy
 import json
 
 from macbook.bettertouchtool.btt_common import MEDIA
+from macbook.bettertouchtool.btt_apple_events import SOCKET_LIMIT, WRITE_COMMANDS
 from macbook.bettertouchtool.media_scrub_install import PPAUSE
 
 OLD_SCRIPT = "// ssh pi@vanpi.lan play_status"
@@ -34,7 +36,7 @@ class FakeMediaBTT:
     def __init__(self, renumber=False, honor_order=True, media=None):
         self.media = media if media is not None else media_fixture()
         self.renumber, self.honor_order = renumber, honor_order
-        self.log, self.before = [], None  # before(command, parameters) may raise or edit state
+        self.log, self.large_log, self.before = [], [], None  # before(command, parameters) may raise or edit state
 
     def find(self, uid):
         stack = [self.media]
@@ -52,6 +54,16 @@ class FakeMediaBTT:
         return None
 
     def __call__(self, command, **parameters):
+        if command in WRITE_COMMANDS and sum(len(str(v)) for v in parameters.values()) > SOCKET_LIMIT:
+            self.log.append((command + " (rejected)", parameters))
+            raise RuntimeError("BTT socket command %s failed; no success confirmed." % command)
+        return self.apply(command, **parameters)
+
+    def write_large(self, command, **parameters):
+        self.large_log.append(command)
+        self.apply(command, **parameters)
+
+    def apply(self, command, **parameters):
         self.log.append((command, parameters))
         if self.before:
             self.before(command, parameters)

@@ -9,11 +9,15 @@ import unittest
 from unittest.mock import patch
 
 import install_media_scrub as cli
+import btt_apple_events
 import media_scrub_install as install
 from macbook.bettertouchtool.btt_common import MEDIA
 from macbook.tests.media_scrub_fake_btt import OLD_SCRIPT, FakeMediaBTT, media_fixture
 
-PAGE = "<!doctype html><title>page</title>"
+# Over SOCKET_LIMIT, like the real page, so every page write must take the Apple Events path.
+PAD = "<!-- pad -->" * 1000
+PAGE = "<!doctype html><title>page</title>" + PAD
+PAGE_V2 = "<!doctype html><title>v2</title>" + PAD
 SOURCE = "// new script running media_scrub.py"
 SCRUB, PPAUSE = install.SCRUB, install.PPAUSE
 
@@ -27,7 +31,8 @@ def run_apply(fake, plan, saved=lambda: [], backups=None):
     def backup(snapshot):
         events.append(("backup", len(fake.commands("update_menu_item", "update_trigger", "add_new_trigger"))))
         return Path("/private/backup.json")
-    return install.apply_plan(fake, plan, backup=backup, saved_check=saved, wait=lambda check: _wait(check))
+    return install.apply_plan(fake, plan, backup=backup, saved_check=saved, wait=lambda check: _wait(check),
+                              large=fake.write_large)
 
 
 def _wait(check):
@@ -119,15 +124,46 @@ class ApplyTests(unittest.TestCase):
                     self.assertEqual(events, [("backup", 0)], "backup precedes every write")
                     self.assertTrue(install.is_noop(plan_for(fake)), "a rerun finds nothing to do")
 
+    def test_the_page_never_crosses_the_socket(self):
+        fake = FakeMediaBTT()
+        run_apply(fake, plan_for(fake))
+        self.assertEqual(fake.large_log, ["add_new_trigger"])
+        self.assertEqual(fake.commands("add_new_trigger (rejected)"), [])
+        fake.log.clear()
+        fake.large_log.clear()
+        run_apply(fake, plan_for(fake, page=PAGE_V2))
+        self.assertEqual(fake.large_log, ["update_menu_item"])
+        # PPause's small script edit still uses the socket.
+        self.assertTrue(all(len(p["json"]) < btt_apple_events.SOCKET_LIMIT for c, p in fake.log if c == "update_menu_item"
+                            and p["uuid"] == PPAUSE))
+
+    def test_a_socket_only_writer_cannot_install_the_page(self):
+        fake = FakeMediaBTT()
+        original = snapshot(fake)
+        with self.assertRaises(install.InstallFailed) as caught:
+            install.apply_plan(fake, plan_for(fake), backup=lambda s: Path("/b"), saved_check=lambda: [],
+                               large=fake)
+        self.assertFalse(caught.exception.incomplete)
+        self.assertEqual(snapshot(fake), original)
+
+    def test_rollback_of_a_page_update_restores_the_old_page_over_apple_events(self):
+        fake = FakeMediaBTT()
+        run_apply(fake, plan_for(fake))
+        fake.large_log.clear()
+        with self.assertRaises(install.InstallFailed):
+            run_apply(fake, plan_for(fake, page=PAGE_V2), saved=lambda: ["pending"])
+        self.assertEqual(fake.large_log, ["update_menu_item", "update_menu_item"])
+        self.assertEqual(fake.find(SCRUB)["BTTMenuConfig"]["BTTMenuItemText"], PAGE)
+
     def test_rerun_updates_the_page_in_place_without_delete_or_add(self):
         fake = FakeMediaBTT()
         run_apply(fake, plan_for(fake))
         fake.log.clear()
         orders = fake.orders()
-        plan = plan_for(fake, page="<!doctype html><title>v2</title>")
+        plan = plan_for(fake, page=PAGE_V2)
         self.assertTrue(plan["exists"])
         run_apply(fake, plan)
-        self.assertEqual(fake.find(SCRUB)["BTTMenuConfig"]["BTTMenuItemText"], "<!doctype html><title>v2</title>")
+        self.assertEqual(fake.find(SCRUB)["BTTMenuConfig"]["BTTMenuItemText"], PAGE_V2)
         self.assertEqual(fake.commands("add_new_trigger", "delete_trigger", "update_trigger"), [])
         self.assertEqual(fake.orders(), orders)
 
@@ -136,7 +172,7 @@ class ApplyTests(unittest.TestCase):
         run_apply(fake, plan_for(fake))
         fake.find(SCRUB)["BTTOrder"] = 5
         fake.find("row")["BTTOrder"] = 3
-        plan = plan_for(fake, page="v2")
+        plan = plan_for(fake, page=PAGE_V2)
         self.assertEqual(plan["order"], 5)
         run_apply(fake, plan)
         self.assertEqual(fake.find(SCRUB)["BTTOrder"], 5)
@@ -183,7 +219,7 @@ class ApplyTests(unittest.TestCase):
         fake = FakeMediaBTT()
         run_apply(fake, plan_for(fake))
         before = snapshot(fake)
-        plan = plan_for(fake, page="v2")
+        plan = plan_for(fake, page=PAGE_V2)
         with self.assertRaises(install.InstallFailed) as caught:
             run_apply(fake, plan, saved=lambda: ["pending"])
         self.assertFalse(caught.exception.incomplete)
@@ -246,7 +282,7 @@ class ApplyTests(unittest.TestCase):
             fake.find("fwd")["BTTMenuName"] = "Edited during backup"
             return Path("/b")
         with self.assertRaisesRegex(install.Refusal, "during backup"):
-            install.apply_plan(fake, plan, backup=backup, saved_check=lambda: [])
+            install.apply_plan(fake, plan, backup=backup, saved_check=lambda: [], large=fake.write_large)
         self.assertEqual(fake.commands("update_menu_item", "update_trigger", "add_new_trigger"), [])
 
     def test_unexpected_sibling_appearing_mid_install_rolls_back(self):
@@ -342,6 +378,7 @@ class MainWiringTests(unittest.TestCase):
             stack.enter_context(patch.object(cli, "SCRIPT", script))
             stack.enter_context(patch.object(cli, "BACKUPS", root / "backups"))
             stack.enter_context(patch.object(cli.btt_socket, "call", fake))
+            stack.enter_context(patch.object(btt_apple_events, "write_large", fake.write_large))
             stack.enter_context(patch.object(cli, "current_database", return_value=root / "db"))
             stack.enter_context(patch.object(cli, "records", side_effect=lambda db: events.append("saved") or {}))
             stack.enter_context(patch.object(install, "wait_saved", side_effect=lambda check: (

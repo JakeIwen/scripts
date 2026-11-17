@@ -7,7 +7,8 @@ still holds the intended value, so a concurrent edit is kept and reported rather
 overwritten; anything unrestored is reported as ROLLBACK INCOMPLETE.
 
 Works through BTT's socket CLI (`call(command, **parameters)`, btt_socket.call), which
-tests replace with an in-memory fake. Python 3.9+, stdlib only.
+tests replace with an in-memory fake; writes too big for the socket go over Apple Events
+(btt_apple_events.routed, whose `large` writer tests replace the same way). Python 3.9+, stdlib only.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 
+from btt_apple_events import routed
 from btt_common import MEDIA
 from media_submenu import ITEM
 
@@ -364,8 +366,13 @@ def rollback(call: Call, plan: Dict[str, Any], edits: List[Edit], created: bool)
 
 def apply_plan(call: Call, plan: Dict[str, Any], *, backup: Callable[[Dict[str, Any]], Any],
                saved_check: Callable[[], List[str]],
-               wait: Optional[Callable[[Callable[[], List[str]]], None]] = None) -> str:
-    """Back up, write, verify and wait for the saved store; on any failure undo and raise InstallFailed."""
+               wait: Optional[Callable[[Callable[[], List[str]]], None]] = None,
+               large: Optional[Callable[..., None]] = None) -> str:
+    """Back up, write, verify and wait for the saved store; on any failure undo and raise InstallFailed.
+
+    The slider item and page updates exceed the socket's message size, so every write, the
+    rollback's included, goes through `routed`."""
+    call = routed(call, large)
     before = plan["media_before"]
     if not same(read_trigger(call, MEDIA), before):
         raise Refusal("Media changed since it was inspected; no changes made.")
