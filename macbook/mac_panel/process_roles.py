@@ -3,10 +3,11 @@
 The display parse (`process_invocation`) shows less when it is unsure. These classifiers
 decide what may be signalled, so they lean the other way. A process is an infra or compute
 root when its program or any whole argument names one, whatever options surround it; a
-false positive only makes a row read-only. A Codex process is an app server only when
-`app-server` is plainly its subcommand; when that cannot be established it is still a
-session root (so an outer session's tree action sees a nested session and is refused), and
-its own group is refused too (`CodexRole.UNCERTAIN`).
+false positive only makes a row read-only. Every Codex process roots a group of its own
+wherever it runs (`resource_groups`), so its role decides only how that group is shown and
+whether it may be ended as a session: a session when `codex_role` is sure, otherwise
+read-only infrastructure, with nothing in it signalled when the role is unknown
+(`CodexRole.UNCERTAIN`).
 """
 from enum import Enum
 import os
@@ -23,7 +24,7 @@ APP_SERVER = 'app-server'
 class CodexRole(str, Enum):
     APP_SERVER = 'app-server'
     SESSION = 'session'
-    # A session root for grouping whose own group may not be signalled: it might be a server.
+    # The subcommand cannot be read from the flattened text: read-only, never a session.
     UNCERTAIN = 'uncertain'
 
 
@@ -45,7 +46,8 @@ CODEX_SUBCOMMANDS = frozenset((
     'archive', 'delete', 'migrate-rollouts', 'migrate-nfs-db', 'unarchive', 'fork', 'cloud',
     'exec-server', 'features', 'help'))
 
-CODEX_APP_SERVER_LABEL = 'Codex app server'
+# The infra label of a Codex group that is not a session.
+CODEX_LABELS = {CodexRole.APP_SERVER: 'Codex app server', CodexRole.UNCERTAIN: 'Codex (role unread)'}
 # Base names of a program or of any argument that make a process shared infrastructure.
 INFRA_NAMES = {'claude-code-proxy': 'model gateway proxy', 'model-gateway.js': 'model gateway',
                'usage-server.mjs': 'usage server', 'llm_switchboard': 'LLM switchboard',
@@ -120,8 +122,6 @@ def argument_names(token):
 
 def infra_label(row: ProcessRow) -> str | None:
     """The infra table's label when the program or any whole argument names shared infrastructure."""
-    if is_codex(row) and codex_role(row) is CodexRole.APP_SERVER:
-        return CODEX_APP_SERVER_LABEL
     for name in program_names(row):
         if name in INFRA_NAMES:
             return INFRA_NAMES[name]

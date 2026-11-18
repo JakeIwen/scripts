@@ -85,9 +85,10 @@ class CodexRoleTests(unittest.TestCase):
         world = Harness((200, 101, 'claude'),
                         (210, 200, '/x/codex -c model=a b app-server --listen x'),
                         (211, 210, 'node helper.js'))
-        self.assertEqual(world.grouping.groups['claude:200'].nested, ['codex:210'])
+        self.assertEqual(world.grouping.groups['claude:200'].nested, ['infra:210'])
+        self.assertEqual(world.grouping.groups['infra:210'].label, 'Codex (role unread)')
         self.assertIn('nested sessions', world.tree_blocked('claude:200'))
-        self.assertEqual(world.tree_blocked('codex:210'), ROLE_UNKNOWN)
+        self.assertEqual(world.tree_blocked('infra:210'), ROLE_UNKNOWN)
         self.assertEqual(world.reason(210), ROLE_UNKNOWN)
         self.assertEqual(world.reason(211), ROLE_UNKNOWN)
         for pid, scope in ((210, 'tree'), (210, 'process'), (211, 'process')):
@@ -135,6 +136,43 @@ class InfraAndComputeTests(unittest.TestCase):
         world = Harness((200, 101, 'claude'), (201, 200, 'grep -r model-gateway.js .'))
         self.assertEqual(world.grouping.membership[201], 'claude:200')
         self.assertIsNone(world.reason(201))
+
+
+class RoundThreeTests(unittest.TestCase):
+    """The round-3 review's reproductions, verbatim as `ps` shows them (quotes are lost)."""
+
+    def assertRefused(self, world, *requests):
+        for pid, scope in requests:
+            with self.assertRaises(ApiError, msg=(pid, scope)) as caught:
+                world.post(pid, scope)
+            self.assertEqual(caught.exception.status, 403)
+        self.assertEqual(world.calls, [])
+
+    def test_finding1_a_codex_inside_a_claude_session_is_never_an_ordinary_member(self):
+        for command in (
+                # codex "app-server tests are failing"
+                'codex app-server tests are failing',
+                # codex -C "/tmp/project app-server" exec review
+                'codex -C /tmp/project app-server exec review'):
+            world = Harness((200, 101, 'claude --permission-mode bypassPermissions'),
+                            (210, 200, command), (211, 210, 'node worker.js'))
+            self.assertNotEqual(world.grouping.membership.get(210), 'claude:200', command)
+            self.assertNotEqual(world.grouping.membership.get(211), 'claude:200', command)
+            gid = world.grouping.membership[210]
+            self.assertIn(gid, world.grouping.groups['claude:200'].nested, command)
+            self.assertIsNotNone(world.tree_blocked('claude:200'), command)
+            self.assertIsNotNone(world.tree_blocked(gid), command)
+            self.assertRefused(world, (200, 'tree'), (210, 'tree'), (210, 'process'))
+
+    def test_finding1_any_group_root_beneath_a_session_blocks_its_tree_and_is_named(self):
+        world = Harness((200, 101, 'claude'), (201, 200, '/bin/zsh -c x'),
+                        (210, 201, '/x/codex app-server --listen x'))
+        self.assertEqual(world.grouping.kind(210), Kind.INFRA)
+        self.assertEqual(world.grouping.groups['claude:200'].nested, ['infra:210'])
+        reason = tree_blocked(world.policy, world.grouping.groups['claude:200'], world.context,
+                              {'infra:210': 'Codex app server'})
+        self.assertIn('Codex app server', reason)
+        self.assertRefused(world, (200, 'tree'))
 
 
 class ShellTests(unittest.TestCase):

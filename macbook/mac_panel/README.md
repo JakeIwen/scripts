@@ -314,17 +314,21 @@ infrastructure or a compute worker when its program, kernel name or any whole ar
 one (`model-gateway.js`, `claude-code-proxy`, `usage-server.mjs`, `llm_switchboard`, the
 Playwright MCP `cli.js`) or `-m` names `van_compute.worker` or `llm_switchboard` anywhere; a
 command that merely mentions one outside a session is read-only as a result. Inside a
-session, a process belongs to that session. A Codex process is the shared app server only
-when `app-server` is plainly its subcommand; a known subcommand reached through flags alone
-(`exec`, `resume`) makes it a session whatever its prompt says; when its role cannot be
-established it is grouped as a session, so an outer session's tree action is refused as
-nested, and nothing in its own group may be signalled.
+session, a process belongs to that session, with one exception: every Codex process roots a
+group of its own wherever it runs, even inside another session, because `ps` flattens its
+arguments and a prompt or an option value can look like a subcommand. Its role decides only
+how that group is shown: a Codex session when its subcommand is certain (a known subcommand
+reached through flags alone, such as `exec` or `resume`, whatever its prompt says),
+otherwise read-only infrastructure (`Codex app server`, or `Codex (role unread)` when the role
+cannot be established, where nothing at all may be signalled). A session with any other
+group's root (a session, a Codex process, infra or compute) beneath any of its processes has
+no whole-tree action, and the reason names those groups.
 
 Before each signal the panel re-reads the whole process table and decides again from it:
 same pid, start time and uid; for a session tree, the root still the same session root,
 every member one the plan saw (a process that joined the session since stops the action
 before any of its ancestors is signalled), the target still a member with every process up
-to the root present, no nested session, and the policy still allowing the process. This
+to the root present, no other group nested in it, and the policy still allowing the process. This
 narrows the window in which a pid could be reused to milliseconds; it does not close it. A
 tree over `TREE_TARGET_LIMIT` (48) processes has no Terminate session button and the request
 is refused with the same reason (one function decides both). A mutation has a total time

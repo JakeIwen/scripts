@@ -3,13 +3,17 @@
 Which processes root a group comes from `process_roles`, which errs toward protection: a
 command that merely mentions `model-gateway.js` outside any session is grouped as infra and
 so is read-only. Membership then decides: a process inside a session belongs to that
-session, so a session's own `grep model-gateway.js` stays an ordinary member.
+session, so a session's own `grep model-gateway.js` stays an ordinary member. The one
+exception is Codex: `ps` flattens its arguments, so whether a Codex process is a session or
+a server can be misread, and every Codex process therefore roots its own group wherever it
+runs. A session with any other group's root beneath it lists that group in `nested`, and
+the signal policy refuses its whole-tree action.
 """
 from dataclasses import dataclass, field
 from enum import Enum
 
-from process_roles import (CLAUDE, CODEX_VALUE_OPTIONS, CodexRole, codex_role, infra_label,
-                           is_codex, is_compute_root)
+from process_roles import (CLAUDE, CODEX_LABELS, CODEX_VALUE_OPTIONS, CodexRole, codex_role,
+                           infra_label, is_codex, is_compute_root)
 from process_table import ProcessRow, ProcessTable
 
 
@@ -49,14 +53,9 @@ def codex_subcommand(row: ProcessRow) -> str | None:
 def session_kind(row: ProcessRow) -> Kind | None:
     if row.exe == CLAUDE:
         return Kind.CLAUDE
-    if is_codex(row) and codex_role(row) is not CodexRole.APP_SERVER:
+    if is_codex(row) and codex_role(row) is CodexRole.SESSION:
         return Kind.CODEX
     return None
-
-
-def role_unknown(row: ProcessRow) -> bool:
-    """A session root that might be an app server: grouped as a session, signalled never."""
-    return is_codex(row) and codex_role(row) is CodexRole.UNCERTAIN
 
 
 def codex_detail(row: ProcessRow) -> str:
@@ -94,9 +93,11 @@ class Group:
     root: ProcessRow
     label: str | None
     members: list[Member] = field(default_factory=list)
+    # Sessions only: the session this one runs inside, for display.
     parent: str | None = None
+    # Sessions only: every other group whose root runs beneath this one's processes.
     nested: list[str] = field(default_factory=list)
-    # The root's role could not be established (`role_unknown`): nothing in it is signalled.
+    # A Codex root whose role could not be established: nothing in it is signalled.
     role_unknown: bool = False
 
 
@@ -146,13 +147,17 @@ def build_grouping(table: ProcessTable) -> Grouping:
     # A zombie is named only by the kernel ("codex"), with no arguments: it roots nothing.
     live = {pid: row for pid, row in table.rows.items() if not row.zombie}
     sessions = {pid: kind for pid, row in live.items() if (kind := session_kind(row))}
+    # Every other Codex process: a read-only infra root of its own, never another's member.
+    services = {pid: codex_role(row) for pid, row in live.items()
+                if is_codex(row) and pid not in sessions}
+    boundaries = {**sessions, **dict.fromkeys(services, Kind.INFRA)}
     computes = {pid for pid, row in live.items() if is_compute_root(row)}
     infras = {pid: label for pid, row in live.items() if (label := infra_label(row))}
     owner: dict[int, tuple[Kind, int]] = {}
     for pid in table.rows:
         chain = [pid, *table.ancestors(pid)]
-        if (root := nearest(chain, sessions)) is not None:
-            owner[pid] = (sessions[root], root)
+        if (root := nearest(chain, boundaries)) is not None:
+            owner[pid] = (boundaries[root], root)
         elif (root := nearest(chain, computes)) is not None:
             owner[pid] = (Kind.COMPUTE, root)
         elif (root := outermost(chain, infras)) is not None:
@@ -168,20 +173,36 @@ def build_grouping(table: ProcessTable) -> Grouping:
     for pid, (kind, root) in owner.items():
         gid = membership[pid]
         if gid not in groups:
-            row = table.rows[root]
-            label = (infras.get(root) if kind is Kind.INFRA else
-                     (COMPUTE_WORKER_LABEL if root in computes else job_label(row))
-                     if kind is Kind.COMPUTE else None)
-            groups[gid] = Group(gid, kind, row, label,
-                                role_unknown=kind in SESSION_KINDS and role_unknown(row))
+            label = group_label(kind, root, services, infras, computes, table)
+            groups[gid] = Group(gid, kind, table.rows[root], label,
+                                role_unknown=services.get(root) is CodexRole.UNCERTAIN)
     for group in groups.values():
         group.members = ordered_members(table, group, membership)
+    link_nested(table, groups, membership, sessions)
+    return Grouping(groups, membership)
+
+
+def group_label(kind, root, services, infras, computes, table) -> str | None:
+    if kind is Kind.INFRA:
+        return CODEX_LABELS[services[root]] if root in services else infras.get(root)
+    if kind is Kind.COMPUTE:
+        return COMPUTE_WORKER_LABEL if root in computes else job_label(table.rows[root])
+    return None
+
+
+def link_nested(table, groups, membership, sessions):
+    """Every session lists each other group whose root runs beneath any of its processes,
+    at any depth; a session also records the nearest session it runs inside."""
+    for group in sorted(groups.values(), key=lambda item: item.root.pid):
+        for ancestor in table.ancestors(group.root.pid):
+            outer = groups.get(membership.get(ancestor))
+            if outer is not None and outer is not group and outer.kind in SESSION_KINDS:
+                if group.id not in outer.nested:
+                    outer.nested.append(group.id)
         if group.kind in SESSION_KINDS:
             outer = nearest(table.ancestors(group.root.pid), sessions)
             if outer is not None:
                 group.parent = group_id(sessions[outer], outer)
-                groups[group.parent].nested.append(group.id)
-    return Grouping(groups, membership)
 
 
 def ordered_members(table, group, membership) -> list[Member]:

@@ -59,7 +59,7 @@ class StopCode(str, Enum):
 STOP_TEXTS = {
     StopCode.TIME_LIMIT: 'Stopped at the time limit before every process was handled; refresh and retry',
     StopCode.SESSION_CHANGED: 'The session gained a process the plan had not seen; nothing more was signalled',
-    StopCode.NESTED_SESSION: 'A session started inside this one; nothing more was signalled',
+    StopCode.NESTED_SESSION: 'A session or service started inside this one; nothing more was signalled',
     StopCode.UNREADABLE: 'The process table could not be read again; nothing more was signalled',
     StopCode.ROOT_CHANGED: 'The session root exited or changed; nothing more was signalled',
 }

@@ -216,7 +216,7 @@
    "cpu": 1.7,
    "rss": 696254464,
    "count": 7,
-   "tree_blocked": "Contains nested sessions (codex · project); end those first",
+   "tree_blocked": "Contains nested sessions or services (codex · project); end those first",
    "processes": [
     {
      "pid": 99903,

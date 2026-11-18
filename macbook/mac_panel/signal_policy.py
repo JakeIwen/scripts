@@ -136,7 +136,7 @@ class SignalPolicy:
 
 
 def nested_reason(names) -> str:
-    return f"Contains nested sessions ({', '.join(names)}); end those first"
+    return f"Contains nested sessions or services ({', '.join(names)}); end those first"
 
 
 def tree_size_reason(group) -> str | None:
@@ -146,8 +146,9 @@ def tree_size_reason(group) -> str | None:
 def tree_blocked(policy: SignalPolicy, group, context: PolicyContext, names=None) -> str | None:
     """Why a group has no whole-tree action, or None for a session tree that may be ended.
 
-    A session with another session nested inside it is refused as a whole, so the count a
-    confirmation shows is always the set of processes that would be signalled. The snapshot,
+    A session with any other group (a session, a Codex process, infra or compute) running
+    beneath it is refused as a whole, so the count a confirmation shows is always the set of
+    processes that would be signalled. The snapshot,
     the request and every re-check ask this one function.
     """
     reason = policy.blocked(group.root, group.kind, Scope.TREE, context)

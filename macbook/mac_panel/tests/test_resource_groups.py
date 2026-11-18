@@ -109,12 +109,12 @@ class GroupingTests(unittest.TestCase):
 
     def test_a_codex_option_value_with_a_space_leaves_its_role_unknown(self):
         # ps shows `-c 'model=a b'` as three words, so "b" sits where the subcommand would be:
-        # it may be an app server, so its group is marked and the policy refuses all of it.
+        # it may be an app server, so it is read-only infra and the policy refuses all of it.
         table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),
                            (301, 1, '/Users/me/.codex/bin/codex -c model=a b app-server --listen x'))
         grouping = build_grouping(table)
-        self.assertEqual(grouping.kind(301), Kind.CODEX)
-        self.assertTrue(grouping.groups['codex:301'].role_unknown)
+        self.assertEqual(grouping.kind(301), Kind.INFRA)
+        self.assertTrue(grouping.groups['infra:301'].role_unknown)
 
     def test_a_session_inside_a_compute_job_or_infra_is_its_own_group(self):
         table = make_table((400, 1, 'node /x/model-gateway.js'), (405, 400, 'claude -p x'), (406, 405, 'sleep 1'))
