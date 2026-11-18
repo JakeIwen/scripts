@@ -60,14 +60,21 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(self.grouping.groups['claude:200'].nested, ['claude:210'])
         self.assertEqual(self.members('codex:300'), [(300, 0)])
 
-    def test_infra_and_compute_match_by_position(self):
+    def test_infra_and_compute_roots_and_their_members(self):
         self.assertEqual(self.grouping.kind(301), Kind.INFRA)
         self.assertEqual(self.members('infra:301'), [(301, 0), (302, 1)])
         self.assertEqual(self.members('infra:400'), [(400, 0), (401, 1)])
         self.assertEqual(self.grouping.groups['infra:400'].label, 'model gateway')
         self.assertEqual(self.grouping.groups['infra:410'].label, 'Playwright MCP')
-        for pid in (600, 601, 602, 603, 100, 101):
+        for pid in (603, 100, 101):
             self.assertEqual(self.grouping.kind(pid), Kind.APP, pid)
+
+    def test_a_mention_outside_any_session_errs_toward_read_only(self):
+        # Matching for safety is liberal: these only mention a gateway or the worker, and are
+        # read-only as a result, which is the safe side of the mistake.
+        self.assertEqual(self.grouping.kind(600), Kind.INFRA)
+        self.assertEqual(self.grouping.kind(601), Kind.COMPUTE)
+        self.assertEqual(self.grouping.kind(602), Kind.INFRA)
 
     def test_compute_worker_row_and_job_rows(self):
         self.assertEqual(self.members('compute:500'), [(500, 0), (501, 1)])
@@ -101,13 +108,14 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(grouping.membership[48], 'infra:47')
         self.assertEqual((grouping.kind(49), table.rows[49].name), (Kind.APP, 'claude'))
 
-    def test_a_codex_option_value_with_a_space_cannot_turn_an_app_server_into_a_session(self):
-        # ps shows `-c 'model=a b'` as three words, so "b" sits where the subcommand would be.
+    def test_a_codex_option_value_with_a_space_leaves_its_role_unknown(self):
+        # ps shows `-c 'model=a b'` as three words, so "b" sits where the subcommand would be:
+        # it may be an app server, so its group is marked and the policy refuses all of it.
         table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),
                            (301, 1, '/Users/me/.codex/bin/codex -c model=a b app-server --listen x'))
         grouping = build_grouping(table)
-        self.assertEqual(grouping.kind(301), Kind.INFRA)
-        self.assertEqual(grouping.groups['infra:301'].label, 'Codex app server')
+        self.assertEqual(grouping.kind(301), Kind.CODEX)
+        self.assertTrue(grouping.groups['codex:301'].role_unknown)
 
     def test_a_session_inside_a_compute_job_or_infra_is_its_own_group(self):
         table = make_table((400, 1, 'node /x/model-gateway.js'), (405, 400, 'claude -p x'), (406, 405, 'sleep 1'))

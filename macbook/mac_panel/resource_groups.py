@@ -1,15 +1,17 @@
-"""The one declaration of how processes group: kinds, positional matches and membership.
+"""The one declaration of how processes group: kinds, roots and membership.
 
-Matching looks only at an argument's position (executable, interpreter script or module,
-subcommand), never at a substring of the whole command line, so an unrelated command that
-merely mentions `van_compute.worker` or `model-gateway.js` is not grouped with them.
+Which processes root a group comes from `process_roles`, which errs toward protection: a
+command that merely mentions `model-gateway.js` outside any session is grouped as infra and
+so is read-only. Membership then decides: a process inside a session belongs to that
+session, so a session's own `grep model-gateway.js` stays an ordinary member.
 """
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 import re
 
-from process_invocation import Family
+from process_roles import (CLAUDE, CODEX_VALUE_OPTIONS, CodexRole, codex_role, infra_label,
+                           is_codex, is_compute_root)
 from process_table import ProcessRow, ProcessTable
 
 
@@ -25,24 +27,10 @@ SESSION_KINDS = frozenset((Kind.CLAUDE, Kind.CODEX))
 # The kinds the payload totals; apps are reported per tree instead.
 TOTAL_KINDS = (Kind.CLAUDE, Kind.CODEX, Kind.INFRA, Kind.COMPUTE)
 
-# Codex global options that consume the next token; the first other operand is its subcommand.
-CODEX_VALUE_OPTIONS = frozenset(('-c', '--config', '-m', '--model', '-p', '--profile', '-C',
-                                 '--cd', '-s', '--sandbox', '-a', '--ask-for-approval', '-i',
-                                 '--image', '--enable', '--disable', '--local-provider',
-                                 '--add-dir'))
-CODEX_APP_SERVER = 'app-server'
 # Subcommands worth naming in a session's detail; anything else (including a prompt
 # operand, which must never be shown) reads as an interactive session.
 CODEX_DETAILS = {'exec': 'exec', 'e': 'exec', 'resume': 'resumed', 'review': 'review'}
 
-INFRA_EXECUTABLES = {'claude-code-proxy': 'model gateway proxy',
-                     'llm_switchboard': 'LLM switchboard'}
-INFRA_SCRIPTS = {'model-gateway.js': 'model gateway', 'usage-server.mjs': 'usage server'}
-INFRA_SCRIPT_PATHS = {('@playwright', 'mcp', 'cli.js'): 'Playwright MCP'}
-INFRA_MODULES = {'llm_switchboard': 'LLM switchboard'}
-INFRA_SUBCOMMANDS = {('codex', CODEX_APP_SERVER): 'Codex app server'}
-
-COMPUTE_MODULE = 'van_compute.worker'
 COMPUTE_WORKER_LABEL = 'worker'
 # Relative to the home directory; a job is named only from an argument under this root.
 JOBS_ROOT = Path('Library/Caches/van-compute/jobs')
@@ -53,6 +41,7 @@ SSH_MASTER_FLAGS = frozenset('NM')
 
 
 def codex_subcommand(row: ProcessRow) -> str | None:
+    """The first operand after value options: display detail only, never a safety decision."""
     tokens = iter(row.arguments)
     for token in tokens:
         if token in CODEX_VALUE_OPTIONS:
@@ -62,49 +51,21 @@ def codex_subcommand(row: ProcessRow) -> str | None:
     return None
 
 
-def is_codex_app_server(row: ProcessRow) -> bool:
-    # A `-c` value containing a space shifts every later token, so the positional
-    # subcommand can be misread; any whole `app-server` token also counts. The error then
-    # falls on the side of infra (never signalled), not on a session tree's actions.
-    return codex_subcommand(row) == CODEX_APP_SERVER or CODEX_APP_SERVER in row.arguments
-
-
 def session_kind(row: ProcessRow) -> Kind | None:
-    if row.exe == 'claude':
+    if row.exe == CLAUDE:
         return Kind.CLAUDE
-    if row.exe == 'codex' and not is_codex_app_server(row):
+    if is_codex(row) and codex_role(row) is not CodexRole.APP_SERVER:
         return Kind.CODEX
     return None
 
 
+def role_unknown(row: ProcessRow) -> bool:
+    """A session root that might be an app server: grouped as a session, signalled never."""
+    return is_codex(row) and codex_role(row) is CodexRole.UNCERTAIN
+
+
 def codex_detail(row: ProcessRow) -> str:
     return CODEX_DETAILS.get(codex_subcommand(row) or '', 'interactive')
-
-
-def script_parts(script):
-    return tuple(part for part in script.split('/') if part)
-
-
-def infra_label(row: ProcessRow) -> str | None:
-    if row.exe in INFRA_EXECUTABLES:
-        return INFRA_EXECUTABLES[row.exe]
-    if row.exe == 'codex':
-        return INFRA_SUBCOMMANDS[(row.exe, CODEX_APP_SERVER)] if is_codex_app_server(row) else None
-    call = row.invocation
-    if call.module is not None:
-        return INFRA_MODULES.get(call.module)
-    if call.script is not None:
-        parts = script_parts(call.script)
-        for suffix, label in INFRA_SCRIPT_PATHS.items():
-            if parts[-len(suffix):] == suffix:
-                return label
-        return INFRA_SCRIPTS.get(parts[-1] if parts else '')
-    return None
-
-
-def is_compute_root(row: ProcessRow) -> bool:
-    call = row.invocation
-    return call.family is Family.PYTHON and call.module == COMPUTE_MODULE
 
 
 def is_control_master(row: ProcessRow) -> bool:
@@ -150,6 +111,8 @@ class Group:
     members: list[Member] = field(default_factory=list)
     parent: str | None = None
     nested: list[str] = field(default_factory=list)
+    # The root's role could not be established (`role_unknown`): nothing in it is signalled.
+    role_unknown: bool = False
 
 
 @dataclass
@@ -225,7 +188,8 @@ def build_grouping(table: ProcessTable, jobs_root: str | None = None) -> Groupin
             label = (infras.get(root) if kind is Kind.INFRA else
                      (COMPUTE_WORKER_LABEL if root in computes else job_label(row, jobs_root))
                      if kind is Kind.COMPUTE else None)
-            groups[gid] = Group(gid, kind, row, label)
+            groups[gid] = Group(gid, kind, row, label,
+                                role_unknown=kind in SESSION_KINDS and role_unknown(row))
     for group in groups.values():
         group.members = ordered_members(table, group, membership)
         if group.kind in SESSION_KINDS:

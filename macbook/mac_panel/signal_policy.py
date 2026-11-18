@@ -9,7 +9,7 @@ from enum import Enum
 import os
 
 from process_hosting import hosted_units
-from process_invocation import SHELLS
+from process_roles import is_shell
 from process_table import KERNEL_NAME_LIMIT, ProcessRow, ProcessTable
 from resource_groups import SESSION_KINDS, Grouping, Kind
 
@@ -42,6 +42,8 @@ PROTECTED_REASON = 'A system or terminal process the panel never signals'
 INCOMPLETE = 'Its parent processes could not be read; refresh'
 SHELL = 'A shell may be hosting a live terminal session; end its session instead'
 TREE_ONLY_SESSIONS = 'Whole-tree actions exist only for Claude and Codex sessions'
+ROLE_UNKNOWN = ('Its Codex role (session or app server) could not be read from its arguments, '
+                'so the panel leaves it alone')
 KIND_REASONS = {Kind.INFRA: 'Shared by every session; restart it from Services',
                 Kind.COMPUTE: 'Owned by van-compute; killing a job here would skip its cleanup'}
 
@@ -62,6 +64,8 @@ class PolicyContext:
     # then unknown, so nothing may be signalled from this table.
     panel_known: bool
     hosted: dict
+    # Every process in a session group whose root's role could not be established.
+    role_unknown: frozenset = frozenset()
 
 
 def is_protected(row: ProcessRow) -> bool:
@@ -76,9 +80,11 @@ class SignalPolicy:
     def context(self, table: ProcessTable, grouping: Grouping) -> PolicyContext:
         pid = self.panel_pid
         known = pid not in table.rows or table.complete_chain(pid) is not None
+        unknown = frozenset(member.row.pid for group in grouping.groups.values()
+                            if group.role_unknown for member in group.members)
         return PolicyContext(table, pid, frozenset(table.ancestors(pid)),
                              frozenset(row.pid for row, _ in table.descendants(pid)), known,
-                             hosted_units(table, grouping))
+                             hosted_units(table, grouping), unknown)
 
     def blocked(self, row: ProcessRow, kind: Kind, scope: Scope, context: PolicyContext) -> str | None:
         """None when allowed; otherwise the reason the page shows."""
@@ -105,13 +111,16 @@ class SignalPolicy:
         return None
 
     def role_reason(self, row, kind, scope, context) -> str | None:
+        # It might be an app server every session shares, so neither scope may touch it.
+        if row.pid in context.role_unknown:
+            return ROLE_UNKNOWN
         if scope is Scope.TREE:
             # A session's own command shells are members of its tree and end with it.
             return None if kind in SESSION_KINDS else TREE_ONLY_SESSIONS
         # The owner's reason says more than "a shell" for a job's or gateway's own shell.
         if kind in KIND_REASONS:
             return KIND_REASONS[kind]
-        if row.exe in SHELLS:
+        if is_shell(row):
             return SHELL
         # A helper inside a session is that session's own; only outside processes host.
         if kind not in SESSION_KINDS and context.hosted.get(row.pid):

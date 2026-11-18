@@ -22,8 +22,9 @@ from panel_contracts import (AppRecord, ApiError, GroupProcessRecord, KindTotals
                              ResourcesPayload, SignalResult, SystemRecord)
 from process_signals import ProcessSignaller
 from process_table import ProcessReader, ProcessTable
+from process_roles import is_compute_root
 from resource_groups import (JOBS_ROOT, SESSION_KINDS, TOTAL_KINDS, Group, Grouping, Kind,
-                             build_grouping, is_compute_root)
+                             build_grouping)
 from signal_policy import PolicyContext, Scope, SignalPolicy, tree_blocked
 from system_metrics import Pressure, Probe, SystemFacts, SystemMetrics, Thermal, cpu_percent
 

@@ -451,7 +451,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `process_table.py` (ps parse, `display_name`), `process_invocation.py` (script or `-m` module read from
   arguments only when they parse with confidence), `system_metrics.py`, `llm_sessions.py` (Claude registry
   `~/.claude/sessions/<pid>.json`, Codex rollout/index naming, `NameSource`), `resource_groups.py` (kinds and
-  positional matching), `signal_policy.py` (the one allow decision; protected by argv[0] and kernel name),
+  membership), `process_roles.py` (session, Codex app-server, infra, compute and shell roles for safety:
+  liberal matching, an unsure parse protects), `signal_policy.py` (the one allow decision; protected by argv[0] and kernel name),
   `process_hosting.py` (outside processes with a terminal or LLM root beneath them are blocked),
   `signal_recheck.py` (before each signal, a fresh table and a fresh decision; `TREE_TARGET_LIMIT`,
   `MUTATION_BUDGET`, the reply's `stopped`) and `process_signals.py` (the mutate executor), and the page modules
