@@ -45,6 +45,7 @@ default_give_up_seconds=$(( 7 * 86400 ))
 agent_template=$repo/macbook/scripts/deferred_agent_run.zsh
 agent_notify=$repo/macbook/scripts/deferred_agent_notify.zsh
 pi_template=$repo/macbook/scripts/deferred_pi_run.py
+list_json=$repo/macbook/scripts/deferred_list_json.py   # turns the list stream into JSON
 agent_hosts=(mac vanpi)   # where an add-agent job runs its prompt
 pi_tiers=(astra sol luna) # pi_agent.py --agent values; a vanpi job's --model
 refused_status=6          # cancel: a vanpi run may still be active (--abandon overrides)
@@ -332,72 +333,7 @@ emit_agent_fields() {  # DIR: host, model, effort, remote state and run id; empt
 }
 
 print_list_json() {
-  emit_list_json_records | /usr/bin/python3 -I -B -c '
-import json
-import pathlib
-import sys
-
-
-def tail_log(path):
-    try:
-        data = pathlib.Path(path).read_bytes()
-    except FileNotFoundError:
-        return None
-    lines = data.splitlines(keepends=True)[-64:]
-    return b"".join(lines)[-8192:].decode("utf-8", errors="replace")
-
-
-fields = iter(part.decode("utf-8", errors="replace")
-              for part in sys.stdin.buffer.read().split(b"\0")[:-1])
-if next(fields) != "H":
-    raise SystemExit("invalid deferred list stream")
-loaded = next(fields) == "1"
-has_last_run = next(fields) == "1"
-last_run = next(fields)
-stale = next(fields) == "1"
-result = {
-    "checker": {
-        "agent_loaded": loaded,
-        "last_run": last_run if has_last_run else None,
-        "stale": stale,
-    },
-    "jobs_dir": next(fields),
-    "jobs": [],
-}
-for kind in fields:
-    job_id = next(fields)
-    if kind == "I":
-        result["jobs"].append({"id": job_id, "valid": False})
-        continue
-    if kind != "V":
-        raise SystemExit("invalid deferred job stream")
-    result["jobs"].append({
-        "id": job_id,
-        "valid": True,
-        "name": next(fields),
-        "due": next(fields),
-        "state": next(fields),
-        "attempts": int(next(fields)),
-        "max_attempts": int(next(fields)),
-        "timeout": int(next(fields)),
-        "description": next(fields),
-        "created": next(fields),
-        "origin": next(fields),
-        "last_log": tail_log(next(fields)),
-        "give_up": next(fields),
-        "agent": next(fields) == "1",
-        "ready": next(fields) or None,
-        "last_not_ready": next(fields) or None,
-        "not_ready_checks": int(next(fields)),
-        "host": next(fields) or None,
-        "model": next(fields) or None,
-        "effort": next(fields) or None,
-        "remote_state": next(fields) or None,
-        "remote_run": next(fields) or None,
-    })
-json.dump(result, sys.stdout, ensure_ascii=False)
-sys.stdout.write("\n")
-'
+  emit_list_json_records | /usr/bin/python3 -I -B $list_json
 }
 
 cmd_list() {
