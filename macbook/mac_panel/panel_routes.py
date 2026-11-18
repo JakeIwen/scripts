@@ -15,6 +15,7 @@ from logs_adapter import LogsAdapter
 from metered_adapter import MeteredAdapter
 from ntfy_adapter import NtfyAdapter
 from panel_contracts import ApiError, Reply, Section
+from resources_adapter import ResourcesAdapter
 from restore_adapter import RestoreAdapter
 from services_adapter import ServicesAdapter
 from settings_adapter import SettingsAdapter
@@ -30,6 +31,7 @@ class PanelRoutes:
         self.guard = GuardAdapter(runner)
         self.services = ServicesAdapter(runner)
         self.logs = LogsAdapter(runner, self.services)
+        self.resources = ResourcesAdapter(runner)
         self.adapters = {
             Section.METERED: MeteredAdapter(runner),
             Section.AMPHETAMINE: AmphetamineAdapter(runner),
@@ -43,6 +45,7 @@ class PanelRoutes:
             Section.NTFY: NtfyAdapter(),
             Section.USAGE: UsageAdapter(runner),
             Section.LOGS: self.logs,
+            Section.RESOURCES: self.resources,
         }
         self.reads = {f'/api/{name.value}': adapter.read for name, adapter in self.adapters.items()}
         self.writes = {
@@ -59,6 +62,7 @@ class PanelRoutes:
             '/api/llm-restore/snapshots': self.adapters[Section.RESTORE].snapshots,
             '/api/guard': self.guard.action,
             '/api/logs': self.logs.mutate,
+            '/api/resources': self.resources.mutate,
             '/api/ntfy/test': self.notify_test,
         }
 
