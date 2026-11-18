@@ -11,7 +11,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'sh' / 'plus_commands.py'
-COMMON = ('+id', '+ho', '+urs', '+lex', '+sa', '+rcp', '+art', '+prompt')
+COMMON = ('+id', '+ho', '+ss', '+lex', '+sa', '+rcp', '+art', '+prompt')
 VARIANTS = {
     'mac-claude': (*COMMON, '+clp', '+x'),
     'mac-codex': (*COMMON, '+clp'),

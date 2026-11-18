@@ -39,7 +39,7 @@ TRIGGER = "+cmd"
 BULLET = re.compile(r"^ ?- `(\+[^`]+)`: (.*)$")
 SENTENCE_END = re.compile(r"\.(\s|$)")
 PROCEDURE_SOURCE = Path("config/shared/plus-commands/procedures.json")
-COMMON_PROCEDURES = frozenset(("+id", "+ho", "+urs", "+lex", "+sa", "+rcp", "+art", "+prompt"))
+COMMON_PROCEDURES = frozenset(("+id", "+ho", "+ss", "+lex", "+sa", "+rcp", "+art", "+prompt"))
 VARIANT_COMMANDS = {
     "mac-claude": COMMON_PROCEDURES | {"+clp", "+x"},
     "mac-codex": COMMON_PROCEDURES | {"+clp"},
