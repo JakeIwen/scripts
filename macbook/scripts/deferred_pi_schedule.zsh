@@ -107,6 +107,8 @@ pi_unlaunched() {  # DIR MODE RC [collect]: the pass left nothing on record
       "Its vanpi pass exited 0 but recorded no launch and delivered no report (see $dir/last.log). Nothing starts a run until you retry or run-now it in Mac Panel (macpanel)."
   elif [[ -n ${4-} ]]; then
     log_line "${${mode:#scheduled}:+manual }nothing to collect for ${dir:t}"
+  elif [[ $mode == scheduled && ! $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
+    pi_window_closed $dir   # the pass reached the launch (or its end) past the give-up time
   else
     account_pass $dir $mode $rc   # not ready, or a launch refused before the Pi
   fi
@@ -185,9 +187,16 @@ pi_run_due() {  # DIR NOW: what the checker does for a vanpi job whose $pi is fr
     unlaunched)
       [[ $job[state] == pending && ! $job[due] > $now ]] || return 0
       if [[ ! $now < $(give_up_stamp) ]]; then pi_window_closed $dir; return 0; fi
-      pi_passable $dir && run_job $dir ;;
+      pi_passable $dir && pi_launch_pass $dir ;;
   esac
   return 0
+}
+
+pi_launch_pass() {  # DIR: the checker's launch pass; the run refuses to launch past the give-up time
+  local epoch
+  strftime -r -s epoch $stamp_format $(give_up_stamp)
+  local -a pass_env=(DEFERRED_LAUNCH_BY=$epoch)   # deferred_pi_run.LAUNCH_BY; run-now passes none
+  run_job $1
 }
 
 pi_passable() {  # DIR: its run file can make a pass; otherwise warns once and fails

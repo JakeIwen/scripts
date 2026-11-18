@@ -55,6 +55,9 @@ LAUNCH_CALLS = remote.LAUNCH_TIMEOUT + remote.STATUS_TIMEOUT
 LAUNCH_NEED = 2 * remote.SSH_TIMEOUT + LAUNCH_CALLS
 MIN_PASS_TIMEOUT = PASS_MARGIN + LAUNCH_NEED
 READY_ALLOWANCE = 30
+# Set by the scheduler for a pass it started (not for run-now): the job's give-up
+# time as epoch seconds, past which the pass must not launch.
+LAUNCH_BY = 'DEFERRED_LAUNCH_BY'
 REPORT_CHECK_LIMIT = 3  # passes that may find a finished run's report blank before it fails
 
 SETTINGS = ('agent_name', 'agent_model', 'agent_effort', 'agent_cwd', 'agent_ready',
@@ -222,6 +225,7 @@ def launch(job, settings, clock):
     if budget.remaining() < LAUNCH_CALLS:
         raise NotReady('Too little of this pass is left to launch and read the run once; '
                        'the next check launches.')
+    refuse_past_give_up()
     token = 'd' + secrets.token_hex(8)  # survives pi_agent.py's 30-character name slug whole
     at = int(time.time())
     job.write(LAUNCHING, {'token': token, 'at': at})
@@ -240,6 +244,15 @@ def launch(job, settings, clock):
     save_run(job, run_id, token, at)
     print(f'Started {run_id} on vanpi.')
     return collect(job, settings, job.read(RUN), clock)
+
+
+def refuse_past_give_up():
+    """Read at the launch itself: --ready and the Pi calls before it can cross the give-up time."""
+    value = os.environ.get(LAUNCH_BY, '')
+    if value.isdigit() and time.time() >= int(value):
+        cutoff = time.strftime('%Y-%m-%d %H:%M', time.localtime(int(value)))
+        raise Failure(f'Not launched: the job is past its give-up time ({cutoff}); nothing was started on '
+                      'vanpi. retry or run-now starts it.')
 
 
 def acquire_prompt(job, settings, budget):

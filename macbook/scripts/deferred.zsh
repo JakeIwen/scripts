@@ -62,6 +62,7 @@ pi_min_timeout=390 pi_ready_allowance=30
 typeset -A job          # the record load_job last read
 typeset run_job_status=0 run_job_not_ready=0 run_job_collecting=0 run_job_done=0  # what the last pass left
 typeset add_kind=script add_host=   # what cmd_add records; stage_agent_job sets them for agent jobs
+typeset -a pass_env=()  # extra NAME=VALUE settings for a pass; a caller sets them as a local
 source $repo/macbook/scripts/deferred_pi_schedule.zsh
 
 usage() {
@@ -496,7 +497,7 @@ execute_job() {  # DIR TIMEOUT [ARG]: one pass of the job's run (ARG: collect); 
     cd -- $dir
     exec /usr/bin/perl -e 'use POSIX (); POSIX::setsid(); exec @ARGV or exit 127' -- \
       /usr/bin/env -i HOME=$HOME USER=$USERNAME LOGNAME=$USERNAME LANG=en_US.UTF-8 \
-      PATH=$job_path TMPDIR=${TMPDIR:-/tmp} DEFERRED_JOB_DIR=$dir DEFERRED_LOG=$log ./run $run_args
+      PATH=$job_path TMPDIR=${TMPDIR:-/tmp} DEFERRED_JOB_DIR=$dir DEFERRED_LOG=$log $pass_env ./run $run_args
   ) > $dir/last.log 2>&1 &
   pid=$!
   { sleep $timeout; : > $flag; kill -TERM -- -$pid; sleep 2; kill -KILL -- -$pid } >/dev/null 2>&1 &
@@ -627,9 +628,10 @@ flag_invalid() {  # DIR [WHAT]: warn once per invalid folder; the marker clears 
 cmd_run_due() {
   acquire_job_lock 0 || return 0  # another check is already running
   local now dir marker
-  now=$(strftime $stamp_format $EPOCHSECONDS)
   strftime '%F %T' $EPOCHSECONDS > $heartbeat
   for dir in $jobs_dir/*(N/); do
+    # Read per job: an earlier job's pass may have held the checker past a due or give-up time.
+    now=$(strftime $stamp_format $EPOCHSECONDS)
     if ! job_trusted $dir; then flag_invalid $dir; continue; fi
     if pi_job; then pi_check $dir $now; continue; fi   # its deadline does not need the run file
     if ! run_executable $dir; then flag_invalid $dir; continue; fi

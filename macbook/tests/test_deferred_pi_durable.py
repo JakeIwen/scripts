@@ -109,3 +109,22 @@ class DeadlineWithoutRunTests(PiHarness):
         self.assertIn(f"stop {run_id}", WarningTopic.received[-1][2])
         self.deferred("run-due")
         self.assertEqual(len(self.alerts()), 2)
+
+
+class LaunchWindowTests(PiHarness):
+    def test_the_launch_window_is_checked_at_the_launch_not_at_the_scan(self):
+        # Sorted first, so its ready probe holds the checker across the cutoff for the second.
+        first = self.add_pi("--ready", "/bin/sleep 6", name="a-ready")
+        second = self.add_pi(name="b-late")
+        cutoff = minute_end(3)
+        for job in (first, second):
+            self.set_meta(job, give_up=cutoff)
+        self.deferred("run-due")
+        self.assertEqual(self.calls("run"), [])
+        for job in (first, second):
+            with self.subTest(job=job.name):
+                self.assertEqual(self.meta(job)["state"], "failed")
+                self.assertEqual(self.listed(job)["remote_state"], "unlaunched")
+        self.assertIn("past its give-up time", self.last_log(first))
+        self.assertEqual(self.meta(second)["attempts"], "0")  # its pass never started
+        self.assertEqual(self.alerts(), [f"Deferred job gave up: {first.name}", f"Deferred job gave up: {second.name}"])
