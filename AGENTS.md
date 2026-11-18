@@ -398,12 +398,18 @@ compare it with this checkout. Deployed files may differ from the repository.
   deferred.zsh) separates launching from collecting and owns the collection
   deadline and the alerts: a vanpi job starts at most one Pi run by itself, a job
   owning a run gets a collect-only pass at every check whatever its state, due or
-  give-up time, and another run starts only by `retry`/`run-now`.
+  give-up time, and another run starts only by `retry`/`run-now`. It reads a
+  pass's outcome from the state files, never its exit status (a job is deleted
+  only once finished and `delivered`), evaluates the deadline before any pass
+  and without the job's `run`, and checks the give-up time per job and, through
+  the run, again at the launch.
   `macbook/scripts/deferred_pi_control.py` (`describe`, `cancel`, `rearm`, `expire`)
   reads and acts on that state, never the job's own files, for `list --json`
   (through `macbook/scripts/deferred_list_json.py`), `cancel` (exit 6 when a Pi
   run may still be active), `retry`/`run-now` (exit 7 unless `--relaunch ID`
-  names the attempt that may still be active, as `relaunch_id` shows) and
+  names the attempt that may still be active, as `relaunch_id` shows, and for
+  any id when the state records disagree; they set the new attempt's launch
+  window before clearing the old records) and
   `reschedule` (exit 8 for a vanpi job that has launched); the job
   record's `kind`/`host` says what a job is. `deferred_pi_state.py` is the one
   strict reader of the state files (`snapshot`, `RemoteState`, `FailureKind`, the

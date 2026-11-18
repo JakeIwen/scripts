@@ -256,9 +256,10 @@ reports `host`, `model` and `effort`):
   answer over ssh (else exit 75, retried at the next check), records a launch
   token and starts the run.
 - `launching`: a launch was attempted but its answer was lost (the pass prints
-  the commands to look for it). The next pass lists the Pi's runs for that token
-  (500, widened once to 2000 when the first list is full) and adopts the one it
-  finds; it never starts a second run while the outcome is unknown. A Pi that
+  the commands to look for it). The next pass lists the Pi's newest runs for that
+  token (500, widened to 2,000 and then 10,000 while each list comes back full)
+  and adopts the one it finds only from a list that holds every run on the Pi;
+  it never starts a second run while the outcome is unknown. A Pi that
   cannot be listed is exit 75.
 - `launch-unknown`: a complete list holds no run with the token, several runs
   carry it, or the list could not reach back far enough ("search incomplete",
@@ -281,13 +282,24 @@ reports `host`, `model` and `effort`):
   a person, and the old id stays in the job's `runs.log` and in `deferred.log`.
   A run that finished cleanly but whose final message is blank is read again at
   the next two checks (exit 75), then fails as "finished without a report".
-  `timed-out`, `remote` and `no-report` failures prove the run is over; a
-  `collection-deadline` failure does not, since the run may still be active.
+  `timed-out`, `remote` and `no-report` failures prove the run is over and always
+  name the run id whose status established them; a `collection-deadline` failure
+  does not prove it, since the run may still be active, and is the only failure
+  that may carry just a launch token (for a launch whose run id was never learned).
+  Records that disagree about which attempt they describe (a failure naming
+  another run than the saved one, or a token-only failure of another kind) make
+  the job's state unreadable (below).
 
 Another run, by a person only: a job never starts a second Pi run by itself, in
 any state. `retry JOB` (resets a failed job for the next check) and `run-now JOB`
 start another run by clearing the previous attempt, and what they need depends
-on whether it is known to be over:
+on whether it is known to be over. Under the checker lock they first check every
+precondition (the state is readable and consistent, and `--relaunch` names the
+unresolved attempt), then give the new attempt a fresh launch window (`give_up`
+becomes the later of now and the due time, plus 7 days, as after a reschedule;
+the due time and so the job id stay), and only then clear the previous attempt's
+records. When a precondition fails nothing is cleared and the message prints a
+command that works:
 
 - An attempt confirmed over (`failed` with kind `remote`, `timed-out` or
   `no-report`) is cleared by plain `retry` or `run-now`.
@@ -301,8 +313,14 @@ on whether it is known to be over:
 - A run the job still owns (`launching`, `running`, or `finished` with an
   undelivered report) is not an attempt to replace: `run-now` without
   `--relaunch` collects it, and `retry` refuses a job that is not failed.
-  `run-now JOB --relaunch ID` naming that run's id or token abandons it and
-  launches another.
+  `run-now JOB --relaunch ID` naming the id or token of a launching or running
+  run abandons it and launches another. A finished run whose report is not yet
+  delivered is not unresolved, so `--relaunch` is refused for it (exit 7):
+  `run-now` without the flag sends the saved report again.
+- A job whose state is unreadable or contradictory has no attempt the records
+  agree on, so `retry` and `run-now` refuse any `--relaunch` id (exit 7), clear
+  nothing and print every id they can recover with the `cancel --abandon JOB`
+  command, the only way to remove such a job.
 
 `reschedule JOB DUE` of a vanpi job that has ever launched (any `remote_state`
 but `unlaunched`) is refused with exit 8, so moving a due time can never start a
@@ -312,7 +330,12 @@ Launching and collecting are separate. A job launches by itself only from
 `unlaunched`, while it is pending, due and inside its give-up window; an
 unlaunched job past `--give-up` (default due + 7 days) fails without launching
 and alerts once, and collection of a run it already owns continues past that
-time. A job that owns a run (a launch in flight, a run with no terminal state,
+time. The give-up time is checked when each job's turn starts (not once per
+check, so a job that held the checker cannot let a later one launch late) and
+again by the run itself immediately before it records the launch, after any
+`--ready` probe; a pass the checker started that reaches the launch past give-up
+records nothing, starts nothing and fails the job as past give-up. A pass started
+by `run-now` is exempt: the person asked for it now. A job that owns a run (a launch in flight, a run with no terminal state,
 or a report not yet delivered) gets a collect-only pass at every check whatever
 its state (`pending` or `failed`), due time or give-up time: a `run-now` before
 the due time, a `run-now` on a failed job and a reschedule into the future all
@@ -320,19 +343,34 @@ leave the run collected. A collect-only pass never launches and spends no attemp
 `run-now` on such a job collects it; when the run is still going it exits 4 and
 prints `running JOB: ...`. Collection lasts until the run is terminal or its
 `--run-timeout` stop is confirmed, up to its collection deadline (launch time +
-`--run-timeout` + 7 days). The scheduler owns that deadline: past it the checker
-records a `collection-deadline` failure from the state file alone, so it holds
-even when the job's copied `run` cannot start, and alerts with the commands to find and
-stop the run by hand. A failure the run recorded before the scheduler could save
+`--run-timeout` + 7 days). The scheduler owns that deadline: at each check, before
+any pass and whether or not the job's copied `run` exists or is executable, it
+records a `collection-deadline` failure from the state file alone once the
+deadline has passed, and alerts with the commands to find and stop the run by
+hand. A `run` that is missing or not executable only means no collection pass
+is made; that is alerted once per run as a collector failure.
+
+The outcome of a pass is read from the state files, never from its exit status:
+the job is deleted only when its run is `finished` and the `delivered` marker
+exists. A pass that exits 0 with anything else (a run still running or
+launching, nothing on record after a launch pass, or unreadable state) is a
+collector failure: the job and its records are kept, and the alert goes out once
+per run (a job with nothing on record also fails and waits for a person). A failure the run recorded before the scheduler could save
 it (a crash between the two) is accounted at the next check instead of
 launching again.
 
 The scheduler also owns the alerts, one per kind and attempt (`alerts.sent` in
-the job directory): a failed or held run, a job that gave up before launching,
-a collector pass that exited abnormally without settling a run it owns (it keeps
-the run and every check tries again until the collection deadline), and a
+the job directory records an alert only after it was sent, so a warning ntfy
+could not take is retried at the next check, and a notifier that stays
+unreachable adds nothing there but a `warning undelivered` line in
+`deferred.log` per check): a failed or held run, a job that gave up before launching,
+a collector pass that did not settle a run it owns, whatever its exit status, or
+a run file that cannot start (it keeps the run and every check tries again until
+the collection deadline), and a
 finished run whose report could not be delivered. That last job stays `pending`
-with its report saved, resends it at every check and never touches the Pi again.
+with its report saved, resends it at every check and never touches the Pi again:
+the report itself has the saved-report guarantee (at least once), while a
+failure warning is only retried until one send succeeds.
 
 Exit statuses: every verb exits 75 when the checker lock is busy, 1 for another
 error and 2 for usage. `cancel` exits 6 when a Pi run may still be active,
