@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 import threading
 import time
@@ -159,6 +160,9 @@ class DeferredTests(unittest.TestCase):
             pi_job(remote_state='launch-unknown'),                             # a hold without its token
             pi_job(remote_state='unlaunched', remote_run=RUN_ID, remote_token=TOKEN),
             pi_job(remote_state='failed'), pi_job(remote_state='finished'),
+            pi_job(remote_state='running', remote_run=RUN_ID, remote_token=TOKEN, relaunch_id=RUN_ID),  # a run still owed
+            pi_job(remote_state='unlaunched', relaunch_id=TOKEN),
+            pi_job(remote_state='launch-unknown', remote_token=TOKEN, relaunch_id='d' + 'f' * 16),    # not its own id
             {**inventory(), 'jobs': [{**script, 'host': 'mac'}]},
             {**inventory(), 'jobs': [{**script, 'model': 'haiku', 'effort': 'high', 'remote_run': RUN_ID}]},
             {**mac, 'jobs': [{**mac['jobs'][0], 'remote_state': 'running'}]},
@@ -250,10 +254,63 @@ class DeferredTests(unittest.TestCase):
         state = load_script('deferred_pi_state')
         run = load_script('deferred_pi_run')
         self.assertEqual([s.value for s in state.RemoteState], [s.value for s in RemoteState])
-        self.assertEqual((deferred_adapter.CANCEL_REFUSED, deferred_adapter.RELAUNCH_REFUSED),
-                         (state.REFUSED, state.RELAUNCH_REFUSED))
+        self.assertEqual((deferred_adapter.CANCEL_REFUSED, deferred_adapter.RELAUNCH_REFUSED,
+                          deferred_adapter.RESCHEDULE_REFUSED),
+                         (state.REFUSED, state.RELAUNCH_REFUSED, state.RESCHEDULE_REFUSED))
         self.assertEqual(deferred_adapter.PI_MIN_TIMEOUT, run.MIN_PASS_TIMEOUT)
+        self.assertEqual(deferred_adapter.PI_READY_ALLOWANCE, run.READY_ALLOWANCE)
         self.assertEqual(deferred_adapter.TOKEN.pattern, state.TOKEN.pattern)
+        self.assertEqual(deferred_adapter.RUN_ID.pattern, state.RUN_ID.pattern)
+        # deferred.zsh keeps its own copies of the numbers and the name rule.
+        script = (ROOT / 'macbook/scripts/deferred.zsh').read_text()
+        number = lambda variable: int(re.search(rf'\b{variable}=(\d+)', script).group(1))
+        self.assertEqual((number('refused_status'), number('relaunch_refused_status'), number('reschedule_refused_status')),
+                         (state.REFUSED, state.RELAUNCH_REFUSED, state.RESCHEDULE_REFUSED))
+        self.assertEqual((number('pi_min_timeout'), number('pi_ready_allowance')),
+                         (run.MIN_PASS_TIMEOUT, run.READY_ALLOWANCE))
+        self.assertEqual(int(re.search(r'valid_name\(\) \{.*-le (\d+)', script).group(1)), deferred_adapter.NAME_LIMIT)
+        self.assertEqual(deferred_adapter.NAME_LIMIT, 60)
+
+    def test_a_run_id_names_the_attempt_to_start_another_over(self):
+        runner = FakeRunner([CommandResult(0, 'retrying')])
+        adapter = DeferredAdapter(runner)
+        try:
+            adapter.mutate({'action': 'retry', 'id': 'test-job', 'relaunch': RUN_ID, 'confirmed': True})
+            self.assertEqual(runner.calls[-1][0], (*DEFERRED, 'retry', 'test-job', '--relaunch', RUN_ID))
+            for bad in (RUN_ID + ';', '1117-34729-b1e4', 'x' * 90, ''):
+                with self.subTest(bad=bad), self.assertRaises(ApiError) as raised:
+                    adapter.mutate({'action': 'retry', 'id': 'test-job', 'relaunch': bad, 'confirmed': True})
+                self.assertEqual(raised.exception.status, 400)
+            self.assertEqual(len(runner.calls), 1)
+        finally:
+            adapter.tasks.close()
+
+    def test_run_now_with_a_relaunch_id_when_none_is_listed_is_a_conflict(self):
+        settled = pi_job(remote_state='running', remote_run=RUN_ID, remote_token=TOKEN, relaunch_id=None)
+        runner = FakeRunner([json_command(settled)])
+        adapter = DeferredAdapter(runner)
+        try:
+            with self.assertRaises(ApiError) as raised:
+                adapter.mutate({'action': 'run-now', 'id': 'test-job', 'confirmed': True, 'relaunch': RUN_ID})
+            self.assertEqual((raised.exception.status, raised.exception.code), (409, 'relaunch-unconfirmed'))
+            self.assertIn('no longer applies', str(raised.exception))
+            self.assertEqual(len(runner.calls), 1)  # only the listing ran, never run-now
+        finally:
+            adapter.tasks.close()
+
+    def test_reschedule_of_a_launched_vanpi_job_is_its_own_conflict(self):
+        refusal = 'job x has launched on vanpi (Pi run: running); reschedule never starts another run'
+        runner = FakeRunner([CommandResult(8, stderr=refusal), CommandResult(0, 'rescheduled')])
+        adapter = DeferredAdapter(runner)
+        try:
+            body = {'action': 'reschedule', 'id': 'test-job', 'due': '2027-01-01 12:15'}
+            with self.assertRaises(ApiError) as raised:
+                adapter.mutate(body)
+            self.assertEqual((raised.exception.status, raised.exception.code), (409, 'reschedule-launched'))
+            self.assertIn('never starts another run', str(raised.exception))
+            self.assertEqual(adapter.mutate(body).body, {'message': 'rescheduled'})
+        finally:
+            adapter.tasks.close()
 
     def test_invalid_cli_payload_fails_closed(self):
         adapter = DeferredAdapter(FakeRunner([json_command({'jobs': []})]))
