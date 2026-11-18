@@ -4,7 +4,8 @@ import {gauge} from './charts.mjs';
 import {lineChart} from './line_chart.mjs';
 import {api} from './panel_api.mjs';
 import {historyPanel} from './history_panel.mjs';
-import {card, emptyState, fieldError, info, kv, node, tag, timeNode} from './panel_dom.mjs';
+import {card, emptyState, fieldError, info, kv, loadError, node, tag, timeNode} from './panel_dom.mjs';
+import {refresh} from './panel_sections.mjs';
 import {MODE_COPY, USAGE_COPY as COPY, USAGE_SETTINGS_TOOL} from './section_copy.mjs';
 import {toolCard} from './settings_card.mjs';
 import {stageAction} from './search_actions.mjs';
@@ -132,7 +133,9 @@ function snapshotAge(data) {
 // Not reused from the Settings payload: a save there or here changes the revision, and a stale one would only conflict.
 export async function load() {
   const [usage, settings] = await Promise.all([
-    api('/api/usage'),
+    // A usage failure renders in the allowance blocks only: the settings card and the hosted llm-restore
+    // section (its own load) stay usable.
+    api('/api/usage').catch(error => ({error: error.message})),
     api('/api/settings').catch(() => null),
   ]);
   const tool = settings?.tools.find(entry => entry.tool === USAGE_SETTINGS_TOOL);
@@ -197,7 +200,32 @@ function assess(data) {
   return worst(levels);
 }
 
+const RESTORE_ID = 'llm-restore';
+
+// The llm-restore section keeps its own frame (load, notices, refresh) and is mounted here, so a restore
+// action never re-renders this section and a usage reload never touches the restore cards.
+function restoreSlot() {
+  const slot = node('div', null, 'usage-restore');
+  const frame = document.getElementById(RESTORE_ID);
+  if (frame) {
+    frame.hidden = false;
+    slot.append(frame);
+  }
+  return slot;
+}
+
+function renderUnavailable(data) {
+  const left = node('div', null, 'usage-main');
+  left.append(card({title: COPY.budgetsTitle, body: loadError(`Could not load usage: ${data.error}`, () => refresh(SECTION)), anchor: 'budgets'}), restoreSlot());
+  const top = node('div', null, 'usage-top');
+  top.append(left, settingsCard(data));
+  const root = node('div');
+  root.append(top);
+  return {node: root, summary: 'unavailable', level: Level.ERROR};
+}
+
 export function render(data) {
+  if (data.error) return renderUnavailable(data);
   const root = node('div');
   const level = assess(data);
   const claude = data.claude_weekly ? `Claude ${percent(data.claude_weekly.left)}` : 'Claude n/a';
@@ -206,14 +234,17 @@ export function render(data) {
   const line = node('p', null, 'summary-line');
   line.append(status(level, summary));
   root.append(line);
+  const left = node('div', null, 'usage-main');
+  left.append(budgetsCard(data), restoreSlot());
   const top = node('div', null, 'usage-top');
-  top.append(budgetsCard(data), settingsCard(data));
+  top.append(left, settingsCard(data));
   root.append(top, routingCard(data), historyCard());
   return {node: root, summary, level};
 }
 
 export function attentionItems(data) {
   const items = [];
+  if (data.error) return items;
   Object.entries(data.availability).forEach(([family, state]) => {
     if (state === 'out') items.push({level: Level.ERROR, text: `${FAMILY[family] ?? family} gets no new workers until its window resets`, anchor: 'routing'});
     else if (state === 'constrained') items.push({level: Level.WARN, text: `${FAMILY[family] ?? family} allowance is constrained`, anchor: 'routing'});
@@ -230,6 +261,7 @@ export function attentionItems(data) {
 
 // Overview's card shows the two headline windows small.
 export function cardExtra(data) {
+  if (data.error) return null;
   const result = node('div');
   WINDOWS.filter(spec => ['claude_weekly', 'codex_weekly'].includes(spec.key) && data[spec.key]).forEach(spec => {
     result.append(gauge({value: data[spec.key].left, max: PERCENT, label: spec.label, format: percent,

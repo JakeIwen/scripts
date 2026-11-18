@@ -29,12 +29,23 @@ let afterOpen = () => {};
 let pendingAnchor = null;
 const navLink = id => document.querySelector(`#nav a[data-nav="${CSS.escape(id)}"]`);
 const knownId = id => known.includes(id) ? id : null;
+// Sections drawn inside another section instead of having a nav entry or a page of their own; the table also
+// maps the id that old bookmarks, stored tabs and links used to the section that now shows it.
+const HOSTED = {'llm-restore': {id: 'usage', anchor: 'snapshots'}};
+/** Maps a hash or stored id to {id, anchorId} of a known nav section, following the hosting table; else null. */
+export function resolveSection(raw, ids = known) {
+  const host = HOSTED[raw];
+  const id = host?.id ?? raw;
+  return ids.includes(id) ? {id, anchorId: host?.anchor} : null;
+}
+/** Ids of the sections shown inside the given one. */
+export const hostedIn = id => Object.keys(HOSTED).filter(key => HOSTED[key].id === id);
 export const currentSection = () => document.querySelector('main > section:not([hidden])')?.id ?? null;
 
 // ---- section frames ----
 
 function frame(id, onRefresh) {
-  const section = node('section');
+  const section = node('section', null, HOSTED[id] ? 'hosted' : undefined);
   section.id = id;
   section.hidden = true;
   section.setAttribute('aria-labelledby', `${id}-title`);
@@ -81,16 +92,20 @@ function navGroup(group, ids) {
   return wrap;
 }
 
-function updateDots(id, entry) {
+function updateDots(changed, entry) {
+  const id = HOSTED[changed]?.id ?? changed;
   const link = navLink(id);
   if (link) {
-    link.querySelector('.dot').className = `dot level-${entry.level}`;
-    link.title = entry.summary || '';
+    // A hosted section's problems show on its host's dot; the tooltip stays the host's own summary.
+    const levels = [id, ...hostedIn(id)].filter(member => state[member]).map(member => state[member].level);
+    link.querySelector('.dot').className = `dot level-${worst(levels)}`;
+    link.title = state[id]?.summary || '';
   }
   const group = GROUPS.find(item => item.sections.includes(id));
+  if (!group) return;
   const heading = document.querySelector(`.nav-heading[data-group="${CSS.escape(group.id)}"]`);
   if (!heading) return;
-  const levels = group.sections.filter(member => state[member]).map(member => state[member].level);
+  const levels = group.sections.flatMap(member => [member, ...hostedIn(member)]).filter(member => state[member]).map(member => state[member].level);
   heading.querySelector('.dot').className = `dot level-${levels.length ? worst(levels) : Level.UNKNOWN}`;
 }
 
@@ -144,7 +159,7 @@ function revealWhenRendered(id, anchorId, options) {
 }
 
 function openSection(id, anchorId, options) {
-  known.forEach(entry => { document.getElementById(entry).hidden = entry !== id; });
+  known.filter(entry => !HOSTED[entry]).forEach(entry => { document.getElementById(entry).hidden = entry !== id; });
   document.querySelectorAll('#nav a').forEach(link => {
     if (link.dataset.nav === id) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -157,8 +172,11 @@ function openSection(id, anchorId, options) {
   if (anchorId) revealWhenRendered(id, anchorId, options);
 }
 
-export function goTo(id, anchorId, options) {
-  if (!knownId(id)) return;
+export function goTo(raw, anchorId, options) {
+  const target = resolveSection(raw);
+  if (!target) return;
+  const id = target.id;
+  anchorId ??= target.anchorId;
   if (location.hash === `#${id}`) {
     openSection(id, anchorId, options);
     return;
@@ -168,11 +186,12 @@ export function goTo(id, anchorId, options) {
 }
 
 function onHashChange() {
-  const id = knownId(location.hash.slice(1));
-  if (!id) return;
-  const {anchorId, options} = pendingAnchor ?? {};
+  const target = resolveSection(location.hash.slice(1));
+  if (!target) return;
+  const {anchorId = target.anchorId, options} = pendingAnchor ?? {};
   pendingAnchor = null;
-  openSection(id, anchorId, options);
+  if (location.hash !== `#${target.id}`) history.replaceState(null, '', `#${target.id}`);
+  openSection(target.id, anchorId, options);
 }
 
 // ---- theme ----
@@ -219,9 +238,9 @@ export function buildShell({ids, onOpen, onRefresh, fallback}) {
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && drawerOpen()) setDrawer(false, true); });
   NARROW.addEventListener('change', () => setDrawer(false, false));
   addEventListener('hashchange', onHashChange);
-  const first = knownId(location.hash.slice(1)) ?? knownId(storedSection()) ?? fallback;
-  history.replaceState(null, '', `#${first}`);
-  openSection(first);
+  const first = resolveSection(location.hash.slice(1)) ?? resolveSection(storedSection()) ?? {id: fallback};
+  history.replaceState(null, '', `#${first.id}`);
+  openSection(first.id, first.anchorId);
 }
 
 /** A link that opens a section (and scrolls to one of its rows) through the same path as the nav. */

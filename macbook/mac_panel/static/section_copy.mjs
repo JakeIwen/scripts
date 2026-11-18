@@ -4,7 +4,7 @@ export const DEFAULT_SECTION = 'overview';
 // Order is the sidebar's order. A one-section group shows no header of its own.
 export const GROUPS = [
   {id: 'home', title: 'Overview', sections: ['overview']},
-  {id: 'jobs', title: 'Jobs & services', sections: ['services', 'deferred', 'crontab', 'automations', 'llm-restore']},
+  {id: 'jobs', title: 'Jobs & services', sections: ['services', 'deferred', 'crontab', 'automations']},
   {id: 'network', title: 'Network', sections: ['metered']},
   {id: 'mac', title: 'Mac', sections: ['amphetamine', 'guard', 'ntfy', 'logs']},
   {id: 'usage', title: 'LLM', sections: ['usage']},

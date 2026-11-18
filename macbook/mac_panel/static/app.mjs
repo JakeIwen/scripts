@@ -18,7 +18,7 @@ import * as services from './section_services.mjs';
 import * as settings from './section_settings.mjs';
 import * as usage from './section_usage.mjs';
 import {setupSearch} from './search_ui.mjs';
-import {buildShell, setConnection} from './shell.mjs';
+import {buildShell, hostedIn, setConnection} from './shell.mjs';
 
 // `auto` sections poll every 15 s. `endpoint: null` means the section renders from the state registry.
 // Optional module exports load, searchItems, attentionItems and cardExtra join search and Overview when present.
@@ -51,8 +51,10 @@ function refreshAll() {
 
 // Sections without auto-refresh reload when opened after a poll interval, so an old view is never shown as current.
 function onOpen(id) {
-  const entry = sections().find(item => item.id === id);
-  if (id === 'overview' || (!entry.auto && loadedAge(id) > POLL_MS)) refreshIfIdle(entry.id);
+  [id, ...hostedIn(id)].forEach(shown => {
+    const entry = sections().find(item => item.id === shown);
+    if (shown === 'overview' || (!entry.auto && loadedAge(shown) > POLL_MS)) refreshIfIdle(entry.id);
+  });
 }
 
 // Overview redraws from the registry shortly after any other section changes, batching a burst of loads.
