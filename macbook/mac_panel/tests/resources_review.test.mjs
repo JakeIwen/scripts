@@ -176,7 +176,7 @@ test('retrying after both reads failed shows the recovered settings form, not th
 
 // ---- finding 11: the hosted restore bookmark lands whichever render finishes last ----
 
-function bookmarkSetup(context) {
+function bookmarkSetup(context, restoreLoad = null) {
   context.mock.timers.enable({apis: ['setTimeout']});
   const host = section('usage');
   const hosted = section('llm-restore');
@@ -190,12 +190,21 @@ function bookmarkSetup(context) {
     return target;
   };
   const place = target => { host.parts['[data-anchor="snapshots"]'] = target; };
-  document.querySelector = selector => (selector.startsWith('main >') ? {id: 'usage'} : original(selector));
+  const open = {id: 'usage'};
+  document.querySelector = selector => (selector.startsWith('main >') ? open : original(selector));
   register([
     {id: 'usage', endpoint: null, render: () => ({node: new Element(), summary: '', level: 'ok'})},
-    {id: 'llm-restore', endpoint: null, render: () => { place(anchor()); return {node: new Element(), summary: '', level: 'ok'}; }},
+    {id: 'llm-restore', endpoint: null, load: restoreLoad ?? undefined,
+      render: () => { place(anchor()); return {node: new Element(), summary: '', level: 'ok'}; }},
   ]);
-  return {host, hosted, place, made, done: () => { document.querySelector = original; }};
+  return {host, hosted, place, made, open, done: () => { document.querySelector = original; }};
+}
+
+// A restore load the test finishes by hand, after as long as it likes.
+function slowLoad() {
+  let finish;
+  const promise = new Promise(resolve => { finish = resolve; });
+  return {load: () => promise, finish: () => finish({})};
 }
 
 test('a restore bookmark lands when the host renders first and the hosted restore finishes last', async context => {
@@ -215,13 +224,65 @@ test('the highlight survives a stale restore frame being replaced by a later res
   stale.dataset.anchor = 'snapshots';
   stale.scrollIntoView = () => {};
   place(stale);
+  // Opening the section has already started the restore frame's refresh.
+  const loading = refresh('llm-restore');
   revealWhenRendered('usage', 'snapshots', {});
   assert.ok(stale.classList.contains('flash'));
   stale.isConnected = false;
-  await refresh('llm-restore');
+  await loading;
   await refresh('usage');
   done();
   assert.ok(made[0].classList.contains('flash'), 'the replacement anchor was highlighted');
+});
+
+test('a restore load slower than a few seconds still lands the bookmark', async context => {
+  const slow = slowLoad();
+  const {made, done} = bookmarkSetup(context, slow.load);
+  const loading = refresh('llm-restore');
+  revealWhenRendered('usage', 'snapshots', {});
+  context.mock.timers.tick(30000);
+  slow.finish();
+  await loading;
+  done();
+  assert.equal(made.length, 1);
+  assert.ok(made[0].classList.contains('flash'));
+});
+
+test('the watch ends on landing, so a later poll does not scroll back to the bookmark', async context => {
+  const {made, done} = bookmarkSetup(context);
+  revealWhenRendered('usage', 'snapshots', {});
+  await refresh('llm-restore');
+  made[0].isConnected = false;
+  await refresh('llm-restore');
+  done();
+  assert.equal(made.length, 2);
+  assert.ok(!made[1].classList.contains('flash'), 'the poll\'s new row was left alone');
+});
+
+test('the watch ends when the reader opens another section or the restore load fails', async context => {
+  const slow = slowLoad();
+  const {made, open, place, done} = bookmarkSetup(context, slow.load);
+  const loading = refresh('llm-restore');
+  revealWhenRendered('usage', 'snapshots', {});
+  open.id = 'resources';
+  slow.finish();
+  await loading;
+  assert.ok(!made[0].classList.contains('flash'), 'not landed after navigating away');
+  open.id = 'usage';
+  // A failed restore load ends the watch: a later successful render does not land.
+  place(null);
+  register([{id: 'llm-restore', endpoint: null, load: () => Promise.reject(new Error('restore down')),
+    render: () => ({node: new Element(), summary: '', level: 'ok'})}]);
+  const failing = refresh('llm-restore');
+  revealWhenRendered('usage', 'snapshots', {});
+  await failing;
+  const late = new Element();
+  late.dataset.anchor = 'snapshots';
+  late.scrollIntoView = () => {};
+  register([{id: 'llm-restore', endpoint: null, render: () => { place(late); return {node: new Element(), summary: '', level: 'ok'}; }}]);
+  await refresh('llm-restore');
+  done();
+  assert.ok(!late.classList.contains('flash'), 'a failed load ended the watch');
 });
 
 // ---- finding 12: unknown pressure is not drawn as healthy ----

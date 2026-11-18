@@ -70,6 +70,8 @@ function pauseForEditing(id) {
 }
 
 export const refreshPending = id => pendingRefreshes.has(id);
+/** True while the section's load is in flight (until just after its state is recorded). */
+export const isLoading = id => busy.has(id);
 export const refreshIfIdle = id => refresh(id, {whenIdle: true});
 
 // Milliseconds since the section last loaded, so a tab opened later can tell whether it is stale.

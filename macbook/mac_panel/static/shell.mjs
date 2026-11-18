@@ -1,13 +1,12 @@
 // Page chrome: grouped sidebar nav (a drawer below 900 px), section frames, hash routing, theme and
 // the header's health line. Sections themselves know nothing of it.
 import {button, info, node} from './panel_dom.mjs';
-import {onState, state} from './panel_sections.mjs';
+import {isLoading, onState, state} from './panel_sections.mjs';
 import {GROUPS, SECTION_COPY, sectionTitle} from './section_copy.mjs';
 import {Level, worst} from './status_cell.mjs';
 
 const STORAGE = {section: 'mac-panel.tab', theme: 'mac-panel.theme'};
 const FLASH_MS = 2000;
-const REVEAL_WAIT_MS = 3000;
 const NARROW = matchMedia('(max-width: 899px)');
 
 // Per-viewer conveniences only; the page renders the same without them.
@@ -146,22 +145,38 @@ export function revealAnchor(id, anchorId, {focus = false} = {}) {
   return true;
 }
 
+// The watch of the latest bookmark landing; opening any section ends it.
+let stopRevealing = () => {};
+
 // Opening a cached section starts a refresh too, and a section that hosts others (usage shows llm-restore) draws its
-// anchors from the hosted frames, which render on their own schedule. So the landing is repeated whenever the section or
-// a hosted one renders and the row it highlighted was replaced, until the wait ends.
+// anchors from the hosted frames, which render on their own schedule, however long their loads take. So the landing is
+// repeated whenever the section or a hosted one renders and the row it highlighted was replaced. Watching ends once the
+// row is shown with none of them still loading (later polls must not scroll the page), when the reader opens a
+// section, or when one of them fails to load.
 export function revealWhenRendered(id, anchorId, options) {
+  stopRevealing();
   const find = () => document.querySelector(`#${CSS.escape(id)} [data-anchor="${CSS.escape(anchorId)}"]`);
+  const watched = [id, ...hostedIn(id)];
   let shown = null;
   const land = () => { if (revealAnchor(id, anchorId, options)) shown = find(); };
+  // A section's state is recorded just before its load is marked finished, so the one that just rendered counts as done.
+  const settled = rendered => Boolean(shown?.isConnected) && watched.every(member => member === rendered || !isLoading(member));
   land();
-  const watched = new Set([id, ...hostedIn(id)]);
-  const stop = onState(changed => {
-    if (watched.has(changed) && currentSection() === id && !shown?.isConnected) land();
+  if (settled(null)) return;
+  const stop = onState((changed, entry) => {
+    if (!watched.includes(changed)) return;
+    if (currentSection() !== id || entry.error) {
+      stop();
+      return;
+    }
+    if (!shown?.isConnected) land();
+    if (settled(changed)) stop();
   });
-  setTimeout(stop, REVEAL_WAIT_MS);
+  stopRevealing = stop;
 }
 
 function openSection(id, anchorId, options) {
+  stopRevealing();
   known.filter(entry => !HOSTED[entry]).forEach(entry => { document.getElementById(entry).hidden = entry !== id; });
   document.querySelectorAll('#nav a').forEach(link => {
     if (link.dataset.nav === id) link.setAttribute('aria-current', 'page');
