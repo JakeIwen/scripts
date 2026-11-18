@@ -14,8 +14,9 @@
 # The scheduler, not the job's copied run script, owns the collection deadline
 # and the alerts, so both hold when that copy cannot run. A warning it raises is
 # owed from that moment, whatever becomes of the job's state, and every check
-# sends what is still owed until a send succeeds or alert_send_limit sends
-# have failed. The Pi state is read
+# sends what is still owed until a send succeeds or alert_send_limit sends have
+# failed; a job delivered and deleted first leaves what it still owes in the
+# outbox, which the checker sends the same way. The Pi state is read
 # by the repository's deferred_pi_control.py, never by running anything from
 # the job directory.
 
@@ -23,6 +24,8 @@ typeset -A pi   # the last pi_snapshot: state run token owes unresolved delivere
 # In the job directory: alerts.sent holds one "KIND ATTEMPT" key per warning sent, alerts.owed one
 # "KEY<TAB>FAILED SENDS<TAB>TITLE<TAB>MESSAGE" line per warning raised and not sent (kept once dropped).
 pi_alerts_sent=alerts.sent pi_alerts_owed=alerts.owed
+pi_outbox=$root/outbox   # one folder per deleted job holding the two files above, until nothing is left to try
+typeset -i pi_owed_left=0   # set by pi_send_owed: warnings still to be tried
 # deferred_pi_state.STATE_RECORDS: a record without kind/host beside any of them is an untrusted vanpi job.
 pi_state_records=(remote-run.json launching.json launch-unknown.json remote-failed.json report-checks.json)
 pi_launcher=$HOME/.claude/skills/pi-agent/pi_agent.py   # deferred_pi_remote.LAUNCHER, for alert text
@@ -68,22 +71,30 @@ pi_alert_once() {  # DIR KIND TITLE MESSAGE: owes one warning per kind and attem
   print -r -- "$key"$'\t'0$'\t'"${3//[$'\t\n']/ }"$'\t'"${4//[$'\t\n']/ }" >> $dir/$pi_alerts_owed
 }
 
-pi_send_owed() {  # DIR: sends each warning the job still owes; marks it sent only after a send succeeds
+pi_send_owed() {  # DIR: sends each warning DIR still owes; marks it sent only after a send succeeds
   local dir=$1 owed=$1/$pi_alerts_owed line key fails
-  local -a fields sent kept
+  local -a fields sent kept kept_keys
+  pi_owed_left=0
   [[ -f $owed ]] || return 0
   [[ -f $dir/$pi_alerts_sent ]] && sent=("${(@f)$(<$dir/$pi_alerts_sent)}")
   for line in "${(@f)$(<$owed)}"; do
     fields=("${(@ps:\t:)line}")
+    # Checked before any field is read: under set -u a short line would end the whole check.
+    if (( ${#fields} != 4 )) || [[ $fields[2] != <-> ]]; then
+      log_line "dropped a malformed owed warning for ${dir:t}"
+      continue
+    fi
     key=$fields[1] fails=$fields[2]
-    (( ${sent[(Ie)$key]} )) && continue   # sent before a crash rewrote this file
-    [[ $fails == <-> && ${#fields} -eq 4 ]] || { log_line "dropped a malformed owed warning for ${dir:t}"; continue }
+    # Sent already (before a crash rewrote this file), or a line repeated by an interrupted move to the outbox.
+    (( ${sent[(Ie)$key]} || ${kept_keys[(Ie)$key]} )) && continue
     if (( fails < alert_send_limit )); then
-      if send_alert $fields[3] $fields[4]; then print -r -- $key >> $dir/$pi_alerts_sent; continue; fi
+      if send_alert $fields[3] $fields[4]; then print -r -- $key >> $dir/$pi_alerts_sent; sent+=($key); continue; fi
       fails=$(( fails + 1 ))
       (( fails < alert_send_limit )) ||
         log_line "dropped warning for ${dir:t} after $fails failed sends: $fields[3]"
     fi
+    (( fails >= alert_send_limit )) || pi_owed_left+=1
+    kept_keys+=($key)
     kept+=("$key"$'\t'$fails$'\t'$fields[3]$'\t'$fields[4])   # a dropped one stays, so it is never raised again
   done
   if (( ${#kept} )); then
@@ -114,6 +125,7 @@ pi_settle() {  # DIR MODE RC [collect]: after a pass, end the job, keep collecti
   fi
   if [[ $pi[state] == finished ]] && (( pi[delivered] )); then
     [[ ${dir:h} == $jobs_dir && -n ${dir:t} ]] || die "refusing to delete $dir"
+    pi_keep_owed $dir
     /bin/rm -rf -- $dir
     run_job_done=1
     log_line "${prefix}done ${dir:t} (vanpi)"
@@ -141,15 +153,22 @@ pi_unlaunched() {  # DIR MODE RC [collect]: the pass left nothing on record
     log_line "${${mode:#scheduled}:+manual }nothing to collect for ${dir:t}"
   elif [[ $mode == scheduled && ! $(window_now) < $(give_up_stamp) ]]; then
     pi_window_closed $dir   # the pass reached the launch (or its end) past the give-up time
+  elif [[ $mode == scheduled ]] && (( rc != not_ready_status )); then
+    pi_refused $dir $rc
   else
-    account_pass $dir $mode $rc   # not ready, or a launch refused before the Pi
-    # A launch run-now authorized (it rearmed a failed job) that was not ready yet stays
-    # authorized: pending, so the checker starts it once it is ready, inside its fresh window.
-    if (( run_job_not_ready )) && [[ $job[state] != pending ]]; then
-      job[state]=pending
-      save_job $dir
-    fi
+    # Not ready, or run-now's own failure (reported at the terminal). A launch run-now authorized
+    # is already saved pending (pi_rearm), so one not ready yet stays authorized for the checker.
+    account_pass $dir $mode $rc
   fi
+}
+
+pi_refused() {  # DIR RC: a scheduled pass failed before anything started on vanpi; the job waits for a person
+  pi_alert_once $1 refused "Deferred job failed: ${1:t}" \
+    "Its vanpi pass exited $2 before anything started on vanpi (a vanpi: prompt that cannot be read, or a launch pi_agent.py refused; see $1/last.log). Nothing starts a run until you retry or run-now it in Mac Panel (macpanel)."
+  job[state]=failed
+  clear_not_ready
+  save_job $1
+  log_line "failed ${1:t} exit $2 before anything started on vanpi; output in $1/last.log"
 }
 
 pi_owned() {  # DIR MODE RC: the job still owns a Pi run after this pass
@@ -206,7 +225,32 @@ pi_window_closed() {  # DIR: an unlaunched job past its give-up time fails witho
 
 pi_check() {  # DIR NOW: the checker's turn for a vanpi job whose record is trusted, then the warnings it owes
   pi_check_turn $1 $2
-  [[ ! -d $1 ]] || pi_send_owed $1   # a delivered job is gone, and with it anything it owed
+  [[ ! -d $1 ]] || pi_send_owed $1   # a delivered job left what it owed in the outbox (pi_send_outbox)
+}
+
+pi_keep_owed() {  # DIR: a delivered job is about to be deleted; what it still owes moves to the outbox
+  # Except the warning that this very report was not delivered: its delivery answers it.
+  local dir=$1 line box=$pi_outbox/${1:t}
+  local -a keep
+  [[ -f $dir/$pi_alerts_owed ]] || return 0
+  for line in "${(@f)$(<$dir/$pi_alerts_owed)}"; do
+    [[ ${line%%$'\t'*} == "delivery $pi[run]" ]] || keep+=("$line")
+  done
+  (( ${#keep} )) || return 0
+  /bin/mkdir -p -m 700 -- $box
+  [[ ! -f $dir/$pi_alerts_sent ]] || /bin/cat -- $dir/$pi_alerts_sent >> $box/$pi_alerts_sent
+  print -rl -- $keep >> $box/$pi_alerts_owed
+}
+
+pi_send_outbox() {  # sends what deleted jobs still owe; a job's folder goes once nothing is left to try
+  local box
+  for box in $pi_outbox/*(N/); do
+    pi_send_owed $box
+    (( pi_owed_left )) && continue
+    [[ ${box:h} == $pi_outbox && -n ${box:t} ]] || die "refusing to delete $box"
+    /bin/rm -rf -- $box
+  done
+  return 0
 }
 
 pi_check_turn() {  # DIR NOW
@@ -269,7 +313,12 @@ pi_rearm() {  # DIR VERB ID: retry/run-now may go ahead; relays a refusal (exit 
   pi_fresh_window
   save_job $dir
   pi_control_run rearm $dir $verb ${id:+"$id"} || die "could not clear the previous Pi attempt of ${dir:t}; try again"
+  # Pending before the new attempt runs: the checker accounts its end even when the command that
+  # started it is interrupted, and a launch not ready yet stays authorized for the checker.
+  job[state]=pending
+  save_job $dir
 }
+
 
 pi_fresh_window() {  # the new attempt may launch until 7 days after now, or after its due time when later
   local from=$EPOCHSECONDS due

@@ -146,7 +146,7 @@ def rearm(job, verb, given, check=False):
         what = snap.failure_kind.value if snap.failure_kind else snap.state.value
         wrong = f'--relaunch {given} does not name it. ' if given else ''
         print(f'{name}: its Pi attempt {snap.attempt_id} is {what} and may still be active on vanpi. {wrong}'
-              f'To start another run anyway: deferred.zsh {verb} {name} --relaunch {" or ".join(ids)}',
+              f'To start another run anyway: deferred.zsh {verb} {name} --relaunch {snap.attempt_id}',
               file=sys.stderr)
         return RELAUNCH_REFUSED
     if check:

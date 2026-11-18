@@ -28,7 +28,8 @@ class CollectionTests(PiHarness):
         self.assertEqual(result.returncode, 4)
         self.assertIn("a later check collects it", result.stdout)
         record = self.listed(job)
-        self.assertEqual((record["state"], record["remote_state"], record["last_not_ready"]), ("failed", "running", None))
+        # The new attempt is saved pending before it runs, so the checker accounts however it ends.
+        self.assertEqual((record["state"], record["remote_state"], record["last_not_ready"]), ("pending", "running", None))
         self.set_run(record["remote_run"], state="done")
         self.deferred("run-due")
         self.assertFalse(job.exists())

@@ -1,11 +1,18 @@
 """`deferred.zsh` vanpi jobs: what a job still owes after a pass. A launch a
 person authorized with retry or run-now that was not ready yet waits as pending
 for the checker, which starts it once; a scheduled warning ntfy could not take
-is sent at a later check, a bounded number of times. Fake pi_agent.py and ssh
-as in deferred_pi_fixture.
+(any kind, including a launch refused before vanpi and unreadable state) is sent
+at a later check, a bounded number of times, even after the job is delivered and
+deleted; a damaged owed record is dropped without stopping the checker. Fake
+pi_agent.py and ssh as in deferred_pi_fixture.
 """
+from pathlib import Path
+
+import deferred_pi_state
+from macbook.tests.deferred_fixture import WarningTopic
 from macbook.tests.deferred_pi_fixture import PiHarness
 
+PAST_DEADLINE = 120 * 60 + deferred_pi_state.COLLECT_GRACE + 60  # default --run-timeout + the grace
 OWED_SEND_LIMIT = 48  # deferred.zsh alert_send_limit: about two days of hourly checks
 
 
@@ -129,5 +136,74 @@ class OwedWarningTests(PiHarness):
         job = self.add_pi()
         self.assertEqual(self.deferred("run-now", job.name, check=False).returncode, 3)
         self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [])
+
+    def assert_failed_before_launch_is_warned_later(self, prompt=None):
+        job = self.add_pi(prompt=prompt)
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assertEqual(self.meta(job)["state"], "failed")
+        self.assert_sent_later_exactly_once(f"Deferred job failed: {job.name}")
+        self.assertEqual(self.runs(), [])
+
+    def test_a_refused_launch_warning_the_notifier_missed_is_sent_at_a_later_check(self):
+        self.control("launch-mode", "refuse")
+        self.assert_failed_before_launch_is_warned_later()
+
+    def test_a_missing_vanpi_prompt_warning_the_notifier_missed_is_sent_at_a_later_check(self):
+        self.assert_failed_before_launch_is_warned_later(prompt="vanpi:/nonexistent/brief.md")
+        self.assertEqual(self.calls("run"), [])
+
+    def test_an_unreadable_state_warning_the_notifier_missed_is_sent_at_a_later_check(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        (job / "remote-run.json").write_text("{")
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assert_sent_later_exactly_once(f"Deferred job not run: {job.name}")
+
+    def test_a_damaged_owed_record_is_dropped_and_later_jobs_still_get_their_turn(self):
+        first = self.add_pi(name="aaa")
+        second = self.add_pi(name="bbb")
+        (first / "alerts.owed").write_text("ended 1117-000000-abcd\nkey 1\t0\tDeferred job failed: aaa\tbody\n")
+        self.deferred("run-due")
+        self.assertEqual(len(self.calls("run")), 2)
+        self.assertEqual(self.listed(second)["remote_state"], "running")
+        self.assertIn(f"dropped a malformed owed warning for {first.name}", self.scheduler_log())
+        self.assertEqual(self.alerts(), ["Deferred job failed: aaa"])
+        self.assertFalse((first / "alerts.owed").exists())
+
+    def test_a_warning_owed_for_a_replaced_attempt_is_sent_after_the_replacement_succeeds(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        old = self.listed(job)["remote_run"]
+        self.age_launch(job, PAST_DEADLINE)
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assertEqual(self.listed(job)["relaunch_id"], old)
+        self.control("next-state", "done")
+        self.deferred("run-now", job.name, "--relaunch", old)
+        self.assertFalse(job.exists())
+        self.warnings_down(False)
+        self.deferred("run-due")
+        self.deferred("run-due")
+        title = f"Deferred job failed: {job.name}"
+        self.assertEqual(self.alerts(), [title])
+        self.assertIn(old, next(body for got, _, body in WarningTopic.received if got == title))
+        self.assertEqual(list(self.root.glob("outbox/*")), [])
+
+    def test_a_not_delivered_warning_is_superseded_when_that_report_arrives(self):
+        self.control("next-state", "done")
+        job = self.add_pi("--topic-var", "MISSING_TOPIC_URL")
+        secrets = Path(self.env["DEFERRED_SECRETS"])
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assertIn(f"warning undelivered: Deferred job result not delivered: {job.name}", self.scheduler_log())
+        url = secrets.read_text().split("NTFY_MACBOOK_URL=", 1)[1].splitlines()[0]
+        secrets.write_text(secrets.read_text() + f"export MISSING_TOPIC_URL={url}\n")
+        self.deferred("run-due")
+        self.assertFalse(job.exists())
+        self.warnings_down(False)
         self.deferred("run-due")
         self.assertEqual(self.alerts(), [])

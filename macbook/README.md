@@ -323,10 +323,13 @@ command that works:
   command, the only way to remove such a job.
 
 A replacement run the person authorized that cannot start yet stays authorized.
-`retry` leaves the job `pending`; so does a `run-now` whose pass is not ready (its
-`--ready` condition is false, or vanpi does not answer: it exits 4 and prints
-`not ready JOB; the next check retries`). The checker then launches it once it is
-ready, inside the fresh window. That one launch is all the person authorized:
+`retry` leaves the job `pending`, and `run-now` saves it `pending` once the
+previous attempt is cleared and before its own pass runs, so the checker accounts
+the new attempt however it ends, even when the command that started it is
+interrupted. A `run-now` whose pass is not ready (its `--ready` condition is false,
+or vanpi does not answer) exits 4 and prints `not ready JOB; the next check
+retries`, or, for a job not yet due, `the checker retries from its due time ...`.
+The checker then launches it once it is due and ready, inside the fresh window. That one launch is all the person authorized:
 once it has started, the job again starts nothing more by itself, and a run-now
 pass that fails outright (a launch the Pi refuses) leaves the job `failed`.
 
@@ -368,16 +371,25 @@ it (a crash between the two) is accounted at the next check instead of
 launching again.
 
 The scheduler also owns the alerts, one per kind and attempt: a failed or held
-run, a job that gave up before launching, a collector pass that did not settle a
+run, a pass that failed before anything started on vanpi (a `vanpi:` prompt that
+cannot be read, a launch `pi_agent.py` refused), a job that gave up before
+launching, a collector pass that did not settle a
 run it owns, whatever its exit status, or a run file that cannot start (it keeps
 the run and every check tries again until the collection deadline), and a
 finished run whose report could not be delivered. A warning is owed from the
 moment the checker raises it (`alerts.owed` in the job directory), whatever
 becomes of the job's state, and every later check sends what is still owed;
-only a successful send moves it to `alerts.sent`. Each failed send adds a
+only a successful send moves it to `alerts.sent`. A crash after a send but before
+that move sends the warning again at the next check: a duplicate is possible,
+a loss is not. Each failed send adds a
 `warning undelivered` line to `deferred.log`; after 48 failed sends (about two
 days of hourly checks) the warning is dropped with a `dropped warning` line
-there. A failure `run-now` reports at the terminal raises no warning. That last job stays `pending`
+there. A damaged `alerts.owed` line is dropped with a `dropped a malformed owed
+warning` line and the check carries on. When a job is delivered and deleted while
+it still owes warnings for an earlier attempt, they move to `outbox/JOB` under the
+queue root and later checks send them the same way (the folder goes once nothing
+is left to try); only the warning that this very report was not delivered is
+dropped, since the delivery answers it. A failure `run-now` reports at the terminal raises no warning. That last job stays `pending`
 with its report saved, resends it at every check and never touches the Pi again:
 the report itself has the saved-report guarantee (at least once), while a
 failure warning is only retried until one send succeeds.
@@ -393,7 +405,9 @@ repository's `scripts/deferred_pi_control.py`, never by running the job's own
 files. A job whose state cannot be read is an invalid row (with a `problem`),
 is flagged once by the checker and never run; plain `cancel` refuses it, and
 `cancel --abandon` always removes it, printing any run id or token it can
-recover.
+recover. The checker's warning about an invalid job (of any kind) counts as sent
+only once ntfy takes it: its marker in `flagged/` holds the failed sends until
+then, and each check tries again, up to 48.
 
 `cancel JOB` for a vanpi job stops its Pi run first and deletes the job only once
 the run is shown not running. After sending the stop it waits up to about 30 s

@@ -620,8 +620,11 @@ cmd_run_now() {
     exit $run_now_not_ready
   fi
   if (( run_job_not_ready )); then
-    # Only a pending job is retried by the checker; a failed Mac job stays failed.
-    print -r -- "not ready $id;${${job[state]:#failed}:+ the next check retries;} output in $dir/last.log"
+    # Only a pending job is retried by the checker, and not before its due time; a failed Mac job stays failed.
+    local when=
+    [[ $job[state] == failed ]] || when=" the next check retries;"
+    [[ -z $when || ! $job[due] > $(window_now) ]] || when=" the checker retries from its due time ${job[due]/T/ };"
+    print -r -- "not ready $id;$when output in $dir/last.log"
     exit $run_now_not_ready
   fi
   if (( run_job_done )); then
@@ -633,11 +636,19 @@ cmd_run_now() {
 }
 
 flag_invalid() {  # DIR [WHAT]: warn once per invalid folder; the marker clears once it is valid or gone
-  local marker=$flagged_dir/${1:t} what=${2:-Its directory, job record or run file is invalid}
+  # An empty marker means the warning was sent; one holding a number counts failed sends, and each
+  # check tries again until one succeeds or alert_send_limit have failed.
+  local marker=$flagged_dir/${1:t} what=${2:-Its directory, job record or run file is invalid} fails=0
+  local title="Deferred job not run: ${1:t}"
   log_line "skipped ${1:t}: ${what:l}"
-  [[ ! -e $marker ]] || return 0
-  alert "Deferred job not run: ${1:t}" "$what. Fix or remove it in Mac Panel (macpanel): $1"
-  : > $marker
+  if [[ -e $marker ]]; then
+    fails=$(<$marker)
+    [[ $fails == <-> ]] && (( fails < alert_send_limit )) || return 0
+  fi
+  if send_alert $title "$what. Fix or remove it in Mac Panel (macpanel): $1"; then : > $marker; return 0; fi
+  fails=$(( fails + 1 ))
+  print -r -- $fails > $marker
+  (( fails < alert_send_limit )) || log_line "dropped warning for ${1:t} after $fails failed sends: $title"
 }
 
 cmd_run_due() {
@@ -654,6 +665,7 @@ cmd_run_due() {
     [[ $job[state] == pending && ! $job[due] > $now ]] || continue
     run_job $dir
   done
+  pi_send_outbox
   for marker in $flagged_dir/*(N); do
     [[ -d $jobs_dir/${marker:t} ]] || /bin/rm -f -- $marker
   done
