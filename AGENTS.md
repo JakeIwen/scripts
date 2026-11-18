@@ -428,7 +428,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   section (`automations_adapter.py`) needs no per-tool panel code: it lists
   `shared/automations/<tool>.json` declarations, runs each one's status command
   and the declared actions by fixed argv. Its Logs section (`logs_adapter.py`,
-  `static/section_logs.mjs`) relays `macbook/scripts/log_rotate.py` and reads sizes and paths only. `sampler.py` records each section's
+  `static/section_logs.mjs`) relays `macbook/scripts/log_rotate.py` and reads sizes and paths only. Its Resources
+  section runs without sudo: `resources_adapter.py` (single-flight snapshot, `GET`/`POST /api/resources`),
+  `process_table.py` (ps parse, `display_name`), `system_metrics.py`, `llm_sessions.py` (Claude registry
+  `~/.claude/sessions/<pid>.json`, Codex rollout/index naming), `resource_groups.py` (kinds and positional
+  matching), `signal_policy.py` and `process_signals.py` (the mutate executor), and the page modules
+  `static/section_resources.mjs` + `resources_*.mjs`; the llm-restore cards are hosted inside the LLM
+  section (`section_usage.mjs`). `sampler.py` records each section's
   level and a few values into the panel-owned SQLite history
   `~/.local/state/mac-panel/history.sqlite` (`history_store.py`: per-series
   thinning, 30-day prune; `GET /api/history`), and `usage_adapter.py` serves

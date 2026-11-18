@@ -173,7 +173,7 @@ time axis row and a key to the band colours.
 
 `sampler.py` runs a daemon thread that reads the existing adapters and appends samples to
 `~/.local/state/mac-panel/history.sqlite` (directory 700, file 600, WAL): services,
-metered and llm-restore every 60 s, crontab and deferred every 300 s, usage every 900 s.
+metered, llm-restore and resources (system, per-kind CPU and memory, and the health level) every 60 s, crontab and deferred every 300 s, usage every 900 s.
 Samples are pruned after 30 days. `GET /api/history?section=&since=&until=[&key=]` returns
 `{series: {key: [{ts, level, value, text}]}, spacing: {key: seconds}}`, thinned to at most
 5000 samples **per series**, behind the
@@ -283,6 +283,18 @@ it. The history store is private (700/600) and holds levels, counts and state wo
 log text or network names beyond what the sections already show. Local processes running as
 Jacob can access the page and token; this is a browser-origin boundary, not isolation from
 other processes in the same account.
+
+Resources signals only the panel user's own processes, with `os.kill` and `os.setpriority`
+and no sudo. It never signals pid ≤ 1, the panel or any process above or below it, or the
+protected programs (`launchd`, `loginwindow`, `WindowServer`, `Dock`, `Finder`,
+`SystemUIServer`, `ControlCenter`, `NotificationCenter`, `coreaudiod`, `cfprefsd`,
+`runningboardd`, `tccd`, `iTerm2`, `Terminal`, `tmux`, `login`, `sshd`). Shells can be
+signalled only as members of a session tree. Shared LLM infrastructure and van-compute rows
+are read-only. Each request re-reads the process table, requires the start time the page
+saw, and re-reads and re-checks every target just before its signal (same start time and
+uid, policy re-run, still inside the session tree). This narrows the window in which a pid
+could be reused to milliseconds; it does not close it. Command lines never leave the
+backend: the page sees only the program name and an interpreter's script or module.
 
 ## Tests
 

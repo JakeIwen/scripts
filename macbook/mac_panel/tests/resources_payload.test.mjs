@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {section} from './dom_fixture.mjs';
-import {findAll, hasClass, labelsIn, withKey} from './resources_fixture.mjs';
+import {findAll, hasClass, withKey} from './resources_fixture.mjs';
 
 const real = () => JSON.parse(readFileSync(new URL('./resources_payload.json', import.meta.url), 'utf8'));
 
@@ -74,5 +74,4 @@ test('summary, search and attention items read the real payload without error', 
   assert.ok(titles.includes('System'));
   assert.ok(data.groups.filter(group => ['claude', 'codex'].includes(group.kind)).every(group => titles.includes(group.name)));
   assert.ok(resources.attentionItems(data).some(item => item.text === 'Memory pressure is elevated'));
-  assert.ok(labelsIn(resources.render(data).node).length >= 0);
 });
