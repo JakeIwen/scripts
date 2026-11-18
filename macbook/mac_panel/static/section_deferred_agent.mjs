@@ -5,6 +5,7 @@ import {action} from './panel_sections.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {AGENT_FIELDS, DEFAULT_MODEL, EFFORTS, Host, PI_TIERS, VANPI_ONLY, agentBody, agentProblemsFromError, validateAgent}
   from './deferred_agent_form.mjs';
+import {NAME_LIMIT} from './deferred_form.mjs';
 
 const SECTION = 'deferred';
 const COPY = JOBS_COPY.deferred.agent;
@@ -32,7 +33,7 @@ function textInput(key) {
     input.rows = 6;
   } else {
     input.autocomplete = 'off';
-    if (key === 'name') input.maxLength = 60;
+    if (key === 'name') input.maxLength = NAME_LIMIT;
   }
   if (key !== 'due' && key !== 'name' && key !== 'description') input.spellcheck = false;
   return input;

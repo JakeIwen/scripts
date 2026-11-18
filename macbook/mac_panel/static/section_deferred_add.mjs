@@ -3,7 +3,7 @@
 import {anchor, button, confirmText, details, fieldError, node, settingRow} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
-import {FIELDS, addBody, problemsFromError, validateAdd} from './deferred_form.mjs';
+import {FIELDS, NAME_LIMIT, addBody, problemsFromError, validateAdd} from './deferred_form.mjs';
 
 const SECTION = 'deferred';
 const COPY = JOBS_COPY.deferred;
@@ -16,7 +16,7 @@ function control(key) {
     input.type = 'number';
     input.min = '1';
   } else if (key === 'name') {
-    input.maxLength = 60;
+    input.maxLength = NAME_LIMIT;
     input.autocomplete = 'off';
   } else if (key === 'script') {
     input.rows = 8;

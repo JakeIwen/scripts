@@ -1,5 +1,7 @@
 // Validation and request shaping for the Add agent job form; pure, so Node can test it. Mirrors
 // deferred_adapter.add_agent, which checks everything again before anything is staged.
+import {NAME, NAME_PROBLEM} from './deferred_form.mjs';
+
 export const Host = Object.freeze({MAC: 'mac', VANPI: 'vanpi'});
 export const PI_TIERS = ['astra', 'sol', 'luna'];
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -8,10 +10,11 @@ export const AGENT_FIELDS = ['host', 'due', 'name', 'description', 'prompt', 'pi
   'cwd', 'ready', 'attempts', 'timeout', 'run_timeout'];
 // Rows shown only for vanpi jobs.
 export const VANPI_ONLY = ['pi_prompt_path', 'run_timeout'];
-const NAME = /^[a-z0-9][a-z0-9-]{0,59}$/;
 const MAC_MODEL = /^[a-z0-9][a-z0-9.[\]-]{0,63}$/;
 const PATH_LIMIT = 1024;
 const READY_LIMIT = 500;
+// deferred.zsh refuses a shorter vanpi --timeout: a pass must launch and read the run once (deferred_adapter.PI_MIN_TIMEOUT).
+export const PI_MIN_TIMEOUT = 390;
 const NUMBERS = ['attempts', 'timeout', 'run_timeout'];
 // The server's wording per field, tried in order (run_timeout before timeout, the Pi path before prompt).
 const SERVER_FIELD = [['due', /\bdue\b/i], ['name', /\bjob name\b|\bname must\b/i], ['run_timeout', /run_timeout|run-timeout/i],
@@ -38,7 +41,7 @@ export function validateAgent(values) {
   const problems = {};
   if (!Object.values(Host).includes(values.host)) problems.host = 'Choose where the prompt runs.';
   if (!values.due) problems.due = 'Choose when the job is due.';
-  if (!NAME.test(values.name)) problems.name = 'Use lower-case letters, digits and hyphens, starting with a letter or digit (60 characters at most).';
+  if (!NAME.test(values.name)) problems.name = NAME_PROBLEM;
   promptProblems(values, problems);
   if (values.model && !(isVanpi(values) ? PI_TIERS.includes(values.model) : MAC_MODEL.test(values.model))) {
     problems.model = isVanpi(values) ? `Choose ${PI_TIERS.join(', ')}.` : 'A Claude model name: lower-case letters, digits, dots, hyphens and brackets.';
@@ -50,6 +53,9 @@ export function validateAgent(values) {
     if (key === 'run_timeout' && !isVanpi(values)) return;
     if (values[key] && !positive(values[key])) problems[key] = 'Must be a positive whole number.';
   });
+  if (isVanpi(values) && !problems.timeout && values.timeout && Number(values.timeout) < PI_MIN_TIMEOUT) {
+    problems.timeout = `On vanpi, at least ${PI_MIN_TIMEOUT} seconds: a check must launch the run and read it once.`;
+  }
   return problems;
 }
 

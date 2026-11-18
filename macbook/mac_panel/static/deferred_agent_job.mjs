@@ -16,6 +16,22 @@ export const REMOTE_LEVEL = Object.freeze({
   failed: Level.ERROR,
 });
 export const LAUNCH_UNKNOWN = 'launch-unknown';
+// deferred.zsh run-now exits 4 for "not ready", and for a vanpi job whose run is still going and is collected later.
+const RUN_NOW_PENDING = 4;
+const ACTIVE = ['running', 'launching'];
+
+/** The extra request fields for retry/run-now: a held launch's token, which the CLI checks under its lock. */
+export function relaunchFields(job) {
+  return job.remote_state === LAUNCH_UNKNOWN ? {confirmed: true, relaunch: job.remote_token} : {};
+}
+
+/** A Pi run-now that left its run going, so it is collected by a later check rather than failed. */
+export function collectedLater(job, task) {
+  return job.host === 'vanpi' && task.exit_status === RUN_NOW_PENDING
+    && (ACTIVE.includes(job.remote_state) || /^running /.test(task.message ?? ''));
+}
+
+export const collectedLaterText = COPY.collectedLater;
 
 /** Tags for an agent job's card, or null for a script job. */
 export function agentTags(job) {

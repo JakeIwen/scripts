@@ -281,6 +281,7 @@ export const JOBS_COPY = {
       cwdPlaceholder: {mac: 'home folder', vanpi: '~ on vanpi'},
       remoteInfo: 'Where the job\'s Pi run stands, as the job last recorded it: unlaunched, launching (the launch answer was lost; the next check looks for it), launch-unknown (it could not be found, so nothing relaunches it until you retry), running, finished (result not yet delivered) or failed.',
       relaunch: 'The previous run may still be active; this starts another run',
+      collectedLater: 'still running on vanpi; a later check collects it',
       abandon: 'delete the job and leave any Pi run alone',
       abandonInfo: 'Cancel was refused because the job\'s Pi run may still be active and could not be stopped or confirmed. Abandon deletes the job anyway; the message above names the run and the commands to find and stop it on the Pi.',
     },

@@ -16,7 +16,7 @@ from cli_runner import CliRunner, CommandResult
 from crontab_adapter import CrontabAdapter, SYNC
 from test_crontab_adapter import status_payload, JOB_ID, REVISION
 from test_deferred_adapter import inventory
-from deferred_adapter import DeferredAdapter
+from deferred_adapter import DeferredAdapter, validate_due
 from panel_contracts import ApiError, Section, SudoRule, TaskState
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, auth, json_command, request, running_server
@@ -128,13 +128,44 @@ print added
         runner = FakeRunner()
         adapter = DeferredAdapter(runner, data=self.root / 'panel')
         self.addCleanup(adapter.tasks.close)
-        for changes in ({'name': '../bad'}, {'name': 'a' * 61}, {'due': '2027-02-30 00:00'},
+        for changes in ({'name': '../bad'}, {'name': 'a' * 50}, {'due': '2027-02-30 00:00'},
                         {'script': 'echo no'}, {'attempts': True}, {'timeout': 0},
-                        {'confirmed': False}, {'description': 'bad\0text'}):
+                        {'confirmed': False}, {'description': 'bad\0text'},
+                        {'script': '#!/bin/zsh\n\ud800'}, {'description': '\udcff'}):
             with self.subTest(changes=changes), self.assertRaises(ApiError):
                 adapter.mutate({**self.body, **changes})
         self.assertEqual(runner.calls, [])
         self.assertFalse(adapter.data.exists())
+
+
+class LocalTimeTests(unittest.TestCase):
+    def test_a_time_skipped_by_daylight_saving_is_refused_before_staging(self):
+        previous = os.environ.get('TZ')
+        os.environ['TZ'] = 'America/Chicago'
+        time.tzset()
+
+        def restore():
+            if previous is None:
+                os.environ.pop('TZ', None)
+            else:
+                os.environ['TZ'] = previous
+            time.tzset()
+        self.addCleanup(restore)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        runner = FakeRunner()
+        adapter = DeferredAdapter(runner, data=Path(temporary.name) / 'panel')
+        self.addCleanup(adapter.tasks.close)
+        body = {'action': 'add-agent', 'name': 'gap', 'due': '2027-03-14 02:30', 'description': '', 'host': 'vanpi',
+                'prompt': 'x', 'confirmed': True}
+        with self.assertRaises(ApiError) as raised:
+            adapter.mutate(body)
+        self.assertEqual(raised.exception.status, 400)
+        self.assertIn('daylight', str(raised.exception))
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(adapter.data.exists())
+        self.assertEqual(validate_due('2027-03-14 03:30'), '2027-03-14 03:30')
+        self.assertEqual(validate_due('2027-11-07 01:30'), '2027-11-07 01:30')  # the repeated hour exists
 
 
 class DeferredAgentAddTests(unittest.TestCase):
@@ -196,6 +227,8 @@ print added
             {'ready': ''}, {'ready': 'a\nb'}, {'ready': 'x' * 501}, {'ready': 'a\0b'},
             {'attempts': 0}, {'attempts': True}, {'timeout': '60'}, {'run_timeout': 0},
             {'confirmed': False}, {'unexpected': 1},
+            {'name': 'n' * 50}, {'prompt': 'lone \ud800 surrogate'}, {'description': '\ud800'},
+            {'cwd': home + '/dev'}, {'cwd': str(Path.home())}, {'timeout': 389},
         )
         for changes in cases:
             body = {key: value for key, value in {**self.body, **changes}.items() if value is not None}

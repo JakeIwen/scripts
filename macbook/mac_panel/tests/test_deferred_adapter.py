@@ -5,6 +5,7 @@ import time
 import unittest
 
 from cli_runner import CommandResult
+import deferred_adapter
 from deferred_adapter import DEFERRED, DeferredAdapter, validate_due, validate_job_id
 from panel_contracts import ApiError, RemoteState, TaskState
 from panel_paths import ROOT
@@ -18,7 +19,10 @@ def inventory():
                       'description': 'Example', 'created': 'today', 'origin': 'test', 'last_log': None,
                       'give_up': '2026-10-27T15:00', 'agent': False, 'ready': None,
                       'last_not_ready': None, 'not_ready_checks': 0, 'host': None, 'model': None,
-                      'effort': None, 'remote_run': None, 'remote_state': None}]}
+                      'effort': None, 'remote_run': None, 'remote_state': None, 'remote_token': None}]}
+
+TOKEN = 'd0123456789abcdef'
+RUN_ID = '1117-034729-b1e4-' + TOKEN
 
 
 def pi_job(**changes):
@@ -26,6 +30,18 @@ def pi_job(**changes):
     value['jobs'][0].update({'agent': True, 'host': 'vanpi', 'model': 'sol', 'effort': 'medium', 'remote_run': None,
                              'remote_state': 'unlaunched', **changes})
     return value
+
+
+def load_script(name):
+    """A module from macbook/scripts, loaded the way the scripts load each other."""
+    folder = str(ROOT / 'macbook/scripts')
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    spec = importlib.util.spec_from_file_location(name, ROOT / f'macbook/scripts/{name}.py')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve the module's annotations through it
+    spec.loader.exec_module(module)
+    return module
 
 
 class DeferredTests(unittest.TestCase):
@@ -123,8 +139,8 @@ class DeferredTests(unittest.TestCase):
             finally:
                 adapter.tasks.close()
 
-    def test_agent_fields_pass_through_and_malformed_ones_fail_closed(self):
-        running = pi_job(remote_run='1117-034729-b1e4-d0123456789abcdef', remote_state='running')
+    def test_agent_fields_pass_through_and_contradictory_rows_become_invalid(self):
+        running = pi_job(remote_run=RUN_ID, remote_state='running', remote_token=TOKEN)
         mac = inventory()
         mac['jobs'][0].update(agent=True, host='mac', model='haiku', effort='high')
         for value in (running, mac, inventory()):
@@ -133,20 +149,38 @@ class DeferredTests(unittest.TestCase):
                 self.assertEqual(adapter.read()['jobs'], value['jobs'])
             finally:
                 adapter.tasks.close()
-        broken_cases = (
+        script = inventory()['jobs'][0]
+        contradictory = (
             pi_job(remote_state='lost'), pi_job(host='pi'), pi_job(remote_state=None), pi_job(model=3),
-            {**inventory(), 'jobs': [{**inventory()['jobs'][0], 'host': 'mac'}]},
+            pi_job(model=None), pi_job(effort=None),
+            pi_job(remote_state='running'),                                   # running without a run id
+            pi_job(remote_state='running', remote_run=RUN_ID),                 # ... or without its token
+            pi_job(remote_state='launch-unknown'),                             # a hold without its token
+            pi_job(remote_state='unlaunched', remote_run=RUN_ID, remote_token=TOKEN),
+            pi_job(remote_state='failed'), pi_job(remote_state='finished'),
+            {**inventory(), 'jobs': [{**script, 'host': 'mac'}]},
+            {**inventory(), 'jobs': [{**script, 'model': 'haiku', 'effort': 'high', 'remote_run': RUN_ID}]},
             {**mac, 'jobs': [{**mac['jobs'][0], 'remote_state': 'running'}]},
-            {**inventory(), 'jobs': [{k: v for k, v in inventory()['jobs'][0].items() if k != 'remote_run'}]},
         )
-        for broken in broken_cases:
-            adapter = DeferredAdapter(FakeRunner([json_command(broken)]))
+        healthy = {**inventory()['jobs'][0], 'id': 'healthy'}
+        for broken in contradictory:
+            value = {**broken, 'jobs': [*broken['jobs'], healthy]}
+            adapter = DeferredAdapter(FakeRunner([json_command(value)]))
             try:
-                with self.assertRaises(ApiError, msg=broken['jobs'][0]) as raised:
-                    adapter.read()
-                self.assertEqual(raised.exception.status, 502)
+                bad, good = adapter.read()['jobs']
+                self.assertEqual((bad['id'], bad['valid']), ('test-job', False), msg=broken['jobs'][0])
+                self.assertIsInstance(bad['problem'], str)
+                self.assertEqual(good, healthy)
             finally:
                 adapter.tasks.close()
+        missing = {**inventory(), 'jobs': [{k: v for k, v in script.items() if k != 'remote_token'}]}
+        adapter = DeferredAdapter(FakeRunner([json_command(missing)]))
+        try:
+            with self.assertRaises(ApiError) as raised:  # a stream missing a field fails closed
+                adapter.read()
+            self.assertEqual(raised.exception.status, 502)
+        finally:
+            adapter.tasks.close()
 
     def test_cancel_relays_a_refusal_and_abandon_is_the_explicit_override(self):
         refusal = 'Could not read run 1117-x on vanpi. The job is kept so its run is not left on vanpi unseen.'
@@ -170,30 +204,55 @@ class DeferredTests(unittest.TestCase):
         finally:
             adapter.tasks.close()
 
-    def test_retry_of_an_unknown_launch_needs_confirmation(self):
-        held = pi_job(remote_state='launch-unknown')
-        runner = FakeRunner([json_command(held), json_command(inventory()), CommandResult(0, 'retrying')])
+    def test_retry_relays_the_relaunch_consent_check_as_its_own_conflict(self):
+        refusal = f'its Pi launch with token {TOKEN} is unknown. To start another run anyway: ...'
+        runner = FakeRunner([CommandResult(7, stderr=refusal), CommandResult(0, 'retrying')])
         adapter = DeferredAdapter(runner)
         try:
             with self.assertRaises(ApiError) as raised:
                 adapter.mutate({'action': 'retry', 'id': 'test-job'})
-            self.assertEqual(raised.exception.status, 400)
-            adapter.mutate({'action': 'retry', 'id': 'test-job'})  # an ordinary failed job needs none
-            self.assertEqual(runner.calls[-1][0], (*DEFERRED, 'retry', 'test-job'))
-            runner.results.append(CommandResult(0, 'retrying'))
-            adapter.mutate({'action': 'retry', 'id': 'test-job', 'confirmed': True})
-            self.assertEqual(len(runner.calls), 4)
+            self.assertEqual((raised.exception.status, raised.exception.code), (409, 'relaunch-unconfirmed'))
+            self.assertIn(TOKEN, str(raised.exception))
+            with self.assertRaises(ApiError):  # consent to a relaunch is an armed action
+                adapter.mutate({'action': 'retry', 'id': 'test-job', 'relaunch': TOKEN})
+            adapter.mutate({'action': 'retry', 'id': 'test-job', 'relaunch': TOKEN, 'confirmed': True})
+            self.assertEqual(runner.calls[-1][0], (*DEFERRED, 'retry', 'test-job', '--relaunch', TOKEN))
+            for body in ({'action': 'retry', 'id': 'test-job', 'relaunch': 'd1', 'confirmed': True},
+                         {'action': 'cancel', 'id': 'test-job', 'relaunch': TOKEN, 'confirmed': True}):
+                with self.subTest(body=body), self.assertRaises(ApiError):
+                    adapter.mutate(body)
+            self.assertEqual(len(runner.calls), 2)
         finally:
             adapter.tasks.close()
 
-    def test_remote_states_match_the_run_script_that_reports_them(self):
-        # The job's run script is a standalone copy, so the panel keeps its own enum; this keeps them equal.
-        spec = importlib.util.spec_from_file_location('deferred_pi_run', ROOT / 'macbook/scripts/deferred_pi_run.py')
-        script = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = script  # dataclasses resolve the module's annotations through it
-        self.addCleanup(sys.modules.pop, spec.name)
-        spec.loader.exec_module(script)
-        self.assertEqual([state.value for state in script.RemoteState], [state.value for state in RemoteState])
+    def test_run_now_of_a_held_launch_needs_its_token(self):
+        held = pi_job(remote_state='launch-unknown', remote_token=TOKEN, state='failed')
+        stale = 'd' + 'f' * 16
+        runner = FakeRunner([json_command(held), json_command(held), json_command(held), CommandResult(0, 'done')])
+        adapter = DeferredAdapter(runner)
+        try:
+            for extra in ({}, {'relaunch': stale}):
+                with self.subTest(extra=extra), self.assertRaises(ApiError) as raised:
+                    adapter.mutate({'action': 'run-now', 'id': 'test-job', 'confirmed': True, **extra})
+                self.assertEqual((raised.exception.status, raised.exception.code), (409, 'relaunch-unconfirmed'))
+            receipt = adapter.mutate({'action': 'run-now', 'id': 'test-job', 'confirmed': True, 'relaunch': TOKEN})
+            self.assertEqual(receipt.status, 202)
+            deadline = time.monotonic() + 2
+            while adapter.tasks.get(receipt.body['id'])['state'] == TaskState.RUNNING and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(runner.calls[-1][0], (*DEFERRED, 'run-now', 'test-job', '--relaunch', TOKEN))
+        finally:
+            adapter.tasks.close()
+
+    def test_shared_vocabulary_matches_the_scripts(self):
+        # The job's scripts are standalone, so the panel keeps its own copies; this keeps them equal.
+        state = load_script('deferred_pi_state')
+        run = load_script('deferred_pi_run')
+        self.assertEqual([s.value for s in state.RemoteState], [s.value for s in RemoteState])
+        self.assertEqual((deferred_adapter.CANCEL_REFUSED, deferred_adapter.RELAUNCH_REFUSED),
+                         (state.REFUSED, state.RELAUNCH_REFUSED))
+        self.assertEqual(deferred_adapter.PI_MIN_TIMEOUT, run.MIN_PASS_TIMEOUT)
+        self.assertEqual(deferred_adapter.TOKEN.pattern, state.TOKEN.pattern)
 
     def test_invalid_cli_payload_fails_closed(self):
         adapter = DeferredAdapter(FakeRunner([json_command({'jobs': []})]))
