@@ -37,7 +37,7 @@ SYSTEM_PID = 'The kernel or launchd'
 PANEL = 'The panel itself'
 PANEL_ANCESTOR = 'Runs the panel; stopping it would stop the panel'
 PANEL_DESCENDANT = 'Started by the panel'
-PANEL_UNKNOWN = "The panel's own parent processes could not be read; refresh"
+PANEL_UNKNOWN = "The panel's own process or its parents could not be read; refresh"
 PROTECTED_REASON = 'A system or terminal process the panel never signals'
 INCOMPLETE = 'Its parent processes could not be read; refresh'
 SHELL = 'A shell may be hosting a live terminal session; end its session instead'
@@ -60,7 +60,7 @@ class PolicyContext:
     panel_pid: int
     panel_ancestors: frozenset
     panel_descendants: frozenset
-    # False when the panel's row is present but its ancestry is broken: its ancestors are
+    # False when the panel's own row is missing or its ancestry is broken: what runs it is
     # then unknown, so nothing may be signalled from this table.
     panel_known: bool
     hosted: dict
@@ -79,7 +79,7 @@ class SignalPolicy:
 
     def context(self, table: ProcessTable, grouping: Grouping) -> PolicyContext:
         pid = self.panel_pid
-        known = pid not in table.rows or table.complete_chain(pid) is not None
+        known = table.complete_chain(pid) is not None
         unknown = frozenset(member.row.pid for group in grouping.groups.values()
                             if group.role_unknown for member in group.members)
         return PolicyContext(table, pid, frozenset(table.ancestors(pid)),

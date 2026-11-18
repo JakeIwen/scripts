@@ -18,7 +18,7 @@ from panel_test_support import FakeRunner, auth, request, running_server
 from process_table import started_epoch
 import resources_adapter
 from resources_adapter import SNAPSHOT_TTL, ResourcesAdapter, health
-from resources_fixtures import (PANEL_PID, STARTED, ArgvRunner, FakeMetrics, FakeReader,
+from resources_fixtures import (PANEL_PID, PANEL_ROW, STARTED, ArgvRunner, FakeMetrics, FakeReader,
                                 make_table)
 from sampler import CADENCES, samples
 from signal_policy import SignalPolicy
@@ -46,6 +46,7 @@ THERM = 'Note: No thermal warning level has been recorded\nNote: No performance 
 BATT = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t51%; discharging; 3:29 remaining present: true\n"
 WORLD = (
     (1, 0, '/sbin/launchd', {'uid': 0}),
+    PANEL_ROW,
     (101, 1, '-zsh'),
     (200, 101, 'claude -p secret prompt about payroll --password hunter2', {'cpu': 50.0, 'rss_kb': 4096}),
     (201, 200, 'node /x/tool.js --api-key sk-live-123', {'cpu': 25.0}),

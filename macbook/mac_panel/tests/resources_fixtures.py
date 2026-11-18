@@ -11,6 +11,9 @@ UID = 501
 STARTED = 'Tue Nov 17 22:19:53 2026'
 LATER = 'Wed Nov 18 04:11:36 2026'
 PANEL_PID = 9000
+# The panel's own process under launchd: a table without it blocks every process, since
+# what runs the panel would then be unknown.
+PANEL_ROW = (PANEL_PID, 1, '/venv/bin/python server.py')
 
 
 def ps_line(pid, ppid, command, uid=UID, nice=0, state='S', cpu=0.0, rss_kb=1024,

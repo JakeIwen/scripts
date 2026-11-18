@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 from resource_groups import Kind, build_grouping
-from resources_fixtures import PANEL_PID, make_table
+from resources_fixtures import PANEL_PID, PANEL_ROW, make_table
 from signal_policy import (INCOMPLETE, KIND_REASONS, OTHER_USER, PANEL, PANEL_ANCESTOR,
                            PANEL_DESCENDANT, PANEL_UNKNOWN, PROTECTED_REASON, SHELL, SYSTEM_PID,
                            TREE_ONLY_SESSIONS, Scope, SignalPolicy, hosts_reason, tree_blocked)
@@ -186,7 +186,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_terminal_hosts_are_protected_by_kernel_name_and_decorated_titles(self):
         table = make_table(
-            (1, 0, '/sbin/launchd', {'uid': 0}),
+            (1, 0, '/sbin/launchd', {'uid': 0}), PANEL_ROW,
             (60, 1, 'tmux: server', {'argv0': 'tmux: server', 'ucomm': 'tmux'}),
             (61, 1, 'SCREEN -S work', {'ucomm': 'screen'}),
             (62, 1, '/Applications/Ghostty.app/Contents/MacOS/ghostty'),
@@ -198,7 +198,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_a_process_hosting_terminals_or_llm_roots_is_blocked_by_structure(self):
         table = make_table(
-            (1, 0, '/sbin/launchd', {'uid': 0}),
+            (1, 0, '/sbin/launchd', {'uid': 0}), PANEL_ROW,
             # An IDE helper parenting a Codex app server (infra) and a terminal with a session.
             (70, 1, '/Applications/Code.app/Contents/MacOS/Code Helper (Plugin) --type=x',
              {'argv0': '/Applications/Code.app/Contents/MacOS/Code Helper (Plugin)'}),
@@ -237,7 +237,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNone(self.reason(152, table=table))
 
     def test_a_gap_in_the_ancestry_blocks_rather_than_guesses(self):
-        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}), PANEL_ROW,
                            (500, 1, 'python3 -m van_compute.worker'),
                            # 501 (the job's shell) is missing: 502 could be a compute job.
                            (502, 501, 'python3 work.py'))
@@ -246,6 +246,11 @@ class PolicyTests(unittest.TestCase):
         table = make_table((1, 0, '/sbin/launchd', {'uid': 0}), (8001, 7999, 'launcher'),
                            (PANEL_PID, 8001, 'python server.py'), (603, 1, 'vim notes'))
         self.assertEqual(self.reason(603, table=table), PANEL_UNKNOWN)
+        # The panel's row missing altogether: the same, for every process.
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}), (8001, 1, 'launcher'),
+                           (603, 1, 'vim notes'))
+        for pid in (8001, 603):
+            self.assertEqual(self.reason(pid, table=table), PANEL_UNKNOWN, pid)
 
 
 if __name__ == '__main__':

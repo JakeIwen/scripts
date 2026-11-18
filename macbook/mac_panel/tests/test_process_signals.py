@@ -14,7 +14,7 @@ from panel_contracts import ApiError
 from process_signals import NICE_FLOOR, TREE_TOO_LARGE, ProcessSignaller
 from process_table import ProcessReader
 from resources_adapter import ResourcesAdapter
-from resources_fixtures import LATER, PANEL_PID, STARTED, FakeReader, make_table
+from resources_fixtures import LATER, PANEL_PID, PANEL_ROW, STARTED, FakeReader, make_table
 from signal_policy import SHELL, SignalPolicy
 from signal_recheck import (MUTATION_BUDGET, STOPPED_NESTED, STOPPED_ROOT, STOPPED_TIME,
                             STOPPED_UNREADABLE)
@@ -42,6 +42,7 @@ WORLD = (
     (400, 1, 'node /x/model-gateway.js serve'),
     (500, 1, 'python3 -m van_compute.worker'),
     (501, 500, '/bin/sh /Users/me/Library/Caches/van-compute/jobs/j1/run.sh'),
+    PANEL_ROW,
 )
 
 
@@ -103,6 +104,14 @@ class SignalTests(unittest.TestCase):
     def test_blocked_roots_are_403(self):
         for request in (body(101), body(100), body(400), body(501), body(201), body(1),
                         body(202, scope='tree'), body(300, scope='tree'), body(400, scope='tree')):
+            self.assertStatus(403, request)
+
+    def test_without_the_panels_own_row_nothing_is_signalled(self):
+        # The panel's row missed the three-pass join: its parent (here 300's sibling launcher)
+        # could be anything, so every process is refused, not only the panel's lineage.
+        del self.reader.rows[PANEL_PID]
+        self.reader.rows.update(make_table((8001, 1, 'launcher')).rows)
+        for request in (body(300), body(8001), body(200, scope='tree'), body(203, 'pause')):
             self.assertStatus(403, request)
 
     def test_nested_session_blocks_the_outer_tree(self):
@@ -291,11 +300,13 @@ class RealProcessTest(unittest.TestCase):
 
     def test_own_sleep_is_paused_resumed_deprioritised_and_terminated(self):
         child = self.own_child()
+        # The panel's seat is taken by a second sleep of ours, a sibling: the test runner is
+        # the real parent of both, and the target is neither the stand-in's ancestor nor its
+        # descendant, as with an ordinary process beside the real panel.
+        panel = self.own_child()
         reader = ProcessReader(CliRunner())
         row = reader.table().rows[child.pid]
-        # The test runner stands in for no panel: a pid that cannot exist, so the sleep is
-        # not the panel's descendant.
-        adapter = ResourcesAdapter(reader=reader, policy=SignalPolicy(panel_pid=10 ** 7))
+        adapter = ResourcesAdapter(reader=reader, policy=SignalPolicy(panel_pid=panel.pid))
         request = {'pid': child.pid, 'started': row.started, 'scope': 'process', 'confirmed': True}
         self.assertEqual(adapter.mutate({**request, 'action': 'pause'})['applied'], 1)
         self.assertTrue(self.state(child.pid)[0].startswith('T'))
