@@ -197,15 +197,34 @@ class DeferredTests(unittest.TestCase):
             self.assertEqual((raised.exception.status, raised.exception.code), (409, 'remote-active'))
             self.assertIn('1117-x', str(raised.exception))
             self.assertEqual(runner.calls[0], ((*DEFERRED, 'cancel', 'test-job'), 200))
-            reply = adapter.mutate({'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': True})
+            reply = adapter.mutate({'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': True,
+                                    'attempt': TOKEN})
             self.assertEqual(reply.body, {'message': 'cancelled test-job'})
-            self.assertEqual(runner.calls[1][0], (*DEFERRED, 'cancel', '--abandon', 'test-job'))
-            for body in ({'action': 'retry', 'id': 'test-job', 'abandon': True},
-                         {'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': False},
-                         {'action': 'cancel', 'id': 'test-job', 'abandon': True}):
+            self.assertEqual(runner.calls[1][0], (*DEFERRED, 'cancel', '--abandon', '--attempt', TOKEN, 'test-job'))
+            abandon = {'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': True}
+            for body in ({'action': 'retry', 'id': 'test-job', 'abandon': True, 'attempt': TOKEN},
+                         {**abandon, 'abandon': False, 'attempt': TOKEN},
+                         {**abandon, 'confirmed': False, 'attempt': TOKEN},
+                         abandon,  # the panel abandons only the attempt it saw refused; Terminal keeps the bare form
+                         {**abandon, 'attempt': 'not-an-id'},
+                         {'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'attempt': TOKEN}):
                 with self.subTest(body=body), self.assertRaises(ApiError):
                     adapter.mutate(body)
             self.assertEqual(len(runner.calls), 2)
+        finally:
+            adapter.tasks.close()
+
+    def test_an_abandon_whose_attempt_was_replaced_is_relayed_as_a_conflict(self):
+        refusal = f'deferred.zsh: kept test-job: {TOKEN} is no longer its Pi attempt'
+        runner = FakeRunner([CommandResult(6, stderr=refusal)])
+        adapter = DeferredAdapter(runner)
+        try:
+            with self.assertRaises(ApiError) as raised:
+                adapter.mutate({'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': True,
+                                'attempt': RUN_ID})
+            self.assertEqual((raised.exception.status, raised.exception.code), (409, 'remote-active'))
+            self.assertIn('no longer its Pi attempt', str(raised.exception))
+            self.assertEqual(runner.calls[0][0], (*DEFERRED, 'cancel', '--abandon', '--attempt', RUN_ID, 'test-job'))
         finally:
             adapter.tasks.close()
 

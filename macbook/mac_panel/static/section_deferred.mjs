@@ -7,8 +7,8 @@ import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {addJobForm} from './section_deferred_add.mjs';
 import {addAgentForm} from './section_deferred_agent.mjs';
-import {LAUNCH_UNKNOWN, agentTags, collectedLaterOnCard, collectedLaterText, describeRunNow, relaunchConfirm, relaunchFields,
-  remoteRows, rescheduleLocked} from './deferred_agent_job.mjs';
+import {LAUNCH_UNKNOWN, agentTags, attemptOf, collectedLaterOnCard, collectedLaterText, describeRunNow, relaunchConfirm,
+  relaunchFields, remoteRows, rescheduleLocked} from './deferred_agent_job.mjs';
 import {readyDetails, stateLabel} from './section_deferred_ready.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 import {TaskState, latestTask, taskLine, watchTask} from './task_receipt.mjs';
@@ -19,8 +19,9 @@ const COPY = JOBS_COPY.deferred;
 const jobAnchor = job => `deferred-${job.id}`;
 const dueSeconds = job => parseStamp(job.due) / 1000;
 let scheduleRange = '7d';
-// Jobs whose cancel the CLI refused because a Pi run may be active; only they offer Abandon.
-const abandonable = new Set();
+// Job id -> the Pi attempt its card showed when the CLI refused its cancel (a run may be active there). Only
+// that attempt offers Abandon, and the request names it, so the CLI keeps the job once another has replaced it.
+const abandonable = new Map();
 
 function apply(job, kind, extra = {}, options = {}) {
   return action(SECTION, '/api/deferred', {action: kind, id: job.id, ...extra}, options);
@@ -60,12 +61,13 @@ function rescheduleEditor(job, cell) {
 }
 
 function cancelButtons(job) {
-  const refused = error => { if (error.code === 'remote-active') abandonable.add(job.id); };
+  const attempt = attemptOf(job);
+  const refused = error => { if (error.code === 'remote-active' && attempt) abandonable.set(job.id, attempt); };
   const cancel = button('Cancel job', () => apply(job, 'cancel', {confirmed: true}, {onError: refused}),
     {confirm: confirmText(`cancel ${job.name}`), key: `cancel-${job.id}`});
-  if (!abandonable.has(job.id)) return [cancel];
-  const abandon = button('Abandon job', () => apply(job, 'cancel', {confirmed: true, abandon: true}),
-    {confirm: confirmText(COPY.agent.abandon), key: `abandon-${job.id}`});
+  if (!attempt || abandonable.get(job.id) !== attempt) return [cancel];
+  const abandon = button('Abandon job', () => apply(job, 'cancel', {confirmed: true, abandon: true, attempt}),
+    {confirm: confirmText(COPY.agent.abandon(attempt)), key: `abandon-${job.id}`});
   return [cancel, abandon, info(COPY.agent.abandonInfo)];
 }
 
@@ -137,7 +139,7 @@ export function render(data) {
   const root = node('div');
   const checker = checkerLine(data.checker);
   root.append(checker.line, addJobForm(), addAgentForm());
-  [...abandonable].forEach(id => { if (!data.jobs.some(job => job.id === id)) abandonable.delete(id); });
+  [...abandonable.keys()].forEach(id => { if (!data.jobs.some(job => job.id === id)) abandonable.delete(id); });
   const valid = data.jobs.filter(job => job.valid);
   if (valid.length) root.append(scheduleBlock(valid));
   if (!data.jobs.length) root.append(emptyState(COPY.empty));

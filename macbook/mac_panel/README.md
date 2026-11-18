@@ -138,7 +138,7 @@ Every armed action is two-click, worded `Confirm: <verb phrase>`: the first clic
 Escape, blur or 8 seconds disarm it, and the second click sends the request with
 `confirmed: true`. The server refuses these requests with HTTP 400 without it: service
 start, stop and restart, crontab pause, resume, install and run-now, deferred run-now,
-cancel (and Abandon job after a refused cancel), add, add-agent and Retry on a job whose Pi launch
+cancel (and Abandon job after a refused cancel, offered only for the Pi attempt whose stop was refused and sent naming it), add, add-agent and Retry on a job whose Pi launch
 is unknown (a second Pi run may start), metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
 test, settings reset, log rotation, llm-restore restore, delete and overwrite and confirmed automation actions. Resources adds six more, all sent as `{action, pid, started, scope, confirmed: true}`: Terminate (`terminate`), Force kill (`kill`), Pause (`pause`), Resume (`resume`), Lower priority (`lower-priority`, which the panel cannot undo) and Terminate session (`terminate` with `scope: tree` on the session's root process). Their confirmations name the process or session, with snapshot counts ("12 processes seen"); the result line reports the reply's applied, gone, changed, skipped, refused and unchanged counts, leaving out zeros, and, when the reply's `stopped` is set, an error notice saying the action stopped early and why. A search result only navigates to the button and arms it. Reschedule opens an inline editor
 whose Apply is enabled only once the time differs.

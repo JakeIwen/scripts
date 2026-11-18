@@ -242,3 +242,37 @@ test('a resumed run-now task reports with the Pi-aware wording; a 409 on retry s
     globalThis.setTimeout = realTimeout;
   }
 });
+
+test('Abandon belongs to the Pi attempt whose stop was refused, and the request names that attempt', async () => {
+  const {section} = await import('./dom_fixture.mjs');
+  const {register} = await import('../static/panel_sections.mjs');
+  section('deferred');
+  register([{id: 'deferred', endpoint: '/api/deferred', render: () => ({node: new Element(), summary: '', level: 'ok'})}]);
+  const first = 'd0123456789abcdef';
+  const running = {...job, state: 'pending', remote_state: 'running', remote_run: `1120-090000-abcd-${first}`,
+    remote_token: first, relaunch_id: null};
+  const posts = [];
+  globalThis.fetch = async (path, init) => {
+    if (init.method === 'POST') {
+      posts.push(JSON.parse(init.body));
+      return {ok: false, status: 409, json: async () => ({error: `Could not read run ${first}`, code: 'remote-active'})};
+    }
+    return {ok: true, status: 200, json: async () => data([])};
+  };
+  const settle = () => new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(byKey(render(data([running])).node, `abandon-${job.id}`), undefined);
+  const cancel = byKey(render(data([running])).node, `cancel-${job.id}`);
+  cancel.click();
+  cancel.click();
+  await settle();
+  const abandon = byKey(render(data([running])).node, `abandon-${job.id}`);
+  abandon.click();
+  assert.match(text(abandon), new RegExp(`leave Pi attempt ${first} alone`));
+  abandon.click();
+  await settle();
+  assert.deepEqual(posts.at(-1), {action: 'cancel', id: job.id, confirmed: true, abandon: true, attempt: first});
+  const second = 'dfedcba9876543210';
+  const replaced = {...running, remote_run: `1120-100000-abcd-${second}`, remote_token: second};
+  assert.equal(byKey(render(data([replaced])).node, `abandon-${job.id}`), undefined);
+  assert.ok(byKey(render(data([replaced])).node, `cancel-${job.id}`));
+});

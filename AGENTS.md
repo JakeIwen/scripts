@@ -426,8 +426,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `remote_run`, `remote_token`, `relaunch_id`) feeds the Mac Panel's
   "Ready condition" disclosure (`mac_panel/static/section_deferred_ready.mjs`)
   and agent-job tags (`mac_panel/static/deferred_agent_job.mjs`);
-  its `add-agent`, `cancel [--abandon]`, `retry`, `run-now` and `reschedule` serve
-  the Mac Panel too (`mac_panel/deferred_adapter.py`);
+  its `add-agent`, `cancel [--abandon [--attempt ID]]`, `retry`, `run-now` and
+  `reschedule` serve the Mac Panel too (`mac_panel/deferred_adapter.py`; its
+  Abandon names the attempt whose stop was refused, and the CLI keeps the job once
+  another attempt has replaced it);
   every mutation (and `cancel`) takes the checker's own flock and exits 75 when
   it is busy, and `run-now` never sends a failure alert.
   LaunchAgent plists name `/usr/bin/python3`, a versioned Homebrew interpreter

@@ -287,8 +287,8 @@ export const JOBS_COPY = {
       relaunch: id => `The previous Pi attempt ${id} may still be active; this starts another run`,
       rescheduleLocked: 'A vanpi job that has launched cannot be rescheduled, so a due time can never start a second Pi run. Use Retry or Run now.',
       collectedLater: 'still running on vanpi; a later check collects it',
-      abandon: 'delete the job and leave any Pi run alone',
-      abandonInfo: 'Cancel was refused because the job\'s Pi run may still be active and could not be stopped or confirmed. Abandon deletes the job anyway; the message above names the run and the commands to find and stop it on the Pi.',
+      abandon: id => `delete the job and leave Pi attempt ${id} alone`,
+      abandonInfo: 'Cancel was refused because the job\'s Pi run may still be active and could not be stopped or confirmed. Abandon deletes the job anyway, but only while that attempt is still the job\'s: if another has replaced it, cancel again. The message above names the run and the commands to find and stop it on the Pi.',
     },
   },
   automations: {

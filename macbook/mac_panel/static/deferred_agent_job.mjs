@@ -34,6 +34,9 @@ export function describeRunNow(task) {
   return task.exit_status === RUN_NOW_PENDING && STILL_RUNNING.test(task.message ?? '') ? COPY.collectedLater : undefined;
 }
 
+/** The Pi attempt a card shows (its launch token, else its run id), or '' when there is none. */
+export const attemptOf = job => job.remote_token || job.remote_run || '';
+
 /** The card's version: only a job whose Pi run is still running or launching is shown as collected later, so a
  * receipt that predates the run's end does not keep saying it is running. */
 export function collectedLaterOnCard(job, task) {

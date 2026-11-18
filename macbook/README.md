@@ -416,7 +416,11 @@ When the Pi cannot be reached or listed, the run still shows running (or cannot 
 read) after that wait, or a launch cannot be matched to one run, `cancel` keeps
 the job and exits 6, printing the recovery commands; `cancel --abandon JOB`
 deletes the job anyway and prints the same commands for a run that may still be
-active (and records the id or token in `deferred.log`). A job record that cannot
+active (and records the id or token in `deferred.log`). `cancel --abandon
+--attempt ID JOB` (what Mac Panel's Abandon sends, ID being the launch token or
+run id of the attempt whose stop was refused) deletes it only while ID is still
+the job's attempt and its state is readable; otherwise it keeps the job and exits 6,
+so an attempt that replaced the refused one gets its own stop first. A job record that cannot
 be read is checked the same way before it is deleted.
 
 A Pi run can outlive its job: the Pi stays unreachable, or a reachable run does

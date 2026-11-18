@@ -75,7 +75,7 @@ usage() {
                   [--cwd DIR] [--run-timeout MINUTES] [--attempts N] [--timeout SECONDS] [--give-up DUE]
                   DUE NAME PROMPT_FILE|vanpi:/PATH [DESCRIPTION]
        ${script:t} list [--json]
-       ${script:t} cancel [--abandon] JOB | retry JOB [--relaunch ID] | run-now JOB [--relaunch ID]
+       ${script:t} cancel [--abandon [--attempt ID]] JOB | retry JOB [--relaunch ID] | run-now JOB [--relaunch ID]
        ${script:t} reschedule JOB DUE
        ${script:t} status | run-due | watchdog | install | uninstall
 DUE is YYYY-MM-DD, 'YYYY-MM-DD HH:MM' (local time), +Nd or +Nh.
@@ -414,8 +414,12 @@ resolve_job() {  # JOB: set REPLY to the one exact id or exact name match
 }
 
 cmd_cancel() {
-  local abandon=
+  local abandon= attempt=
   [[ ${1-} == --abandon ]] && { abandon=--abandon; shift }
+  if [[ -n $abandon && ${1-} == --attempt ]]; then
+    [[ ${2-} == [a-z0-9][a-z0-9-]# && ${#2} -le 80 ]] || die "--attempt needs the run id or launch token being abandoned"
+    attempt=$2; shift 2
+  fi
   (( $# == 1 )) || usage
   acquire_mutation_lock
   resolve_job $1
@@ -423,7 +427,10 @@ cmd_cancel() {
   # A Pi run outlives the job directory, so it is stopped (or found finished) first.
   # A record that cannot be trusted beside signs of a vanpi job is kept unless --abandon.
   if load_job $dir && job_record_valid $dir; then
+    [[ -z $attempt ]] || pi_abandon_scope $dir $attempt
     ! pi_job || pi_cancel $dir "$abandon"
+  elif [[ -n $attempt ]]; then
+    pi_abandon_scope $dir $attempt untrusted
   elif pi_evidence $dir; then
     pi_cancel $dir "$abandon" untrusted
   fi

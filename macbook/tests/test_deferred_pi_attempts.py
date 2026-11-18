@@ -1,7 +1,8 @@
 """`deferred.zsh` vanpi jobs: which attempt a person's command acts on. run-now
 that starts a new attempt saves the job as pending before the attempt runs, so
-its end is accounted even when a check is interrupted; refusals print one
-command that works. Fake pi_agent.py and ssh as in
+its end is accounted even when a check is interrupted; `cancel --abandon
+--attempt ID` (Mac Panel's Abandon) goes ahead only while ID is still the job's
+attempt; refusals print one command that works. Fake pi_agent.py and ssh as in
 deferred_pi_fixture.
 """
 import datetime
@@ -58,3 +59,34 @@ class RunNowAttemptTests(PiHarness):
         self.deferred(*command)
         self.assertEqual(self.meta(job)["state"], "pending")
 
+
+class AbandonAttemptTests(PiHarness):
+    def test_abandon_naming_an_attempt_refuses_once_the_job_has_another(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        first = self.listed(job)
+        self.deferred("run-now", job.name, "--relaunch", first["remote_run"], check=False)
+        second = self.listed(job)
+        self.assertNotEqual(second["remote_token"], first["remote_token"])
+        for stale in (first["remote_token"], first["remote_run"]):
+            with self.subTest(stale=stale):
+                result = self.deferred("cancel", "--abandon", "--attempt", stale, job.name, check=False)
+                self.assertEqual(result.returncode, 6)
+                self.assertIn(stale, result.stderr)
+                self.assertTrue(job.exists())
+        self.assertEqual(self.deferred("cancel", "--attempt", second["remote_token"], job.name,
+                                       check=False).returncode, 2)
+        self.deferred("cancel", "--abandon", "--attempt", second["remote_token"], job.name)
+        self.assertFalse(job.exists())
+        self.assertEqual(self.calls("stop"), [])  # abandon leaves the run alone; it never tried to stop it
+
+    def test_abandon_naming_an_attempt_refuses_a_job_whose_state_cannot_be_read(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        token = self.listed(job)["remote_token"]
+        (job / "remote-run.json").write_text("{")
+        result = self.deferred("cancel", "--abandon", "--attempt", token, job.name, check=False)
+        self.assertEqual(result.returncode, 6)
+        self.assertTrue(job.exists())
+        self.deferred("cancel", "--abandon", job.name)  # the CLI escape hatch still removes it
+        self.assertFalse(job.exists())

@@ -151,21 +151,19 @@ class DeferredAdapter:
         return {**value, 'tasks': self.tasks.list(Section.DEFERRED)}
 
     def mutate(self, body):
-        object_fields(body, ('action',), ('id', 'due', 'confirmed', 'name', 'description', 'abandon',
+        object_fields(body, ('action',), ('id', 'due', 'confirmed', 'name', 'description', 'abandon', 'attempt',
                                            'relaunch', 'script', 'attempts', 'timeout', *AGENT_FIELDS))
         if body['action'] == 'add':
             return self.add(body)
         if body['action'] == 'add-agent':
             return self.add_agent(body)
-        object_fields(body, ('action', 'id'), ('due', 'confirmed', 'abandon', 'relaunch'))
+        object_fields(body, ('action', 'id'), ('due', 'confirmed', 'abandon', 'attempt', 'relaunch'))
         action = field(body, 'action', str, status=400)
         if action not in ACTIONS:
             raise ApiError(400, 'Unsupported deferred action')
         job_id = validate_job_id(body['id'])
-        if 'abandon' in body and (action != 'cancel' or field(body, 'abandon', bool, status=400) is not True):
-            raise ApiError(400, 'abandon is only true, and only for cancel')
         relaunch = relaunch_token(body, action)
-        argv = (*DEFERRED, action, *(('--abandon',) if 'abandon' in body else ()), job_id,
+        argv = (*DEFERRED, action, *abandon_options(body, action), job_id,
                 *(('--relaunch', relaunch) if relaunch else ()))
         if action in ('cancel', 'run-now'):
             confirm(body)
@@ -265,6 +263,24 @@ class DeferredAdapter:
             return Reply({'message': result.stdout.strip() or 'Added'})
         finally:
             Path(temporary).unlink(missing_ok=True)
+
+
+def abandon_options(body, action):
+    """cancel's `--abandon --attempt ID`: the panel abandons only the Pi attempt whose stop it saw refused.
+
+    The CLI checks under the checker lock that ID (launch token or run id) is still
+    the job's attempt and keeps the job (exit 6) when another has replaced it.
+    A bare `cancel --abandon` stays a Terminal-only escape hatch."""
+    if 'abandon' not in body:
+        if 'attempt' in body:
+            raise ApiError(400, 'attempt is only for an abandoning cancel')
+        return ()
+    if action != 'cancel' or field(body, 'abandon', bool, status=400) is not True:
+        raise ApiError(400, 'abandon is only true, and only for cancel')
+    attempt = body.get('attempt')
+    if not isinstance(attempt, str) or not (TOKEN.fullmatch(attempt) or RUN_ID.fullmatch(attempt)):
+        raise ApiError(400, 'abandon names the Pi attempt (launch token or run id) whose stop was refused')
+    return ('--abandon', '--attempt', attempt)
 
 
 def relaunch_token(body, action):

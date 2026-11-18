@@ -319,6 +319,12 @@ pi_rearm() {  # DIR VERB ID: retry/run-now may go ahead; relays a refusal (exit 
   save_job $dir
 }
 
+pi_abandon_scope() {  # DIR ID [UNTRUSTED]: cancel --abandon --attempt ID goes ahead only while ID is the job's attempt
+  # Mac Panel's Abandon names the attempt whose stop was refused; a later attempt needs its own refused cancel.
+  [[ -z ${3-} ]] && pi_job && pi_snapshot $1 && [[ $2 == "$pi[run]" || $2 == "$pi[token]" ]] && return 0
+  print -u2 -- "${script:t}: kept ${1:t}: $2 is no longer its Pi attempt, or its Pi state cannot be read. Cancel it again to stop what it runs now; cancel --abandon ${1:t} deletes it anyway."
+  exit $refused_status
+}
 
 pi_fresh_window() {  # the new attempt may launch until 7 days after now, or after its due time when later
   local from=$EPOCHSECONDS due
