@@ -33,6 +33,7 @@ stamp_format=%Y-%m-%dT%H:%M
 default_attempts=3
 default_timeout=900
 lock_wait=${DEFERRED_LOCK_WAIT:-10}
+alert_send_limit=48     # failed sends before an owed warning is dropped: about two days of hourly checks
 # Tests only: a file holding seconds added to the clock the give-up time is judged by, here
 # and (through the pass environment) by a vanpi run at its launch. Unset, the clock is real.
 clock_shift_file=${DEFERRED_CLOCK_SHIFT_FILE-}

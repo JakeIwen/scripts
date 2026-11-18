@@ -6,7 +6,7 @@ as in deferred_pi_fixture.
 """
 from macbook.tests.deferred_pi_fixture import PiHarness
 
-OWED_SEND_LIMIT = 48  # deferred_pi_schedule.zsh pi_alert_send_limit: about two days of hourly checks
+OWED_SEND_LIMIT = 48  # deferred.zsh alert_send_limit: about two days of hourly checks
 
 
 class AuthorizedLaunchWaitsTests(PiHarness):

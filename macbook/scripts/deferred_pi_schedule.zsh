@@ -14,7 +14,7 @@
 # The scheduler, not the job's copied run script, owns the collection deadline
 # and the alerts, so both hold when that copy cannot run. A warning it raises is
 # owed from that moment, whatever becomes of the job's state, and every check
-# sends what is still owed until a send succeeds or pi_alert_send_limit sends
+# sends what is still owed until a send succeeds or alert_send_limit sends
 # have failed. The Pi state is read
 # by the repository's deferred_pi_control.py, never by running anything from
 # the job directory.
@@ -23,7 +23,6 @@ typeset -A pi   # the last pi_snapshot: state run token owes unresolved delivere
 # In the job directory: alerts.sent holds one "KIND ATTEMPT" key per warning sent, alerts.owed one
 # "KEY<TAB>FAILED SENDS<TAB>TITLE<TAB>MESSAGE" line per warning raised and not sent (kept once dropped).
 pi_alerts_sent=alerts.sent pi_alerts_owed=alerts.owed
-pi_alert_send_limit=48   # failed sends before an owed warning is dropped: about two days of hourly checks
 # deferred_pi_state.STATE_RECORDS: a record without kind/host beside any of them is an untrusted vanpi job.
 pi_state_records=(remote-run.json launching.json launch-unknown.json remote-failed.json report-checks.json)
 pi_launcher=$HOME/.claude/skills/pi-agent/pi_agent.py   # deferred_pi_remote.LAUNCHER, for alert text
@@ -79,10 +78,10 @@ pi_send_owed() {  # DIR: sends each warning the job still owes; marks it sent on
     key=$fields[1] fails=$fields[2]
     (( ${sent[(Ie)$key]} )) && continue   # sent before a crash rewrote this file
     [[ $fails == <-> && ${#fields} -eq 4 ]] || { log_line "dropped a malformed owed warning for ${dir:t}"; continue }
-    if (( fails < pi_alert_send_limit )); then
+    if (( fails < alert_send_limit )); then
       if send_alert $fields[3] $fields[4]; then print -r -- $key >> $dir/$pi_alerts_sent; continue; fi
       fails=$(( fails + 1 ))
-      (( fails < pi_alert_send_limit )) ||
+      (( fails < alert_send_limit )) ||
         log_line "dropped warning for ${dir:t} after $fails failed sends: $fields[3]"
     fi
     kept+=("$key"$'\t'$fails$'\t'$fields[3]$'\t'$fields[4])   # a dropped one stays, so it is never raised again
