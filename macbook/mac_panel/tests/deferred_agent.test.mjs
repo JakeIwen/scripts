@@ -13,7 +13,7 @@ const {render, searchItems} = await import('../static/section_deferred.mjs');
 const mac = {host: 'mac', due: '2026-11-20T09:30', name: 'check-build', description: '', prompt: 'Check the build.\n',
   pi_prompt_path: '', model: '', effort: 'medium', cwd: '', ready: '', attempts: '', timeout: '', run_timeout: ''};
 const vanpi = {...mac, host: 'vanpi', prompt: '', pi_prompt_path: '/home/pi/briefs/can scan.md', model: 'astra', run_timeout: '30'};
-const RELAUNCH = 'Confirm: The previous run may still be active; this starts another run';
+const RELAUNCH = 'Confirm: The previous Pi attempt d0123456789abcdef may still be active; this starts another run';
 
 const walk = element => [element, ...(element.childNodes ?? []).flatMap(child => (child instanceof Element ? walk(child) : []))];
 const byKey = (root, key) => walk(root).find(element => element.dataset?.key === key);
@@ -66,6 +66,7 @@ const job = {
   max_attempts: 1, timeout: 900, description: 'd', created: '2026-11-19T09:00', origin: '/tmp', last_log: 'Held: …',
   give_up: '2026-11-27T09:00', agent: true, ready: null, last_not_ready: null, not_ready_checks: 0,
   host: 'vanpi', model: 'sol', effort: 'medium', remote_run: null, remote_state: 'launch-unknown',
+  remote_token: 'd0123456789abcdef', relaunch_id: 'd0123456789abcdef',
 };
 
 test('agent jobs show host, model and effort tags and the Pi run state at its level', () => {
@@ -82,8 +83,11 @@ test('agent jobs show host, model and effort tags and the Pi run state at its le
 
 test('retrying an unknown launch says it may start a second run', () => {
   assert.equal(relaunchConfirm(job, 'run pi-check now'), RELAUNCH);
-  assert.equal(relaunchConfirm({...job, remote_state: 'failed'}, 'run pi-check now'), 'Confirm: run pi-check now');
-  assert.equal(relaunchConfirm({...job, remote_state: 'failed'}), undefined);
+  const settled = {...job, remote_state: 'failed', relaunch_id: null};
+  assert.equal(relaunchConfirm(settled, 'run pi-check now'), 'Confirm: run pi-check now');
+  assert.equal(relaunchConfirm(settled), undefined);
+  assert.match(relaunchConfirm({...settled, remote_state: 'failed', relaunch_id: '1120-090000-abcd-d0123456789abcdef'}),
+    /1120-090000-abcd-d0123456789abcdef may still be active/);
   const data = {checker: {agent_loaded: true, stale: false, last_run: null}, jobs_dir: '/j', tasks: [], jobs: [job]};
   const {node} = render(data);
   const retry = byKey(node, `retry-${job.id}`);
@@ -94,7 +98,7 @@ test('retrying an unknown launch says it may start a second run', () => {
   assert.equal(text(runNow), RELAUNCH);
   assert.match(text(node), /Pi run: launch-unknown/);
   assert.equal(byKey(node, `abandon-${job.id}`), undefined);
-  const plain = render({...data, jobs: [{...job, remote_state: 'failed'}]}).node;
+  const plain = render({...data, jobs: [{...job, remote_state: 'failed', relaunch_id: null}]}).node;
   const ordinary = byKey(plain, `retry-${job.id}`);
   assert.equal(ordinary.classes.has('armed'), false);
 });
@@ -122,12 +126,12 @@ test('search offers the agent form', () => {
 
 test('both add forms stop names at the length whose dated id the CLI accepts', async () => {
   const {NAME_LIMIT, validateAdd} = await import('../static/deferred_form.mjs');
-  assert.equal(NAME_LIMIT, 49);
-  assert.deepEqual(validateAgent({...mac, name: 'n'.repeat(49)}), {});
-  assert.ok(validateAgent({...mac, name: 'n'.repeat(50)}).name);
-  const script = {due: '2026-11-06T09:30', name: 'n'.repeat(50), description: '', script: '#!/bin/zsh\n', attempts: '', timeout: ''};
+  assert.equal(NAME_LIMIT, 60);
+  assert.deepEqual(validateAgent({...mac, name: 'n'.repeat(60)}), {});
+  assert.ok(validateAgent({...mac, name: 'n'.repeat(61)}).name);
+  const script = {due: '2026-11-06T09:30', name: 'n'.repeat(61), description: '', script: '#!/bin/zsh\n', attempts: '', timeout: ''};
   assert.ok(validateAdd(script).name);
-  assert.deepEqual(validateAdd({...script, name: 'n'.repeat(49)}), {});
+  assert.deepEqual(validateAdd({...script, name: 'n'.repeat(60)}), {});
 });
 
 test('a vanpi timeout below what one check needs is named', () => {
@@ -136,13 +140,105 @@ test('a vanpi timeout below what one check needs is named', () => {
   assert.deepEqual(validateAgent({...mac, timeout: '60'}), {});
 });
 
-test('a held launch sends its token with Run now and Retry; a still-running Pi run-now is not a failure', async () => {
-  const {collectedLater, relaunchFields} = await import('../static/deferred_agent_job.mjs');
-  const held = {host: 'vanpi', remote_state: 'launch-unknown', remote_token: 'd0123456789abcdef'};
-  assert.deepEqual(relaunchFields(held), {confirmed: true, relaunch: 'd0123456789abcdef'});
-  assert.deepEqual(relaunchFields({...held, remote_state: 'running'}), {});
-  assert.equal(collectedLater({host: 'vanpi', remote_state: 'running'}, {exit_status: 4, message: ''}), true);
-  assert.equal(collectedLater({host: 'vanpi', remote_state: 'unlaunched'}, {exit_status: 4, message: 'running 2026-x: its Pi run'}), true);
-  assert.equal(collectedLater({host: 'vanpi', remote_state: 'unlaunched'}, {exit_status: 4, message: 'not ready x'}), false);
-  assert.equal(collectedLater({host: 'mac', remote_state: null}, {exit_status: 4, message: 'running x'}), false);
+test('a vanpi timeout needs the floor, and the ready allowance more with a ready condition', async () => {
+  const {PI_MIN_TIMEOUT, PI_READY_ALLOWANCE} = await import('../static/deferred_agent_form.mjs');
+  assert.equal(PI_READY_ALLOWANCE, 30);
+  const floor = PI_MIN_TIMEOUT + PI_READY_ALLOWANCE;
+  const withReady = {...vanpi, ready: 'true'};
+  assert.match(validateAgent({...withReady, timeout: String(floor - 1)}).timeout, /with a ready condition, at least 420/);
+  assert.deepEqual(validateAgent({...withReady, timeout: String(floor)}), {});
+  assert.deepEqual(validateAgent({...vanpi, timeout: String(PI_MIN_TIMEOUT)}), {});
+  assert.deepEqual(validateAgent({...mac, ready: 'true', timeout: '60'}), {});
+});
+
+test('a vanpi job has no attempts: the form hides the row and the body omits it; the Mac keeps it', () => {
+  assert.equal('attempts' in agentBody({...vanpi, attempts: '3'}), false);
+  assert.equal(agentBody({...mac, attempts: '3'}).attempts, 3);
+  assert.deepEqual(validateAgent({...vanpi, attempts: 'x'}), {});
+  const form = addAgentForm();
+  const row = walk(form).find(element => element.className === 'setting' && byKey(element, 'agent-attempts'));
+  assert.equal(row.hidden, false);
+  const host = byKey(form, 'agent-host');
+  host.value = 'vanpi';
+  host.dispatchEvent(new Event('change'));
+  assert.equal(row.hidden, true);
+  host.value = 'mac';
+  host.dispatchEvent(new Event('change'));
+  assert.equal(row.hidden, false);
+});
+
+test('Run now and Retry send the unresolved attempt id; a settled job sends none', async () => {
+  const {relaunchFields} = await import('../static/deferred_agent_job.mjs');
+  const run = '1120-090000-abcd-d0123456789abcdef';
+  assert.deepEqual(relaunchFields({...job, relaunch_id: run}), {confirmed: true, relaunch: run});
+  assert.deepEqual(relaunchFields({...job, remote_state: 'running', relaunch_id: null}), {});
+  assert.deepEqual(relaunchFields({host: 'mac', relaunch_id: null}), {});
+});
+
+test('a still-running Pi run-now is not a failure, and the card shows it only while the run is active', async () => {
+  const {collectedLaterOnCard, describeRunNow, collectedLaterText} = await import('../static/deferred_agent_job.mjs');
+  const pending = {exit_status: 4, message: 'running 1120-x: its Pi run is going'};
+  assert.equal(describeRunNow(pending), collectedLaterText);
+  assert.equal(describeRunNow({exit_status: 4, message: 'not ready x'}), undefined);
+  assert.equal(describeRunNow({exit_status: 1, message: 'running x'}), undefined);
+  assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'running'}, pending), true);
+  assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'launching'}, pending), true);
+  assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'finished'}, pending), false);
+  assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'failed'}, pending), false);
+  assert.equal(collectedLaterOnCard({host: 'mac', remote_state: null}, pending), false);
+});
+
+const data = jobs => ({checker: {agent_loaded: true, stale: false, last_run: null}, jobs_dir: '/j', tasks: [], jobs});
+
+test('Reschedule is withheld from a vanpi job that has launched, with the reason in an info popover', () => {
+  const unlaunched = {...job, state: 'pending', remote_state: 'unlaunched', relaunch_id: null};
+  assert.ok(byKey(render(data([unlaunched])).node, `reschedule-${job.id}`));
+  const macJob = {...job, host: 'mac', remote_state: null, relaunch_id: null};
+  assert.ok(byKey(render(data([macJob])).node, `reschedule-${job.id}`));
+  ['launching', 'launch-unknown', 'running', 'finished', 'failed'].forEach(remote_state => {
+    const node = render(data([{...unlaunched, remote_state}])).node;
+    assert.equal(byKey(node, `reschedule-${job.id}`), undefined, remote_state);
+    assert.match(text(node), /cannot be rescheduled/);
+  });
+});
+
+test('a stale "still running" receipt is not shown once the job is no longer running', () => {
+  const task = {id: 't1', job: job.id, state: 'done', exit_status: 4, message: 'running x', started_at: 1, finished_at: 2};
+  const failed = {...job, remote_state: 'failed', relaunch_id: null};
+  assert.doesNotMatch(text(render({...data([failed]), tasks: [task]}).node), /still running on vanpi/);
+  const running = {...job, state: 'pending', remote_state: 'running', relaunch_id: null};
+  assert.match(text(render({...data([running]), tasks: [task]}).node), /still running on vanpi/);
+});
+
+test('a resumed run-now task reports with the Pi-aware wording; a 409 on retry shows its message and reloads', async () => {
+  const {section} = await import('./dom_fixture.mjs');
+  const {register} = await import('../static/panel_sections.mjs');
+  const root = section('deferred');
+  let loads = 0;
+  const finished = {id: 't9', job: job.id, state: 'done', exit_status: 4, message: 'running x', started_at: 1, finished_at: 2};
+  const running = {...finished, state: 'running', finished_at: null};
+  register([{id: 'deferred', endpoint: '/api/deferred', render: value => { loads++; return {node: new Element(), summary: '', level: 'ok', value}; }}]);
+  globalThis.fetch = async (path, init) => {
+    if (init.method === 'POST') {
+      return {ok: false, status: 409, json: async () => ({error: 'The Pi attempt x may still be active', code: 'relaunch-unconfirmed'})};
+    }
+    return {ok: true, status: 200, json: async () => (path.startsWith('/api/tasks/') ? finished : data([]))};
+  };
+  const realTimeout = globalThis.setTimeout;
+  // Only the 2 s poll is shortened; the notice's own clearing timer keeps its delay.
+  globalThis.setTimeout = (fn, ms) => realTimeout(fn, ms === 2000 ? 0 : ms);
+  try {
+    const {node} = render({...data([{...job, state: 'pending', remote_state: 'running', relaunch_id: null}]), tasks: [running]});
+    await new Promise(resolve => realTimeout(resolve, 50));
+    assert.match(root.parts['.notice'].textContent, /pi-check: still running on vanpi; a later check collects it/);
+    const retry = byKey(render(data([job])).node, `retry-${job.id}`);
+    retry.click();
+    retry.click();
+    await new Promise(resolve => realTimeout(resolve, 50));
+    assert.match(root.parts['.notice'].textContent, /may still be active/);
+    assert.ok(loads >= 2, 'the section reloaded after the 409');
+    assert.ok(node);
+  } finally {
+    globalThis.setTimeout = realTimeout;
+  }
 });

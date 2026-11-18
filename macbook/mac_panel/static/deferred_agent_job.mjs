@@ -1,5 +1,5 @@
-// What an agent job's card adds: host/model/effort tags, its Pi run's state, and the confirm wording
-// for a retry that may start a second Pi run.
+// What an agent job's card adds: host/model/effort tags, its Pi run's state, the confirm wording for a
+// retry that may start another Pi run, and the outcome wording for a run-now that leaves its run going.
 import {confirmText, info, node, tag} from './panel_dom.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {Level} from './status_cell.mjs';
@@ -20,18 +20,30 @@ export const LAUNCH_UNKNOWN = 'launch-unknown';
 const RUN_NOW_PENDING = 4;
 const ACTIVE = ['running', 'launching'];
 
-/** The extra request fields for retry/run-now: a held launch's token, which the CLI checks under its lock. */
+/** The extra request fields for retry/run-now: the unresolved Pi attempt's id (`relaunch_id`, as the list shows it),
+ * which the CLI checks under its lock; a job with nothing unresolved sends none. */
 export function relaunchFields(job) {
-  return job.remote_state === LAUNCH_UNKNOWN ? {confirmed: true, relaunch: job.remote_token} : {};
+  return job.relaunch_id ? {confirmed: true, relaunch: job.relaunch_id} : {};
 }
 
-/** A Pi run-now that left its run going, so it is collected by a later check rather than failed. */
-export function collectedLater(job, task) {
-  return job.host === 'vanpi' && task.exit_status === RUN_NOW_PENDING
-    && (ACTIVE.includes(job.remote_state) || /^running /.test(task.message ?? ''));
+const STILL_RUNNING = /^running /;
+
+/** run-now's outcome wording from the finished task alone, for the click and the resumed-task paths: exit 4 with a
+ * "running ..." message is a Pi run left going, collected by a later check, not a failure. */
+export function describeRunNow(task) {
+  return task.exit_status === RUN_NOW_PENDING && STILL_RUNNING.test(task.message ?? '') ? COPY.collectedLater : undefined;
+}
+
+/** The card's version: only a job whose Pi run is still running or launching is shown as collected later, so a
+ * receipt that predates the run's end does not keep saying it is running. */
+export function collectedLaterOnCard(job, task) {
+  return job.host === 'vanpi' && ACTIVE.includes(job.remote_state) && task.exit_status === RUN_NOW_PENDING;
 }
 
 export const collectedLaterText = COPY.collectedLater;
+
+/** A vanpi job that has launched is moved on only by retry or run-now, so it has no Reschedule. */
+export const rescheduleLocked = job => job.host === 'vanpi' && job.remote_state !== 'unlaunched';
 
 /** Tags for an agent job's card, or null for a script job. */
 export function agentTags(job) {
@@ -49,7 +61,7 @@ export function remoteRows(job) {
   return job.remote_run ? [['Pi run', job.remote_run]] : [];
 }
 
-/** Retry and run-now after a launch that could not be reconciled may start a second Pi run, so say so. */
+/** Retry and run-now over an unresolved Pi attempt may start another run beside it, so say so and name it. */
 export function relaunchConfirm(job, phrase) {
-  return job.remote_state === LAUNCH_UNKNOWN ? confirmText(COPY.relaunch) : phrase && confirmText(phrase);
+  return job.relaunch_id ? confirmText(COPY.relaunch(job.relaunch_id)) : phrase && confirmText(phrase);
 }

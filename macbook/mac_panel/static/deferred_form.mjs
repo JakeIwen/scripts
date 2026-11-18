@@ -1,7 +1,6 @@
 // Validation and request shaping for the Add job form; pure, so Node can test it. Mirrors deferred_adapter.add.
-// A new job's name, shared by both add forms: the dated id (YYYY-MM-DD-NAME) must stay within the CLI's 60
-// characters (deferred_adapter.NAME_LIMIT).
-export const NAME_LIMIT = 49;
+// A new job's name, shared by both add forms (deferred_adapter.NAME_LIMIT, deferred.zsh valid_name).
+export const NAME_LIMIT = 60;
 export const NAME = new RegExp(`^[a-z0-9][a-z0-9-]{0,${NAME_LIMIT - 1}}$`);
 export const NAME_PROBLEM = `Use lower-case letters, digits and hyphens, starting with a letter or digit (${NAME_LIMIT} characters at most).`;
 export const FIELDS = ['due', 'name', 'description', 'script', 'attempts', 'timeout'];
