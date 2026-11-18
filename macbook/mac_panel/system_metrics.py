@@ -7,6 +7,7 @@ drawing an impossible gauge.
 """
 from dataclasses import dataclass
 from enum import Enum
+import logging
 import re
 import shutil
 import time
@@ -20,6 +21,7 @@ DISK_PATH = '/System/Volumes/Data'
 PROBE_TIMEOUT = 5
 # All probes together; whatever has not run when it is spent is reported unavailable.
 SYSTEM_BUDGET = 8
+LOG = logging.getLogger(__name__)
 
 
 class Probe(str, Enum):
@@ -53,8 +55,10 @@ SYSCTL_KEYS = {Probe.MEMORY_TOTAL: 'hw.memsize', Probe.NCPU: 'hw.ncpu', Probe.LO
 PRESSURE_LEVELS = {1: Pressure.NORMAL, 2: Pressure.WARN, 4: Pressure.CRITICAL}
 POWER_SOURCES = {'AC Power': 'ac', 'Battery Power': 'battery', 'UPS Power': 'ups'}
 SIZE_UNITS = {'K': 1024, 'M': 1024 ** 2, 'G': 1024 ** 3}
-LOAD = re.compile(r'\{\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\}')
-SWAP = re.compile(r'total = ([\d.]+)([KMG])\s+used = ([\d.]+)([KMG])')
+# A decimal number: digits with at most one fractional part, so `1..2` never matches.
+NUMBER = r'(\d{1,15}(?:\.\d{1,15})?)'
+LOAD = re.compile(rf'\{{\s*{NUMBER}\s+{NUMBER}\s+{NUMBER}\s*\}}')
+SWAP = re.compile(rf'total = {NUMBER}([KMG])\s+used = {NUMBER}([KMG])')
 BOOT = re.compile(r'\bsec = (\d+)')
 PAGE_SIZE = re.compile(r'page size of (\d+) bytes')
 VM_LINE = re.compile(r'^"?([A-Za-z][A-Za-z -]*?)"?:\s+(\d+)\.?$')
@@ -93,14 +97,21 @@ def parse_int(text):
         raise Unavailable from None
 
 
+def parse_float(text):
+    try:
+        return float(text)
+    except ValueError:
+        raise Unavailable from None
+
+
 def parse_load(text):
-    return [float(value) for value in require(LOAD.search(text)).groups()]
+    return [parse_float(value) for value in require(LOAD.search(text)).groups()]
 
 
 def parse_swap(text):
     total, total_unit, used, used_unit = require(SWAP.search(text)).groups()
-    return {'total': round(float(total) * SIZE_UNITS[total_unit]),
-            'used': round(float(used) * SIZE_UNITS[used_unit])}
+    return {'total': round(parse_float(total) * SIZE_UNITS[total_unit]),
+            'used': round(parse_float(used) * SIZE_UNITS[used_unit])}
 
 
 def parse_pressure(text):
@@ -203,6 +214,10 @@ class SystemMetrics:
             try:
                 values[probe] = thunk()
             except Unavailable:
+                unavailable.append(probe.value)
+            except (ValueError, ArithmeticError):
+                # Each parser validates its own text; this keeps a parser gap to one probe.
+                LOG.exception('Probe %s returned text it could not parse', probe.value)
                 unavailable.append(probe.value)
         if Probe.UPTIME in values:
             values[Probe.UPTIME] = max(0, int(self.wall_clock()) - values[Probe.UPTIME])

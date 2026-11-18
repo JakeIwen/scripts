@@ -119,6 +119,16 @@ class SystemMetricsTests(unittest.TestCase):
         self.assertIn('memory', facts.unavailable)
         self.assertIsNone(facts.get(Probe.MEMORY))
 
+    def test_malformed_numbers_make_only_their_probe_unavailable(self):
+        runner = ArgvRunner(probe_answers({
+            (SYSCTL, '-n', 'vm.loadavg'): '{ 1..2 3.0 4.0 }\n',
+            (SYSCTL, '-n', 'vm.swapusage'): 'total = 1..2M  used = 3.0M  free = 1.0M\n',
+            (SYSCTL, '-n', 'hw.ncpu'): '1..2\n'}))
+        facts = self.collect(runner)
+        self.assertEqual(sorted(facts.unavailable), ['load', 'ncpu', 'swap'])
+        self.assertIsNotNone(facts.get(Probe.MEMORY))
+        self.assertIs(facts.get(Probe.PRESSURE), Pressure.NORMAL)
+
     def test_a_spent_budget_marks_the_rest_unavailable(self):
         clock = Clock()
 
