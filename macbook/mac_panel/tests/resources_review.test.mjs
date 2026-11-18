@@ -290,6 +290,33 @@ test('the watch ends when the reader opens another section or the restore load f
   assert.ok(!late.classList.contains('flash'), 'a failed load ended the watch');
 });
 
+test('round 4: a cold restore bookmark lands once when the restore frame finishes before its host mounts it', async context => {
+  const {host, hosted, made, done} = bookmarkSetup(context);
+  const ANCHOR = '[data-anchor="snapshots"]';
+  let scrolls = 0;
+  const drawn = () => ({node: new Element(), summary: '', level: 'ok'});
+  // On a cold start the restore frame is a sibling of usage: its render draws the row in its own frame, and only
+  // usage's render moves that frame (and so the row) inside the usage section.
+  register([
+    {id: 'llm-restore', endpoint: null, render: () => {
+      const target = bookmarkAnchor();
+      target.scrollIntoView = () => { scrolls++; };
+      hosted.parts[ANCHOR] = target;
+      return drawn();
+    }},
+    {id: 'usage', endpoint: null, render: () => { host.parts[ANCHOR] = hosted.parts[ANCHOR] ?? null; return drawn(); }},
+  ]);
+  revealWhenRendered('usage', 'snapshots', {});
+  await refresh('llm-restore');
+  assert.equal(scrolls, 0, 'the row exists only in the unmounted restore frame');
+  await refresh('usage');
+  assert.equal(scrolls, 1, 'the row was revealed once the host mounted the frame');
+  assert.ok(made[0].classList.contains('flash'));
+  await refresh('usage');
+  done();
+  assert.equal(scrolls, 1, 'a later poll does not scroll again');
+});
+
 test('low note: the watch ends on a definitive miss, so a later row with the same anchor is not scrolled to', async context => {
   const {made, done} = bookmarkSetup(context);
   const absent = {id: 'llm-restore', endpoint: null, render: () => ({node: new Element(), summary: '', level: 'ok'})};

@@ -159,10 +159,13 @@ const anchorFrame = (id, anchorId) => hostedIn(id).find(key => HOSTED[key].ancho
 // repeated whenever the section or a hosted one renders and the row it highlighted was replaced. Watching ends once the
 // row is shown with none of them still loading (later polls must not scroll the page); once `frame`, the one that draws
 // the row, has rendered without it (a definitive miss: a later row that happens to match is not scrolled to); when the
-// reader opens a section; or when `frame` fails to load. Another frame's failure does not end it.
+// reader opens a section; or when `frame` fails to load. Another frame's failure does not end it. A hosted frame can
+// finish before its host has mounted it (on a cold start usage moves the restore frame inside itself when it renders):
+// the row is then in `frame` but not yet in the section, which is no miss, so the watch waits for the host's render.
 export function revealWhenRendered(id, anchorId, options, frame = anchorFrame(id, anchorId)) {
   stopRevealing();
-  const find = () => document.querySelector(`#${CSS.escape(id)} [data-anchor="${CSS.escape(anchorId)}"]`);
+  const within = scope => document.querySelector(`#${CSS.escape(scope)} [data-anchor="${CSS.escape(anchorId)}"]`);
+  const find = () => within(id);
   const watched = [id, ...hostedIn(id)];
   let shown = null;
   let frameRendered = false;
@@ -170,7 +173,7 @@ export function revealWhenRendered(id, anchorId, options, frame = anchorFrame(id
   // A section's state is recorded just before its load is marked finished, so the one that just rendered counts as done.
   const settled = rendered => (shown?.isConnected
     ? watched.every(member => member === rendered || !isLoading(member))
-    : frameRendered);
+    : frameRendered && !within(frame));
   land();
   if (settled(null)) return;
   const stop = onState((changed, entry) => {
