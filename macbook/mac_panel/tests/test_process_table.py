@@ -208,13 +208,16 @@ class DisplayNameTests(unittest.TestCase):
             # A lookup that reached a reused pid names another program: not believed.
             (13, 1, 'ssh: /Users/me/.ssh/sock [mux]', {'argv0': 'ssh: /Users/me/.ssh/sock [mux]', 'ucomm': 'ssh'}),
             (14, 1, '/usr/bin/plain --flag'),
-            files={10: 'Google Chrome Helper (Renderer)', 11: 'Google Chrome Helper (GPU)', 13: 'other'})
+            # The 16-character cut ends in a space, which the kernel-name pass strips.
+            (15, 1, 'Keychain Circle Notification', {'argv0': 'Keychain Circle Notification', 'ucomm': 'Keychain Circle '}),
+            files={10: 'Google Chrome Helper (Renderer)', 11: 'Google Chrome Helper (GPU)', 13: 'other',
+                   15: 'Keychain Circle Notification'})
         table = reader.table()
         names = {pid: row.name for pid, row in table.rows.items()}
         self.assertEqual(names, {10: 'Google Chrome Helper (Renderer)', 11: 'Google Chrome Helper (GPU)',
-                                 12: 'tmux', 13: 'ssh', 14: 'plain'})
+                                 12: 'tmux', 13: 'ssh', 14: 'plain', 15: 'Keychain Circle Notification'})
         # Only rows whose argv[0] has whitespace are looked up.
-        self.assertEqual(sorted(reader.looked_up), [10, 11, 12, 13])
+        self.assertEqual(sorted(reader.looked_up), [10, 11, 12, 13, 15])
         for row in table.rows.values():
             self.assertNotIn('private', row.name)
             self.assertNotIn('/', row.name)

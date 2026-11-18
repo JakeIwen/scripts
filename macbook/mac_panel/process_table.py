@@ -109,7 +109,8 @@ def program_name(argv0, kernel_name, executable_file='') -> str:
     """
     text = argv0.strip()
     if has_whitespace(text):
-        if kernel_name and executable_file[:KERNEL_NAME_LIMIT] == kernel_name:
+        # The kernel name arrives stripped, so a cut that ends in a space is stripped too.
+        if kernel_name and executable_file[:KERNEL_NAME_LIMIT].strip() == kernel_name:
             return executable_file
         return kernel_name or '?'
     if text.startswith('/'):
