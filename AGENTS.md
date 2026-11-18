@@ -454,8 +454,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   membership), `process_roles.py` (session, Codex app-server, infra, compute and shell roles for safety:
   liberal matching, an unsure parse protects), `signal_policy.py` (the one allow decision; protected by argv[0] and kernel name),
   `process_hosting.py` (outside processes with a terminal or LLM root beneath them are blocked),
-  `signal_recheck.py` (before each signal, a fresh table and a fresh decision; `TREE_TARGET_LIMIT`,
-  `MUTATION_BUDGET`, the reply's `stopped`) and `process_signals.py` (the mutate executor), and the page modules
+  `signal_recheck.py` (before each signal, a fresh table and a fresh decision; `MUTATION_BUDGET`,
+  `StopCode` and the reply's `stopped`; the tree-size cap is `signal_policy.TREE_TARGET_LIMIT`) and `process_signals.py` (the mutate executor), and the page modules
   `static/section_resources.mjs` + `resources_*.mjs`; the llm-restore cards are hosted inside the LLM
   section (`section_usage.mjs`). `sampler.py` records each section's
   level and a few values into the panel-owned SQLite history

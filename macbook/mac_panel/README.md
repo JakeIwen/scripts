@@ -140,7 +140,7 @@ Escape, blur or 8 seconds disarm it, and the second click sends the request with
 start, stop and restart, crontab pause, resume, install and run-now, deferred run-now,
 cancel (and Abandon job after a refused cancel), add, add-agent and Retry on a job whose Pi launch
 is unknown (a second Pi run may start), metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
-test, settings reset, log rotation, llm-restore restore, delete and overwrite and confirmed automation actions. Resources adds six more, all sent as `{action, pid, started, scope, confirmed: true}`: Terminate (`terminate`), Force kill (`kill`), Pause (`pause`), Resume (`resume`), Lower priority (`lower-priority`, which the panel cannot undo) and Terminate session (`terminate` with `scope: tree` on the session's root process). Their confirmations name the process or session, with snapshot counts ("12 processes seen"); the result line reports the reply's applied, gone, changed, skipped, refused and unchanged counts, leaving out zeros, and, when the reply's `stopped` is set, an error notice saying the action stopped early and why. A search result only navigates to the button and arms it. Reschedule opens an inline editor
+test, settings reset, log rotation, llm-restore restore, delete and overwrite and confirmed automation actions. Resources adds six more, all sent as `{action, pid, started, scope, confirmed: true}`: Terminate (`terminate`), Force kill (`kill`), Pause (`pause`), Resume (`resume`), Lower priority (`lower-priority`, which the panel cannot undo) and Terminate session (`terminate` with `scope: tree` on the session's root process). Their confirmations name the process or session, with snapshot counts ("12 processes seen"); the result line reports the reply's applied, gone, changed, skipped (members protected by the policy), refused, unchanged and not-reached (targets left alone because the action stopped first) counts, leaving out zeros, and, when the reply's `stopped` (`{code, text}` or null) is set, an error notice saying the action stopped early and why. A search result only navigates to the button and arms it. Reschedule opens an inline editor
 whose Apply is enabled only once the time differs.
 
 Navigation: the sidebar groups Overview; Jobs & services (Services, Deferred jobs,
@@ -300,24 +300,51 @@ protected programs: the system set (`launchd`, `loginwindow`, `WindowServer`, `D
 `runningboardd`, `tccd`) and the terminal hosts (`iTerm2`, `Terminal`, `tmux`, `screen`,
 `zellij`, `Ghostty`, `kitty`, `Alacritty`, `WezTerm`, `Warp`, `Hyper`, `mosh-server`, `sshd`,
 `login` and their variants), matched by argv[0] and by the kernel's own (truncated) process
-name. A process outside a session that has a terminal, or an LLM session, gateway or compute
-root, beneath it is blocked too (`process_hosting.py`), whatever its name. Shells can be
-signalled only as members of a session tree. Shared LLM infrastructure and van-compute rows
-are read-only.
+name. If the panel's own row is missing from a table, or the chain above it is broken,
+nothing is signalled from that table. A process outside a session that has a terminal, or an
+LLM session, gateway or compute root, beneath it is blocked too (`process_hosting.py`),
+whatever its name; each such root counts on its own even when it shares the process's
+terminal, so a supervisor of a session is blocked. Shells, known by argv[0] or kernel name,
+can be signalled only as members of a session tree. Shared LLM infrastructure and
+van-compute rows are read-only.
+
+Roles that decide what may be signalled come from `process_roles.py`, which reads the
+arguments the opposite way to the display parse: when unsure, it protects. A process is
+infrastructure or a compute worker when its program, kernel name or any whole argument names
+one (`model-gateway.js`, `claude-code-proxy`, `usage-server.mjs`, `llm_switchboard`, the
+Playwright MCP `cli.js`) or `-m` names `van_compute.worker` or `llm_switchboard` anywhere; a
+command that merely mentions one outside a session is read-only as a result. Inside a
+session, a process belongs to that session. A Codex process is the shared app server only
+when `app-server` is plainly its subcommand; a known subcommand reached through flags alone
+(`exec`, `resume`) makes it a session whatever its prompt says; when its role cannot be
+established it is grouped as a session, so an outer session's tree action is refused as
+nested, and nothing in its own group may be signalled.
 
 Before each signal the panel re-reads the whole process table and decides again from it:
-same pid, start time and uid; for a session tree, still a member of that session with every
-process up to the root present, the session not holding a nested session, and the policy
-still allowing the process. This narrows the window in which a pid could be reused to
-milliseconds; it does not close it. A tree over `TREE_TARGET_LIMIT` (48) processes is
-refused, and a mutation has a total time budget (`MUTATION_BUDGET`, 8 s); when an action
-ends before every target was handled, the reply's `stopped` says why and the page shows it
-after the counts. Command lines never leave the backend: a display name is the program's
-base name plus a script name or `-m module`, only when the arguments parse with confidence
-(`process_invocation.py`), never an option or an argument value. A session's `name_source`
-(`registry`, `rollout-open`, `rollout-time` or `fallback`) says how its name was
-established; a Codex name matched only by start time is a guess, and the page shows it as an
-unconfirmed name, also in the Terminate session confirmation.
+same pid, start time and uid; for a session tree, the root still the same session root,
+every member one the plan saw (a process that joined the session since stops the action
+before any of its ancestors is signalled), the target still a member with every process up
+to the root present, no nested session, and the policy still allowing the process. This
+narrows the window in which a pid could be reused to milliseconds; it does not close it. A
+tree over `TREE_TARGET_LIMIT` (48) processes has no Terminate session button and the request
+is refused with the same reason (one function decides both). A mutation has a total time
+budget (`MUTATION_BUDGET`, 8 s), checked again immediately before each signal or priority
+change, so nothing is signalled after it. When an action ends before every target was
+handled, the reply's `stopped` is `{code, text}` with code `time-limit`, `session-changed`,
+`nested-session`, `unreadable` or `root-changed`, the targets it left alone are counted as
+`not_reached`, and the page shows the reason after the counts.
+
+Command lines never leave the backend. A display name is the program's base name plus a
+script name or `-m module`, only when the arguments parse with confidence against that
+interpreter's own flag table (`process_invocation.py`; an interpreter without one, such as
+fish, shows the bare program), never an option or an argument value. argv[0] with spaces is
+shown only when the kernel's name begins it (`Google Chrome Helper (Renderer)`); otherwise
+the kernel's name stands in. Compute job rows are named `job · <program>`. A session's
+`name_source` (`registry`, `rollout-open`, `rollout-time` or `fallback`) says how its name
+was established: `rollout-open` needs exactly one rollout-like open file, an exact rollout
+file name inside `~/.codex/sessions`; a Codex name matched only by start time is a guess,
+and the page shows a guessed or fallback name as unconfirmed, also in the Terminate session
+confirmation.
 
 ## Tests
 
