@@ -166,10 +166,13 @@ acquire_mutation_lock() {
   }
 }
 
-alert() {  # TITLE MESSAGE: high priority; the sender's reason, never the URL, goes to the log
-  print -r -- $2 | /usr/bin/python3 -I -B $notifier --secrets $secrets --title $1 2>>$log ||
-    log_line "warning undelivered: $1"
+send_alert() {  # TITLE MESSAGE: high priority; fails when it was not sent. The sender's reason, never the URL, goes to the log
+  print -r -- $2 | /usr/bin/python3 -I -B $notifier --secrets $secrets --title $1 2>>$log && return 0
+  log_line "warning undelivered: $1"
+  return 1
 }
+
+alert() { send_alert "$@" || true }  # TITLE MESSAGE: best effort
 
 agent_loaded() { /bin/launchctl print gui/$UID/$label >/dev/null 2>&1 }
 valid_name() { [[ $1 == [a-z0-9][a-z0-9-]# && ${#1} -le 60 ]] }
@@ -424,7 +427,7 @@ relaunch_args() {  # ARGS: sets relaunch (a vanpi attempt's run id or token, or 
   while (( $# )); do
     case $1 in
       --relaunch) [[ ${2-} == [a-z0-9][a-z0-9-]# && ${#2} -le 80 ]] ||
-          die "--relaunch needs the run id or launch token that ${script:t} list shows"
+          die "--relaunch needs the run id or launch token that ${script:t} list --json shows as relaunch_id"
         relaunch=$2; shift 2 ;;
       *) rest+=($1); shift ;;
     esac
@@ -467,7 +470,7 @@ cmd_reschedule() {
   if pi_job; then
     pi_snapshot $dir || die "cannot read the Pi run state of ${dir:t}"
     if [[ $pi[state] != unlaunched ]]; then
-      print -u2 -- "${script:t}: job ${dir:t} has launched on vanpi (Pi run: $pi[state]); reschedule never starts another run: use retry ${dir:t} or run-now (${script:t} list shows whether --relaunch is needed)"
+      print -u2 -- "${script:t}: job ${dir:t} has launched on vanpi (Pi run: $pi[state]); reschedule never starts another run: use retry ${dir:t} or run-now (${script:t} list --json shows whether --relaunch is needed: relaunch_id)"
       exit $reschedule_refused_status
     fi
   fi

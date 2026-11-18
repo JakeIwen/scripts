@@ -17,7 +17,7 @@
 # the job directory.
 
 typeset -A pi   # the last pi_snapshot: state run token owes unresolved delivered failure_kind
-pi_alerts=alerts.sent   # in the job directory: one "KIND ATTEMPT" line per alert already sent
+pi_alerts=alerts.sent   # in the job directory: one "KIND ATTEMPT" line per alert sent successfully
 # deferred_pi_state.STATE_RECORDS: a record without kind/host beside any of them is an untrusted vanpi job.
 pi_state_records=(remote-run.json launching.json launch-unknown.json remote-failed.json report-checks.json)
 pi_launcher=$HOME/.claude/skills/pi-agent/pi_agent.py   # deferred_pi_remote.LAUNCHER, for alert text
@@ -53,13 +53,14 @@ pi_recovery() {  # how to check and stop the attempt by hand
   fi
 }
 
-pi_alert_once() {  # DIR KIND TITLE MESSAGE: one alert per kind and attempt, whatever came before
+pi_alert_once() {  # DIR KIND TITLE MESSAGE: one alert per kind and attempt; one not sent is tried at the next check
   local file=$1/$pi_alerts key="$2 $(pi_attempt)"
   local -a sent
   [[ -f $file ]] && sent=("${(@f)$(<$file)}")
   (( ${sent[(Ie)$key]} )) && return 0
-  print -r -- $key >> $file
-  alert $3 $4
+  # Recorded only once sent, so an unreachable notifier adds nothing here.
+  if send_alert $3 $4; then print -r -- $key >> $file; fi
+  return 0
 }
 
 pi_collect() {  # DIR MODE: one collect-only pass
@@ -153,7 +154,7 @@ pi_ended() {  # DIR MODE: the attempt ended badly, or its launch is unknown; the
   fi
   log_line "${${mode:#scheduled}:+manual }failed ${dir:t}: ${what:l}; output in $dir/last.log"
   [[ $mode != scheduled ]] || pi_alert_once $dir ended "Deferred job failed: ${dir:t}" \
-    "$what. Nothing starts another run until you retry or run-now (deferred.zsh list shows whether --relaunch is needed). $(pi_recovery) Job kept at $dir (see last.log); review it in Mac Panel (macpanel)."
+    "$what. Nothing starts another run until you retry or run-now (deferred.zsh list --json shows whether --relaunch is needed: relaunch_id). $(pi_recovery) Job kept at $dir (see last.log); review it in Mac Panel (macpanel)."
 }
 
 pi_window_closed() {  # DIR: an unlaunched job past its give-up time fails without launching

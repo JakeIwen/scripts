@@ -182,7 +182,7 @@ def dispatch(job, clock, collect_only):
         return deliver(job, settings)
     if state in (RemoteState.FAILED, RemoteState.LAUNCH_UNKNOWN):
         raise Failure(f'This job\'s Pi attempt already ended ({state.value}); only retry or run-now '
-                      f'starts another run (deferred.zsh list shows what they need).')
+                      f'starts another run (deferred.zsh list --json shows what they need).')
     if state == RemoteState.RUNNING:
         job.remove(LAUNCHING)  # a crash between saving the id and clearing the marker
         return collect(job, settings, job.read(RUN), clock)

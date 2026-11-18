@@ -163,3 +163,21 @@ class LaunchWindowTests(PiHarness):
         self.assertIn("past its give-up time", self.last_log(first))
         self.assertEqual(self.meta(second)["attempts"], "0")  # its pass never started
         self.assertEqual(self.alerts(), [f"Deferred job gave up: {first.name}", f"Deferred job gave up: {second.name}"])
+
+
+class AlertRetryTests(PiHarness):
+    def test_an_alert_that_could_not_be_sent_is_sent_at_the_next_check(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        (job / "deferred_pi_remote.py").unlink()
+        secrets = self.env["DEFERRED_SECRETS"]
+        unreachable = Path(self.tmp / "unreachable-secrets")
+        unreachable.write_text("export NTFY_WARNING_URL='http://127.0.0.1:9/warn'\n")
+        self.env["DEFERRED_SECRETS"] = str(unreachable)
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [])
+        self.assertIn("warning undelivered", self.scheduler_log())
+        self.env["DEFERRED_SECRETS"] = secrets
+        self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [f"Deferred job collector failed: {job.name}"])
