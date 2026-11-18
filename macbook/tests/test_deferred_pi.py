@@ -25,9 +25,20 @@ class AddPiJobTests(PiHarness):
         self.assertEqual((record["host"], record["model"], record["effort"]), ("vanpi", "sol", "medium"))
         self.assertEqual((record["remote_state"], record["remote_run"]), ("unlaunched", None))
         self.assertTrue(record["agent"])
-        explicit = self.add_pi("--attempts", "3", "--model", "astra", "--effort", "high", name="three")
-        self.assertEqual(self.meta(explicit)["max_attempts"], "3")
+        explicit = self.add_pi("--attempts", "1", "--model", "astra", "--effort", "high", name="three")
+        self.assertEqual(self.meta(explicit)["max_attempts"], "1")
         self.assertEqual(self.listed(explicit)["model"], "astra")
+
+    def test_attempts_other_than_one_are_refused_for_vanpi(self):
+        for args in (("--host", "vanpi", "--attempts", "2"), ("--attempts", "3")):
+            prompt = str(self.prompt) if "--host" in args else "vanpi:/home/pi/brief.md"
+            with self.subTest(args=args):
+                result = self.deferred("add-agent", *args, YESTERDAY, "many", prompt, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("at most one Pi run", result.stderr)
+        self.assertEqual(sorted((self.root / "jobs").glob("*")), [])
+        mac = self.deferred("add-agent", "--attempts", "3", "--cwd", str(self.tmp), YESTERDAY, "macjob", str(self.prompt))
+        self.assertEqual(self.meta(Path(mac.stdout.strip()))["max_attempts"], "3")
 
     def test_mac_and_script_jobs_list_their_host_fields(self):
         mac = Path(self.deferred("add-agent", "--cwd", str(self.tmp), YESTERDAY, "macjob", str(self.prompt)).stdout.strip())
@@ -194,7 +205,7 @@ class LaunchAndCollectTests(PiHarness):
         record = self.listed(job)
         self.assertEqual((record["state"], record["remote_state"], record["remote_run"]), ("failed", "failed", first))
         self.assertIn(f"Run {first} on vanpi failed: exited 1", self.last_log(job))
-        self.assertEqual([t for t, _, _ in WarningTopic.received], [f"Deferred job gave up: {job.name}"])
+        self.assertEqual(self.alerts(), [f"Deferred job failed: {job.name}"])
         status_calls = len(self.calls("status"))
         self.control("next-exit", "0")
         time.sleep(1.1)  # a new run id needs a new second
@@ -212,7 +223,7 @@ class LaunchAndCollectTests(PiHarness):
         self.assertEqual(self.listed(job)["remote_state"], "failed")
         self.assertIn("reported an error", self.last_log(job))
 
-    def test_delivery_failure_keeps_the_report_for_retry(self):
+    def test_delivery_failure_keeps_the_report_and_sends_it_again(self):
         self.control("next-state", "done")
         job = self.add_pi()
         secrets = Path(self.env["DEFERRED_SECRETS"])
@@ -220,10 +231,9 @@ class LaunchAndCollectTests(PiHarness):
         secrets.write_text("export UNRELATED=1\n")
         self.deferred("run-due")
         self.assertEqual(self.listed(job)["remote_state"], "finished")
-        self.assertEqual(self.meta(job)["state"], "failed")
+        self.assertEqual(self.meta(job)["state"], "pending")
         secrets.write_text(good)
         calls = len(self.calls())
-        self.deferred("retry", job.name)
         self.deferred("run-due")
         self.assertFalse(job.exists())
         self.assertEqual(len(self.calls()), calls)
@@ -247,16 +257,16 @@ class LostLaunchTests(PiHarness):
 
     def test_absent_token_holds_without_relaunching_until_retry(self):
         self.control("launch-mode", "lost-nothing")
-        job = self.add_pi("--attempts", "2")
+        job = self.add_pi()
         self.deferred("run-due")
         token = self.record(job, "launching.json")["token"]
         self.deferred("run-due")
         record = self.listed(job)
-        self.assertEqual((record["remote_state"], record["state"], record["attempts"]), ("launch-unknown", "pending", 1))
+        self.assertEqual((record["remote_state"], record["state"], record["attempts"]), ("launch-unknown", "failed", 1))
+        self.assertEqual(record["relaunch_id"], token)
         self.assertIn(token, self.last_log(job))
         calls, ssh = len(self.calls()), (self.fake / "ssh-calls").read_text()
         self.deferred("run-due")
-        self.assertEqual(self.meta(job)["state"], "failed")
         self.assertEqual((len(self.calls()), (self.fake / "ssh-calls").read_text()), (calls, ssh))
         self.clear("launch-mode")
         refused = self.deferred("retry", job.name, check=False)
@@ -265,7 +275,7 @@ class LostLaunchTests(PiHarness):
         self.assertEqual(self.listed(job)["remote_state"], "launch-unknown")
         self.assertEqual(self.deferred("retry", job.name, "--relaunch", "d" + "0" * 16, check=False).returncode, 7)
         self.assertIn("Cleared", self.deferred("retry", job.name, "--relaunch", token).stdout)
-        self.assertIn(f"launch token {token} abandoned", (job / "runs.log").read_text())
+        self.assertIn(f"attempt {token} abandoned", (job / "runs.log").read_text())
         self.deferred("run-due")
         self.assertEqual(len(self.calls("run")), 2)
         [run_id] = self.runs()
@@ -287,7 +297,7 @@ class LostLaunchTests(PiHarness):
 
     def test_run_now_also_clears_the_hold(self):
         self.control("launch-mode", "lost-nothing")
-        job = self.add_pi("--attempts", "3")
+        job = self.add_pi()
         self.deferred("run-due")
         self.deferred("run-due")
         record = self.listed(job)

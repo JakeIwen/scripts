@@ -7,11 +7,11 @@ import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {addJobForm} from './section_deferred_add.mjs';
 import {addAgentForm} from './section_deferred_agent.mjs';
-import {LAUNCH_UNKNOWN, agentTags, collectedLater, collectedLaterText, relaunchConfirm, relaunchFields, remoteRows}
-  from './deferred_agent_job.mjs';
+import {LAUNCH_UNKNOWN, agentTags, attemptOf, cardOutcome, describeRunNow, relaunchConfirm,
+  relaunchFields, remoteRows, rescheduleLocked} from './deferred_agent_job.mjs';
 import {readyDetails, stateLabel} from './section_deferred_ready.mjs';
 import {Level, status, worst} from './status_cell.mjs';
-import {latestTask, resumeTasks, taskLine, watchTask} from './task_receipt.mjs';
+import {TaskState, latestTask, taskLine, watchTask} from './task_receipt.mjs';
 import {parseStamp} from './relative_time.mjs';
 
 const SECTION = 'deferred';
@@ -19,8 +19,9 @@ const COPY = JOBS_COPY.deferred;
 const jobAnchor = job => `deferred-${job.id}`;
 const dueSeconds = job => parseStamp(job.due) / 1000;
 let scheduleRange = '7d';
-// Jobs whose cancel the CLI refused because a Pi run may be active; only they offer Abandon.
-const abandonable = new Set();
+// Job id -> the Pi attempt its card showed when the CLI refused its cancel (a run may be active there). Only
+// that attempt offers Abandon, and the request names it, so the CLI keeps the job once another has replaced it.
+const abandonable = new Map();
 
 function apply(job, kind, extra = {}, options = {}) {
   return action(SECTION, '/api/deferred', {action: kind, id: job.id, ...extra}, options);
@@ -60,28 +61,30 @@ function rescheduleEditor(job, cell) {
 }
 
 function cancelButtons(job) {
-  const refused = error => { if (error.code === 'remote-active') abandonable.add(job.id); };
+  const attempt = attemptOf(job);
+  const refused = error => { if (error.code === 'remote-active' && attempt) abandonable.set(job.id, attempt); };
   const cancel = button('Cancel job', () => apply(job, 'cancel', {confirmed: true}, {onError: refused}),
     {confirm: confirmText(`cancel ${job.name}`), key: `cancel-${job.id}`});
-  if (!abandonable.has(job.id)) return [cancel];
-  const abandon = button('Abandon job', () => apply(job, 'cancel', {confirmed: true, abandon: true}),
-    {confirm: confirmText(COPY.agent.abandon), key: `abandon-${job.id}`});
+  if (!attempt || abandonable.get(job.id) !== attempt) return [cancel];
+  const abandon = button('Abandon job', () => apply(job, 'cancel', {confirmed: true, abandon: true, attempt}),
+    {confirm: confirmText(COPY.agent.abandon(attempt)), key: `abandon-${job.id}`});
   return [cancel, abandon, info(COPY.agent.abandonInfo)];
 }
 
 function jobActions(job) {
   const cell = node('div', null, 'actions');
-  // A held Pi launch sends the token this page showed; the CLI refuses (409, then a reload) if the hold changed.
-  const later = task => (collectedLater(job, task) ? collectedLaterText : undefined);
+  // An unresolved Pi attempt sends the id this page showed; a 409 (the state moved on) shows its message and
+  // reloads, which is apply's default, so the controls match the fresh state.
   cell.append(button('Run now', () => apply(job, 'run-now', {confirmed: true, ...relaunchFields(job)},
-    {after: receipt => watchTask(SECTION, receipt, job.name, later)}),
+    {after: receipt => watchTask(SECTION, receipt, job.name, describeRunNow)}),
     {confirm: relaunchConfirm(job, `run ${job.name} now`), key: `run-${job.id}`}));
   if (job.state === 'failed') {
-    // Only an unknown launch arms Retry: it may start a second Pi run.
+    // Only an unresolved Pi attempt arms Retry: it may start another Pi run beside it.
     cell.append(button('Retry', () => apply(job, 'retry', relaunchFields(job)),
       {confirm: relaunchConfirm(job), key: `retry-${job.id}`}));
   }
-  cell.append(button('Reschedule…', () => rescheduleEditor(job, cell), {key: `reschedule-${job.id}`}));
+  if (rescheduleLocked(job)) cell.append(info(COPY.agent.rescheduleLocked));
+  else cell.append(button('Reschedule…', () => rescheduleEditor(job, cell), {key: `reschedule-${job.id}`}));
   cell.append(...cancelButtons(job));
   return cell;
 }
@@ -99,7 +102,7 @@ function jobCard(job, tasks) {
   if (job.description) body.append(node('p', job.description));
   body.append(kv([['Due', timeWithAbsolute(job.due)]]));
   const task = latestTask(tasks, job.id);
-  if (task) body.append(taskLine(task, collectedLater(job, task) ? {level: Level.OK, text: collectedLaterText} : undefined));
+  if (task) body.append(taskLine(task, cardOutcome(job, task)));
   body.append(readyDetails(job), jobDetails(job), jobActions(job));
   return card({title: job.name, level: failed ? Level.ERROR : Level.IDLE, body, anchor: jobAnchor(job)});
 }
@@ -136,7 +139,7 @@ export function render(data) {
   const root = node('div');
   const checker = checkerLine(data.checker);
   root.append(checker.line, addJobForm(), addAgentForm());
-  [...abandonable].forEach(id => { if (!data.jobs.some(job => job.id === id)) abandonable.delete(id); });
+  [...abandonable.keys()].forEach(id => { if (!data.jobs.some(job => job.id === id)) abandonable.delete(id); });
   const valid = data.jobs.filter(job => job.valid);
   if (valid.length) root.append(scheduleBlock(valid));
   if (!data.jobs.length) root.append(emptyState(COPY.empty));
@@ -145,7 +148,9 @@ export function render(data) {
   if (orphans.length) root.append(orphanTasks(orphans));
   root.append(node('p', `Jobs directory: ${data.jobs_dir}`, 'muted small'));
   const names = new Map(data.jobs.map(job => [job.id, job.name ?? job.id]));
-  resumeTasks(SECTION, data.tasks, task => names.get(task.job) ?? task.job);
+  // Not resumeTasks: a resumed run-now reports with the same Pi-aware wording as one watched from the click.
+  data.tasks.filter(task => task.state === TaskState.RUNNING)
+    .forEach(task => watchTask(SECTION, task, names.get(task.job) ?? task.job, describeRunNow));
   const failed = data.jobs.filter(job => job.valid && job.state === 'failed').length;
   const invalid = data.jobs.filter(job => !job.valid).length;
   const pending = data.jobs.length - failed - invalid;

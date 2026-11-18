@@ -8,13 +8,17 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export const DEFAULT_MODEL = {[Host.MAC]: 'haiku', [Host.VANPI]: 'sol'};
 export const AGENT_FIELDS = ['host', 'due', 'name', 'description', 'prompt', 'pi_prompt_path', 'model', 'effort',
   'cwd', 'ready', 'attempts', 'timeout', 'run_timeout'];
-// Rows shown only for vanpi jobs.
+// Rows shown only for vanpi jobs, and only for Mac jobs: a vanpi job starts at most one Pi run by itself, so
+// it has no attempts to set.
 export const VANPI_ONLY = ['pi_prompt_path', 'run_timeout'];
+export const MAC_ONLY = ['attempts'];
 const MAC_MODEL = /^[a-z0-9][a-z0-9.[\]-]{0,63}$/;
 const PATH_LIMIT = 1024;
 const READY_LIMIT = 500;
 // deferred.zsh refuses a shorter vanpi --timeout: a pass must launch and read the run once (deferred_adapter.PI_MIN_TIMEOUT).
 export const PI_MIN_TIMEOUT = 390;
+// A vanpi job with a ready condition needs this much more, for the pass that first runs it (deferred_adapter.PI_READY_ALLOWANCE).
+export const PI_READY_ALLOWANCE = 30;
 const NUMBERS = ['attempts', 'timeout', 'run_timeout'];
 // The server's wording per field, tried in order (run_timeout before timeout, the Pi path before prompt).
 const SERVER_FIELD = [['due', /\bdue\b/i], ['name', /\bjob name\b|\bname must\b/i], ['run_timeout', /run_timeout|run-timeout/i],
@@ -26,6 +30,7 @@ const positive = text => /^\d+$/.test(text) && Number(text) > 0;
 const oneLine = (text, limit) => !/[\0\r\n]/.test(text) && text.length <= limit;
 const absolutePath = text => text.startsWith('/') && oneLine(text, PATH_LIMIT);
 const isVanpi = values => values.host === Host.VANPI;
+const piTimeoutFloor = values => PI_MIN_TIMEOUT + (values.ready ? PI_READY_ALLOWANCE : 0);
 
 function promptProblems(values, problems) {
   const hasText = values.prompt.trim() !== '';
@@ -50,11 +55,14 @@ export function validateAgent(values) {
   if (values.cwd && !absolutePath(values.cwd)) problems.cwd = `An absolute path, one line, at most ${PATH_LIMIT} characters.`;
   if (values.ready && !oneLine(values.ready, READY_LIMIT)) problems.ready = `One line, at most ${READY_LIMIT} characters.`;
   NUMBERS.forEach(key => {
-    if (key === 'run_timeout' && !isVanpi(values)) return;
+    if ((key === 'run_timeout' && !isVanpi(values)) || (key === 'attempts' && isVanpi(values))) return;
     if (values[key] && !positive(values[key])) problems[key] = 'Must be a positive whole number.';
   });
-  if (isVanpi(values) && !problems.timeout && values.timeout && Number(values.timeout) < PI_MIN_TIMEOUT) {
-    problems.timeout = `On vanpi, at least ${PI_MIN_TIMEOUT} seconds: a check must launch the run and read it once.`;
+  const floor = piTimeoutFloor(values);
+  if (isVanpi(values) && !problems.timeout && values.timeout && Number(values.timeout) < floor) {
+    problems.timeout = values.ready
+      ? `On vanpi with a ready condition, at least ${floor} seconds: a check must run it, launch the run and read it once.`
+      : `On vanpi, at least ${floor} seconds: a check must launch the run and read it once.`;
   }
   return problems;
 }
@@ -67,7 +75,8 @@ export function agentBody(values) {
   else body.prompt = values.prompt;
   ['model', 'cwd', 'ready'].forEach(key => { if (values[key]) body[key] = values[key]; });
   NUMBERS.forEach(key => {
-    if (values[key] && (key !== 'run_timeout' || isVanpi(values))) body[key] = Number(values[key]);
+    const skipped = isVanpi(values) ? key === 'attempts' : key === 'run_timeout';
+    if (values[key] && !skipped) body[key] = Number(values[key]);
   });
   return body;
 }

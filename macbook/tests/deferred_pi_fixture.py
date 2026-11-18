@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path
 
-from macbook.tests.deferred_fixture import DeferredHarness
+from macbook.tests.deferred_fixture import DeferredHarness, WarningTopic
 
 YESTERDAY = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
@@ -20,7 +20,10 @@ YESTERDAY = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 # (status reads that still say running after a stop, then the run ends; 143),
 # empty-reads (status reads after a stop that print nothing, like a dropped link),
 # status-delay (seconds every status call sleeps first), extra-runs (that many
-# newer runs listed before the real ones, as on a busy Pi).
+# newer runs listed before the real ones, as on a busy Pi), foreign-runs (newer
+# runs whose names carry non-ASCII letters, as pi_agent.py's slug allows),
+# between-runs (that many runs listed between the newest real run and the older
+# ones), stop-exit (the exit status a run ends with when stopped; default 143).
 FAKE_LAUNCHER = r'''
 import json, secrets, sys, time
 from pathlib import Path
@@ -78,8 +81,10 @@ if args[0] == "status":
 if args[0] == "status" and (len(args) == 1 or args[1] == "-n"):
     limit = int(args[2]) if len(args) > 2 else 15
     lines = ["0101-000000-%04x-newer d" % i for i in range(int(control("extra-runs", "0")))]
-    lines += ["%-28s %-8s claude sol   medium first line" % (path.stem, json.loads(path.read_text())["state"])
-              for path in sorted(RUNS.glob("*.json"), reverse=True)]
+    lines += ["0101-000000-%04x-\u00e9t\u00e9 done" % i for i in range(int(control("foreign-runs", "0")))]
+    real = ["%-28s %-8s claude sol   medium first line" % (path.stem, json.loads(path.read_text())["state"])
+            for path in sorted(RUNS.glob("*.json"), reverse=True)]
+    lines += real[:1] + ["0101-000000-%04x-older d" % i for i in range(int(control("between-runs", "0")))] + real[1:]
     print("\n".join(lines[:limit]))
     sys.exit(0)
 
@@ -124,7 +129,7 @@ if args[0] == "stop":
         if control("stop-lag"):
             run["lag"] = int(control("stop-lag"))
         else:
-            run.update(state="done", exit="143")
+            run.update(state="done", exit=control("stop-exit", "143"))
         (RUNS / (args[1] + ".json")).write_text(json.dumps(run))
     print("stopping %s" % args[1])
     sys.exit(0)
@@ -194,11 +199,31 @@ class PiHarness(DeferredHarness):
         meta = {**self.meta(job), **{key: str(value) for key, value in changes.items()}}
         (job / "job").write_text("".join(f"{key}={value}\n" for key, value in meta.items()))
 
+    def age_record(self, job, name, key, seconds):
+        """Moves a time field of one of the job's state records back by SECONDS."""
+        record = self.record(job, name)
+        (job / name).write_text(json.dumps({**record, key: record[key] - seconds}))
+
+    def alerts(self):
+        """Titles of the warnings sent so far (the result notifications are titled with the job's name)."""
+        return [title for title, _, _ in WarningTopic.received if title.startswith("Deferred job")]
+
     def scheduler_log(self):
         return (self.root / "deferred.log").read_text()
 
     def offline(self, on=True):
         self.control("unreachable") if on else self.clear("unreachable")
+
+    def warnings_down(self, on=True):
+        """Points the scheduler's warnings at a closed port (on) or back at the stand-in topic.
+        A job's result ntfy keeps the secrets file it was added with."""
+        if on:
+            self.warnings_up = self.env["DEFERRED_SECRETS"]
+            closed = self.tmp / "closed-secrets"
+            closed.write_text("export NTFY_WARNING_URL='http://127.0.0.1:9/warn'\n")
+            self.env["DEFERRED_SECRETS"] = str(closed)
+        else:
+            self.env["DEFERRED_SECRETS"] = self.warnings_up
 
     def add_pi(self, *args, prompt=None, name="pijob", due=YESTERDAY, check=True):
         result = self.deferred("add-agent", "--host", "vanpi", "--timeout", "600", *args, due, name,

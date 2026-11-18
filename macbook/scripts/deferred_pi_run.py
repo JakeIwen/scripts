@@ -11,9 +11,14 @@ it, so every pass first dispatches on the durable state files
 reads the prompt. Exit 75 means "not finished yet" to deferred.zsh: no attempt
 spent.
 
-`run` launches when nothing is on record; `run collect` is the collect-only
-pass deferred.zsh makes for a job that owns a Pi run, whatever its state, due
-time or give-up time: it never launches.
+`run` launches only when nothing is on record: a job starts at most one Pi run
+by itself, and every outcome other than a delivered report stays on record
+until a person acts (`retry` or `run-now`, which clear the ended attempt
+through deferred_pi_control.py). `run collect` is the collect-only pass
+deferred.zsh makes for a job that owns a Pi run, whatever its state, due time
+or give-up time: it never launches. The collection deadline and the alerts are
+the scheduler's (deferred_pi_schedule.zsh), so they hold even when this copy
+cannot run.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import base64
 import os
 from pathlib import Path
 import secrets
+import signal
 import subprocess
 import sys
 import time
@@ -29,8 +35,8 @@ JOB = Path(__file__).resolve().parent
 # -I keeps the script's own folder off sys.path; the modules it needs sit beside it.
 sys.path.insert(0, str(JOB))
 from deferred_pi_state import (  # noqa: E402
-    DELIVERED, DONE, FAILED, FAILURE, FETCHED, HOLD, INLINE_PROMPT, LAUNCHING, NOT_READY, REPORT,
-    REPORT_CHECKS, RUN, RUN_ID, USAGE, FailureKind, HoldReason, PiJob, StateError)
+    DEFAULT_RUN_TIMEOUT, DELIVERED, DONE, FAILED, FAILURE, FETCHED, HOLD, INLINE_PROMPT, LAUNCHING, NOT_READY,
+    REPORT, REPORT_CHECKS, RUN, RUN_ID, USAGE, FailureKind, HoldReason, PiJob, RemoteState, StateError, snapshot)
 import deferred_pi_remote as remote  # noqa: E402
 
 PROMPT_LIMIT = 256 * 1024
@@ -39,14 +45,21 @@ POLL_WINDOW, POLL_INTERVAL = 240, 20
 # Seconds of the job's --timeout kept for launching, stopping and the final
 # status read; only the rest is spent polling a running run.
 POLL_RESERVE, PASS_MARGIN = 600, 60
-# What a launch needs after --ready: the reachability probe, the vanpi: prompt
-# read, the launch call and one status read. deferred.zsh add-agent refuses a
-# vanpi --timeout below MIN_PASS_TIMEOUT (it keeps its own copy of the number).
-LAUNCH_NEED = 2 * remote.SSH_TIMEOUT + remote.LAUNCH_TIMEOUT + remote.STATUS_TIMEOUT
+# What a launch needs after --ready, each call capped at its own timeout: the
+# vanpi: prompt read, the reachability probe, the launch call and one status
+# read. The launch call is made only while LAUNCH_CALLS still fit. A pass of
+# MIN_PASS_TIMEOUT launches a job with no --ready; a --ready command gets what
+# is left above LAUNCH_NEED, and add-agent asks READY_ALLOWANCE more for one.
+# deferred.zsh add-agent and the Mac Panel keep their own copies of both numbers.
+LAUNCH_CALLS = remote.LAUNCH_TIMEOUT + remote.STATUS_TIMEOUT
+LAUNCH_NEED = 2 * remote.SSH_TIMEOUT + LAUNCH_CALLS
 MIN_PASS_TIMEOUT = PASS_MARGIN + LAUNCH_NEED
-# A run is collected until it is terminal or launch + --run-timeout + this;
-# then the job fails with the commands to find and stop the run by hand.
-COLLECT_GRACE = 7 * 86400
+READY_ALLOWANCE = 30
+# Set by the scheduler for a pass it started (not for run-now): the job's give-up
+# time as epoch seconds, past which the pass must not launch.
+LAUNCH_BY = 'DEFERRED_LAUNCH_BY'
+# Tests only (deferred.zsh clock_shift_file): a file holding seconds added to the clock LAUNCH_BY is judged by.
+CLOCK_SHIFT = 'DEFERRED_CLOCK_SHIFT_FILE'
 REPORT_CHECK_LIMIT = 3  # passes that may find a finished run's report blank before it fails
 
 SETTINGS = ('agent_name', 'agent_model', 'agent_effort', 'agent_cwd', 'agent_ready',
@@ -107,7 +120,7 @@ REMOTE_READER_COMMAND = "python3 -I -c 'import base64;exec(base64.b64decode(\"%s
 # ---- the job's own files ----
 
 def job_value(key, default):
-    """A whole-number field of the scheduler's job record (timeout, attempts)."""
+    """A whole-number field of the scheduler's job record (its timeout)."""
     try:
         for line in (JOB / 'job').read_text().splitlines():
             if line.startswith(key + '=') and line[len(key) + 1:].isdigit():
@@ -129,7 +142,7 @@ def load_settings():
 
 
 def run_timeout_seconds(settings):
-    return int(settings['agent_run_timeout'] or 120) * 60
+    return int(settings['agent_run_timeout'] or DEFAULT_RUN_TIMEOUT) * 60
 
 
 # ---- one pass ----
@@ -163,49 +176,44 @@ def run_pass(collect_only):
 
 
 def dispatch(job, clock, collect_only):
+    state = snapshot(job).state
     if job.exists(DELIVERED):
         return DONE
     settings = load_settings()
-    if job.exists(REPORT):
+    if state == RemoteState.FINISHED:
         return deliver(job, settings)
-    hold = job.read(HOLD)
-    if hold is not None:
-        raise Failure(held(hold.get('token'), hold.get('detail') or hold.get('reason')))
-    failure = job.read(FAILURE)
-    if failure is not None:
-        if collect_only:
-            raise Failure(f'This attempt already ended: {failure.get("reason")}.')
-        # deferred.zsh authorized a new attempt; the failed run is history and never looked at again.
-        what = failure.get('run_id') or f'with token {failure.get("token")}'
-        job.append_history(f'run {what} ended ({failure.get("kind")}: {failure.get("reason")}); '
-                           'superseded by a new attempt')
-        job.remove(FAILURE, RUN, LAUNCHING, FETCHED, REPORT_CHECKS)
-    run = job.read(RUN)
-    if run is not None:
+    if state in (RemoteState.FAILED, RemoteState.LAUNCH_UNKNOWN):
+        raise Failure(f'This job\'s Pi attempt already ended ({state.value}); only retry or run-now '
+                      f'starts another run (deferred.zsh list --json shows what they need).')
+    if state == RemoteState.RUNNING:
         job.remove(LAUNCHING)  # a crash between saving the id and clearing the marker
-        return collect(job, settings, run, clock)
-    launching = job.read(LAUNCHING)
-    if launching is not None:
-        return reconcile(job, settings, launching, clock)
+        return collect(job, settings, job.read(RUN), clock)
+    if state == RemoteState.LAUNCHING:
+        return reconcile(job, settings, job.read(LAUNCHING), clock)
     if collect_only:
         raise NotReady('Nothing on vanpi to collect for this job.')
     return launch(job, settings, clock)
 
 
 def ready_now(settings, budget):
-    """Evaluates --ready inside the time the pass still needs to launch afterwards."""
+    """Evaluates --ready in its own process group, inside the time the pass still needs to launch afterwards."""
     ready = settings['agent_ready']
-    room = budget.remaining() - LAUNCH_NEED
-    if room < remote.MIN_CALL:
-        raise NotReady('Too little of this pass is left to launch; the next check tries again.')
     if not ready:
         return
+    room = budget.remaining() - LAUNCH_NEED
+    if room < remote.MIN_CALL:
+        raise NotReady('Too little of this pass is left for the --ready command and the launch; '
+                       'a longer --timeout gives it room.')
+    probe = subprocess.Popen(['/bin/zsh', '-c', ready], start_new_session=True)
     try:
-        result = subprocess.run(['/bin/zsh', '-c', ready], timeout=room)
+        code = probe.wait(timeout=room)
     except subprocess.TimeoutExpired:
+        # The whole group: a compound command's children must not outlive the probe.
+        os.killpg(probe.pid, signal.SIGKILL)
+        probe.wait()
         raise NotReady('Not ready: the --ready command did not finish in the time this pass '
                        'has before it must launch.') from None
-    if result.returncode != 0:
+    if code != 0:
         raise NotReady('Not ready: the --ready command exited nonzero.')
 
 
@@ -216,12 +224,13 @@ def launch(job, settings, clock):
     reachable = remote.ssh('true', budget)
     if reachable is None or reachable.returncode != 0:
         raise NotReady('vanpi did not answer; the launch waits for the next check.')
-    if budget.remaining() < remote.LAUNCH_TIMEOUT + remote.STATUS_TIMEOUT:
+    if budget.remaining() < LAUNCH_CALLS:
         raise NotReady('Too little of this pass is left to launch and read the run once; '
                        'the next check launches.')
+    refuse_past_give_up()
     token = 'd' + secrets.token_hex(8)  # survives pi_agent.py's 30-character name slug whole
-    at, attempt = int(time.time()), job_value('attempts', 0)
-    job.write(LAUNCHING, {'token': token, 'at': at, 'attempt': attempt})
+    at = int(time.time())
+    job.write(LAUNCHING, {'token': token, 'at': at})
     result = remote.launcher(['run', '--agent', settings['agent_model'], '--effort', settings['agent_effort'],
                               '--cd', settings['agent_cwd'], '--name', token, '--no-wait',
                               '--prompt-file', str(prompt)], budget, remote.LAUNCH_TIMEOUT)
@@ -234,9 +243,27 @@ def launch(job, settings, clock):
         raise NotReady(f'The launch outcome is unknown ({remote.text(result) or "no answer"}); a later '
                        f'check looks for token {token} on vanpi before doing anything else.\n'
                        f'{remote.launcher_commands(token=token)}')
-    save_run(job, run_id, token, at, attempt)
+    save_run(job, run_id, token, at)
     print(f'Started {run_id} on vanpi.')
     return collect(job, settings, job.read(RUN), clock)
+
+
+def refuse_past_give_up():
+    """Read at the launch itself: --ready and the Pi calls before it can cross the give-up time."""
+    value = os.environ.get(LAUNCH_BY, '')
+    if value.isdigit() and window_clock() >= int(value):
+        cutoff = time.strftime('%Y-%m-%d %H:%M', time.localtime(int(value)))
+        raise Failure(f'Not launched: the job is past its give-up time ({cutoff}); nothing was started on '
+                      'vanpi. retry or run-now starts it.')
+
+
+def window_clock():
+    """The time the give-up time is judged by: real, unless a test shifts it through CLOCK_SHIFT."""
+    try:
+        shift = int(Path(os.environ[CLOCK_SHIFT]).read_text())
+    except (KeyError, OSError, ValueError):
+        shift = 0
+    return time.time() + shift
 
 
 def acquire_prompt(job, settings, budget):
@@ -270,39 +297,31 @@ def checked_prompt(data, path):
     return path
 
 
-def save_run(job, run_id, token, launched, attempt):
-    job.write(RUN, {'run_id': run_id, 'token': token, 'launched': launched, 'attempt': attempt})
+def save_run(job, run_id, token, launched):
+    job.write(RUN, {'run_id': run_id, 'token': token, 'launched': launched})
     job.remove(LAUNCHING)
-
-
-def collection_over(launched, settings):
-    """True once launch + --run-timeout + COLLECT_GRACE has passed."""
-    return time.time() > int(launched or 0) + run_timeout_seconds(settings) + COLLECT_GRACE
 
 
 def reconcile(job, settings, launching, clock):
     """A launch whose answer was lost: adopt its run by token, never launch again."""
-    token = launching.get('token')
+    token = launching['token']
     search = remote.runs_with_token(token, clock.budget)
     if search is None:
-        if collection_over(launching.get('at'), settings):
-            record_failure(job, launching, FailureKind.COLLECTION_DEADLINE,
-                           'its lost launch could not be looked up before the collection deadline')
         raise NotReady(f'vanpi could not be listed; token {token} is looked for at the next check.\n'
                        f'{remote.launcher_commands(token=token)}')
-    if len(search.matches) == 1:
-        save_run(job, search.matches[0], token, launching.get('at') or int(time.time()), launching.get('attempt'))
-        print(f'Found the run of token {token}: {search.matches[0]}.')
+    if search.found:
+        save_run(job, search.found, token, launching['at'])
+        print(f'Found the run of token {token}: {search.found}.')
         return collect(job, settings, job.read(RUN), clock)
-    if search.matches:
-        reason, detail = HoldReason.AMBIGUOUS, f'{len(search.matches)} runs match'
-    elif search.complete:
-        reason, detail = HoldReason.ABSENT, 'no run with that token'
-    else:
+    if not search.covered:
         reason, detail = (HoldReason.SEARCH_INCOMPLETE, f'search incomplete: the newest '
-                          f'{remote.LIST_LIMITS[-1]} runs on vanpi do not include it and older ones were not listed')
-    job.write(HOLD, {'token': token, 'at': launching.get('at'), 'attempt': launching.get('attempt'),
-                     'reason': reason.value, 'detail': detail})
+                          f'{remote.LIST_LIMITS[-1]} runs on vanpi are not all of them, so neither a match '
+                          'nor its absence there settles it')
+    elif search.matches:
+        reason, detail = HoldReason.AMBIGUOUS, f'{len(search.matches)} runs match'
+    else:
+        reason, detail = HoldReason.ABSENT, 'no run with that token'
+    job.write(HOLD, {'token': token, 'at': launching['at'], 'reason': reason.value, 'detail': detail})
     job.remove(LAUNCHING)
     raise Failure(held(token, detail))
 
@@ -315,17 +334,14 @@ def held(token, detail):
 
 
 def collect(job, settings, run, clock):
-    run_id = run.get('run_id')
-    deadline = int(run.get('launched') or 0) + run_timeout_seconds(settings)
+    run_id = run['run_id']
+    deadline = run['launched'] + run_timeout_seconds(settings)
     since = time.monotonic()
     status = remote.run_status(run_id, clock.budget)
     while status is not None and status.state == 'running' and time.time() < deadline and clock.may_poll(since):
         time.sleep(POLL_INTERVAL)
         status = remote.run_status(run_id, clock.budget)
     if status is None:
-        if collection_over(run.get('launched'), settings):
-            record_failure(job, run, FailureKind.COLLECTION_DEADLINE,
-                           'it could not be read on vanpi before the collection deadline; it may still be active')
         raise NotReady(f'Could not read run {run_id} on vanpi; the next check tries again.\n'
                        f'{remote.launcher_commands(run_id=run_id)}')
     if status.state == 'running' and time.time() < deadline:
@@ -334,18 +350,16 @@ def collect(job, settings, run, clock):
     if status.state == 'running':
         status = remote.stop_confirmed(run_id, clock.budget)
         if status is None:
-            if collection_over(run.get('launched'), settings):
-                record_failure(job, run, FailureKind.COLLECTION_DEADLINE,
-                               'its stop after --run-timeout was never confirmed; it may still be active')
             raise NotReady(f'Run {run_id} passed its --run-timeout; the stop is not confirmed yet '
                            f'and is tried again at the next check.\n{remote.launcher_commands(run_id=run_id)}')
-        if not status.succeeded:
+        # A run that finished on its own just before the stop is judged like any finished run.
+        if not status.clean_finish:
             record_failure(job, run, FailureKind.TIMED_OUT, 'timed out: stopped after its --run-timeout', status)
     return settle(job, settings, run, status)
 
 
 def settle(job, settings, run, status):
-    run_id = run.get('run_id')
+    run_id = run['run_id']
     if status.clean_finish and status.report_blank:
         return blank_report(job, run, status)
     if not status.succeeded:
@@ -365,30 +379,27 @@ def settle(job, settings, run, status):
 
 
 def blank_report(job, run, status):
-    """A clean finish whose final message is blank: read again, then fail without relaunching."""
-    run_id = run.get('run_id')
+    """A clean finish whose final message is blank: read again, then fail; nothing relaunches it."""
+    run_id = run['run_id']
     checks = job.read(REPORT_CHECKS) or {}
-    count = checks.get('count') if checks.get('run_id') == run_id and type(checks.get('count')) is int else 0
-    count += 1
+    count = (checks['count'] if checks.get('run_id') == run_id else 0) + 1
     if count >= REPORT_CHECK_LIMIT:
         job.remove(REPORT_CHECKS)
         record_failure(job, run, FailureKind.NO_REPORT,
-                       f'finished without a report (blank on {count} checks); it is not relaunched '
-                       'automatically, retry or run-now starts a new run', status)
+                       f'finished without a report (blank on {count} checks); retry or run-now starts a new run',
+                       status)
     job.write(REPORT_CHECKS, {'run_id': run_id, 'count': count})
     raise NotReady(f'Run {run_id} finished but its report is blank (check {count} of {REPORT_CHECK_LIMIT}); '
                    f'the next check reads it again.\n{remote.launcher_commands(run_id=run_id)}')
 
 
-def record_failure(job, record, kind, reason, status=None):
-    """Ends the attempt: saves which run failed, for which attempt, and how."""
-    run_id, token = record.get('run_id'), record.get('token')
-    job.write(FAILURE, {'run_id': run_id, 'token': token, 'attempt': record.get('attempt'),
-                        'kind': kind.value, 'reason': reason})
+def record_failure(job, run, kind, reason, status=None):
+    """Ends the attempt: saves which run failed and how."""
+    run_id, token = run['run_id'], run['token']
+    job.write(FAILURE, {'run_id': run_id, 'token': token, 'kind': kind.value, 'reason': reason})
     if status is not None:
         print(status.text.rstrip())
-    what = f'Run {run_id}' if run_id else f'The launch with token {token}'
-    raise Failure(f'{what} on vanpi failed: {reason}.\n{remote.launcher_commands(run_id=run_id, token=token)}')
+    raise Failure(f'Run {run_id} on vanpi failed: {reason}.\n{remote.launcher_commands(run_id=run_id)}')
 
 
 def deliver(job, settings):
@@ -396,7 +407,8 @@ def deliver(job, settings):
     body = (JOB / REPORT).read_bytes()
     result = subprocess.run(['/bin/zsh', settings['agent_notify'], str(JOB)], input=body)
     if result.returncode != 0:
-        raise Failure('The result could not be sent; the saved report is sent again at the next check.')
+        raise Failure(f'The Pi run finished and its report is saved, but the notification failed '
+                      f'(exit {result.returncode}); every check sends the saved report again.')
     job.write_bytes(DELIVERED, b'')
     return DONE
 

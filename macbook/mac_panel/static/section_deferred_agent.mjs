@@ -3,7 +3,7 @@
 import {anchor, button, confirmText, details, fieldError, node, settingRow} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
-import {AGENT_FIELDS, DEFAULT_MODEL, EFFORTS, Host, PI_TIERS, VANPI_ONLY, agentBody, agentProblemsFromError, validateAgent}
+import {AGENT_FIELDS, DEFAULT_MODEL, EFFORTS, Host, PI_TIERS, MAC_ONLY, VANPI_ONLY, agentBody, agentProblemsFromError, validateAgent}
   from './deferred_agent_form.mjs';
 import {NAME_LIMIT} from './deferred_form.mjs';
 
@@ -75,6 +75,7 @@ export function addAgentForm() {
   const followHost = () => {
     const host = inputs.host.value;
     VANPI_ONLY.forEach(key => { rows[key].hidden = host !== Host.VANPI; });
+    MAC_ONLY.forEach(key => { rows[key].hidden = host === Host.VANPI; });
     inputs.model = keyed(modelControl(host), 'model');
     slots.model.replaceChildren(inputs.model);
     inputs.cwd.placeholder = COPY.cwdPlaceholder[host];

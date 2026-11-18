@@ -128,7 +128,7 @@ print added
         runner = FakeRunner()
         adapter = DeferredAdapter(runner, data=self.root / 'panel')
         self.addCleanup(adapter.tasks.close)
-        for changes in ({'name': '../bad'}, {'name': 'a' * 50}, {'due': '2027-02-30 00:00'},
+        for changes in ({'name': '../bad'}, {'name': 'a' * 61}, {'due': '2027-02-30 00:00'},
                         {'script': 'echo no'}, {'attempts': True}, {'timeout': 0},
                         {'confirmed': False}, {'description': 'bad\0text'},
                         {'script': '#!/bin/zsh\n\ud800'}, {'description': '\udcff'}):
@@ -177,16 +177,16 @@ class DeferredAgentAddTests(unittest.TestCase):
         self.addCleanup(self.adapter.tasks.close)
         self.body = {'action': 'add-agent', 'name': 'pi-check', 'due': '2027-01-01 12:15', 'description': 'Example',
                      'host': 'vanpi', 'prompt': 'Check the Pi.\n', 'model': 'astra', 'effort': 'high',
-                     'cwd': '/home/pi/dev', 'ready': "test -e '/tmp/x y'", 'attempts': 2, 'timeout': 900,
+                     'cwd': '/home/pi/dev', 'ready': "test -e '/tmp/x y'", 'timeout': 900,
                      'run_timeout': 30, 'confirmed': True}
 
     def test_fake_deferred_receives_a_private_prompt_and_cleanup_on_success_and_failure(self):
         fake = self.root / 'fake-deferred.zsh'
         fake.write_text("""#!/bin/zsh
 set -eu
-[[ "${(j:|:)@[1,17]}" == "add-agent|--host|vanpi|--model|astra|--effort|high|--cwd|/home/pi/dev|--ready|test -e '/tmp/x y'|--attempts|2|--timeout|900|--run-timeout|30" ]]
-[[ $18 == '2027-01-01 12:15' && $19 == pi-check && $21 == Example ]]
-[[ $(/usr/bin/stat -f %Lp $20) == 600 && $(<$20) == 'Check the Pi.' ]]
+[[ "${(j:|:)@[1,15]}" == "add-agent|--host|vanpi|--model|astra|--effort|high|--cwd|/home/pi/dev|--ready|test -e '/tmp/x y'|--timeout|900|--run-timeout|30" ]]
+[[ $16 == '2027-01-01 12:15' && $17 == pi-check && $19 == Example ]]
+[[ $(/usr/bin/stat -f %Lp $18) == 600 && $(<$18) == 'Check the Pi.' ]]
 print added
 """)
         self.adapter.runner = CliRunner()
@@ -205,6 +205,18 @@ print added
         self.adapter.mutate({**body, 'pi_prompt_path': "/home/pi/it's $(x).md"})
         self.assertEqual(runner.calls[0][0][-4:], ('2027-01-01 12:15', 'pi-check', "vanpi:/home/pi/it's $(x).md", 'Example'))
         self.assertFalse(self.adapter.data.exists())
+
+    def test_a_vanpi_job_without_a_ready_condition_needs_only_the_floor(self):
+        runner = FakeRunner([CommandResult(0, 'added')])
+        self.adapter.runner = runner
+        body = {key: value for key, value in self.body.items() if key != 'ready'}
+        self.adapter.mutate({**body, 'timeout': 390})
+        self.assertEqual(len(runner.calls), 1)
+        for refused in ({'timeout': 389}, {'timeout': 419, 'ready': 'true'}):
+            with self.subTest(refused=refused), self.assertRaises(ApiError) as raised:
+                self.adapter.mutate({**body, **refused})
+            self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(len(runner.calls), 1)
 
     def test_mac_jobs_default_to_the_home_folder_and_take_a_free_model_name(self):
         runner = FakeRunner([CommandResult(0, 'added')])
@@ -227,8 +239,10 @@ print added
             {'ready': ''}, {'ready': 'a\nb'}, {'ready': 'x' * 501}, {'ready': 'a\0b'},
             {'attempts': 0}, {'attempts': True}, {'timeout': '60'}, {'run_timeout': 0},
             {'confirmed': False}, {'unexpected': 1},
-            {'name': 'n' * 50}, {'prompt': 'lone \ud800 surrogate'}, {'description': '\ud800'},
+            {'name': 'n' * 61}, {'prompt': 'lone \ud800 surrogate'}, {'description': '\ud800'},
             {'cwd': home + '/dev'}, {'cwd': str(Path.home())}, {'timeout': 389},
+            {'attempts': 2}, {'attempts': 3, 'ready': None},               # a vanpi job starts one run by itself
+            {'timeout': 419},                                              # below the floor plus the ready allowance
         )
         for changes in cases:
             body = {key: value for key, value in {**self.body, **changes}.items() if value is not None}
