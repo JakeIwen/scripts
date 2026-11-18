@@ -137,6 +137,87 @@ print added
         self.assertFalse(adapter.data.exists())
 
 
+class DeferredAgentAddTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.adapter = DeferredAdapter(FakeRunner(), data=self.root / 'panel')
+        self.addCleanup(self.adapter.tasks.close)
+        self.body = {'action': 'add-agent', 'name': 'pi-check', 'due': '2027-01-01 12:15', 'description': 'Example',
+                     'host': 'vanpi', 'prompt': 'Check the Pi.\n', 'model': 'astra', 'effort': 'high',
+                     'cwd': '/home/pi/dev', 'ready': "test -e '/tmp/x y'", 'attempts': 2, 'timeout': 900,
+                     'run_timeout': 30, 'confirmed': True}
+
+    def test_fake_deferred_receives_a_private_prompt_and_cleanup_on_success_and_failure(self):
+        fake = self.root / 'fake-deferred.zsh'
+        fake.write_text("""#!/bin/zsh
+set -eu
+[[ "${(j:|:)@[1,17]}" == "add-agent|--host|vanpi|--model|astra|--effort|high|--cwd|/home/pi/dev|--ready|test -e '/tmp/x y'|--attempts|2|--timeout|900|--run-timeout|30" ]]
+[[ $18 == '2027-01-01 12:15' && $19 == pi-check && $21 == Example ]]
+[[ $(/usr/bin/stat -f %Lp $20) == 600 && $(<$20) == 'Check the Pi.' ]]
+print added
+""")
+        self.adapter.runner = CliRunner()
+        with patch('deferred_adapter.DEFERRED', ('/bin/zsh', str(fake))):
+            self.assertEqual(self.adapter.mutate(self.body).body, {'message': 'added'})
+        self.assertEqual(list(self.adapter.data.iterdir()), [])
+        self.adapter.runner = FakeRunner([CommandResult(1, stderr='fixture failed')])
+        with self.assertRaises(ApiError):
+            self.adapter.mutate(self.body)
+        self.assertEqual(list(self.adapter.data.iterdir()), [])
+
+    def test_pi_prompt_path_is_passed_as_vanpi_path_without_staging(self):
+        runner = FakeRunner([CommandResult(0, 'added')])
+        self.adapter.runner = runner
+        body = {key: value for key, value in self.body.items() if key != 'prompt'}
+        self.adapter.mutate({**body, 'pi_prompt_path': "/home/pi/it's $(x).md"})
+        self.assertEqual(runner.calls[0][0][-4:], ('2027-01-01 12:15', 'pi-check', "vanpi:/home/pi/it's $(x).md", 'Example'))
+        self.assertFalse(self.adapter.data.exists())
+
+    def test_mac_jobs_default_to_the_home_folder_and_take_a_free_model_name(self):
+        runner = FakeRunner([CommandResult(0, 'added')])
+        self.adapter.runner = runner
+        body = {key: value for key, value in self.body.items() if key not in ('cwd', 'run_timeout')}
+        self.adapter.mutate({**body, 'host': 'mac', 'model': 'claude-sonnet-5[1m]'})
+        argv = runner.calls[0][0]
+        self.assertEqual(argv[argv.index('--cwd') + 1], os.path.realpath(Path.home()))
+        self.assertEqual(argv[argv.index('--model') + 1], 'claude-sonnet-5[1m]')
+
+    def test_invalid_add_agent_never_writes_or_runs(self):
+        home = os.path.realpath(Path.home())
+        prompt_less = {key: value for key, value in self.body.items() if key != 'prompt'}
+        cases = (
+            {'host': 'pi'}, {'host': None}, {'name': '../bad'}, {'due': '2027-02-30 00:00'},
+            {'prompt': '   \n'}, {'prompt': 'a\0b'}, {'prompt': 5}, {'description': 'bad\0text'},
+            {'pi_prompt_path': '/home/pi/x.md'},                           # both prompt sources
+            {'model': 'haiku'}, {'model': 'Sol'},
+            {'effort': 'ultra'}, {'cwd': 'relative'}, {'cwd': '/a\nb'}, {'cwd': '/' + 'a' * 1100},
+            {'ready': ''}, {'ready': 'a\nb'}, {'ready': 'x' * 501}, {'ready': 'a\0b'},
+            {'attempts': 0}, {'attempts': True}, {'timeout': '60'}, {'run_timeout': 0},
+            {'confirmed': False}, {'unexpected': 1},
+        )
+        for changes in cases:
+            body = {key: value for key, value in {**self.body, **changes}.items() if value is not None}
+            with self.subTest(changes=changes), self.assertRaises(ApiError) as raised:
+                self.adapter.mutate(body)
+            self.assertEqual(raised.exception.status, 400)
+        mac = {key: value for key, value in self.body.items() if key != 'run_timeout'}
+        for changes in ({'cwd': '/tmp'}, {'cwd': home + '/../' + Path(home).name}, {'cwd': home + '/no-such-folder'},
+                        {'model': 'Bad Model'}, {'run_timeout': 5}):
+            with self.subTest(mac=changes), self.assertRaises(ApiError):
+                self.adapter.mutate({**mac, 'host': 'mac', 'model': 'haiku', **changes})
+        for changes in ({'pi_prompt_path': 'relative.md'}, {'pi_prompt_path': '/a\nb.md'},
+                        {'pi_prompt_path': '/' + 'a' * 1100}):
+            with self.subTest(path=changes), self.assertRaises(ApiError):
+                self.adapter.mutate({**prompt_less, **changes})
+        with self.assertRaises(ApiError):  # a Pi path on the Mac
+            self.adapter.mutate({**prompt_less, 'host': 'mac', 'model': 'haiku', 'cwd': home, 'run_timeout': 1,
+                                 'pi_prompt_path': '/x.md'})
+        self.assertEqual(self.adapter.runner.calls, [])
+        self.assertFalse(self.adapter.data.exists())
+
+
 class AsyncControlsTests(unittest.TestCase):
     def test_cron_run_is_a_receipt_visible_through_routes_and_inventory(self):
         release, entered = threading.Event(), threading.Event()

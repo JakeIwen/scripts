@@ -30,6 +30,22 @@ class JobState(str, Enum):
     FAILED = 'failed'
 
 
+class AgentHost(str, Enum):
+    """Where a deferred agent job runs its prompt (`deferred.zsh add-agent --host`)."""
+    MAC = 'mac'
+    VANPI = 'vanpi'
+
+
+class RemoteState(str, Enum):
+    """A vanpi agent job's launch/collect state, as deferred_pi_run.py's RemoteState reports it."""
+    UNLAUNCHED = 'unlaunched'
+    LAUNCHING = 'launching'
+    LAUNCH_UNKNOWN = 'launch-unknown'
+    RUNNING = 'running'
+    FINISHED = 'finished'
+    FAILED = 'failed'
+
+
 class ServiceKind(str, Enum):
     AGENT = 'agent'
     DAEMON = 'daemon'

@@ -1,10 +1,13 @@
+import importlib.util
+import sys
 import threading
 import time
 import unittest
 
 from cli_runner import CommandResult
-from deferred_adapter import DeferredAdapter, validate_due, validate_job_id
-from panel_contracts import ApiError, TaskState
+from deferred_adapter import DEFERRED, DeferredAdapter, validate_due, validate_job_id
+from panel_contracts import ApiError, RemoteState, TaskState
+from panel_paths import ROOT
 from panel_test_support import FakeRunner, json_command
 
 
@@ -14,7 +17,15 @@ def inventory():
                       'state': 'pending', 'attempts': 0, 'max_attempts': 3, 'timeout': 900,
                       'description': 'Example', 'created': 'today', 'origin': 'test', 'last_log': None,
                       'give_up': '2026-10-27T15:00', 'agent': False, 'ready': None,
-                      'last_not_ready': None, 'not_ready_checks': 0}]}
+                      'last_not_ready': None, 'not_ready_checks': 0, 'host': None, 'model': None,
+                      'effort': None, 'remote_run': None, 'remote_state': None}]}
+
+
+def pi_job(**changes):
+    value = inventory()
+    value['jobs'][0].update({'agent': True, 'host': 'vanpi', 'model': 'sol', 'effort': 'medium', 'remote_run': None,
+                             'remote_state': 'unlaunched', **changes})
+    return value
 
 
 class DeferredTests(unittest.TestCase):
@@ -30,7 +41,7 @@ class DeferredTests(unittest.TestCase):
         adapter = DeferredAdapter(runner)
         try:
             with self.assertRaises(ApiError) as raised:
-                adapter.mutate({'action': 'retry', 'id': 'test-job'})
+                adapter.mutate({'action': 'retry', 'id': 'test-job', 'confirmed': True})
             self.assertEqual(raised.exception.status, 409)
             self.assertIn('checker is running jobs', str(raised.exception))
             runner.results.append(CommandResult(0, 'new-id'))
@@ -93,7 +104,8 @@ class DeferredTests(unittest.TestCase):
 
     def test_ready_fields_pass_through_and_malformed_ones_fail_closed(self):
         waiting = inventory()
-        waiting['jobs'][0].update(agent=True, ready="ssh h 'true'", last_not_ready='2026-10-20T16:00', not_ready_checks=4)
+        waiting['jobs'][0].update(agent=True, ready="ssh h 'true'", last_not_ready='2026-10-20T16:00', not_ready_checks=4,
+                                  host='mac', model='haiku', effort='medium')
         adapter = DeferredAdapter(FakeRunner([json_command(waiting)]))
         try:
             job = adapter.read()['jobs'][0]
@@ -110,6 +122,78 @@ class DeferredTests(unittest.TestCase):
                     adapter.read()
             finally:
                 adapter.tasks.close()
+
+    def test_agent_fields_pass_through_and_malformed_ones_fail_closed(self):
+        running = pi_job(remote_run='1117-034729-b1e4-d0123456789abcdef', remote_state='running')
+        mac = inventory()
+        mac['jobs'][0].update(agent=True, host='mac', model='haiku', effort='high')
+        for value in (running, mac, inventory()):
+            adapter = DeferredAdapter(FakeRunner([json_command(value)]))
+            try:
+                self.assertEqual(adapter.read()['jobs'], value['jobs'])
+            finally:
+                adapter.tasks.close()
+        broken_cases = (
+            pi_job(remote_state='lost'), pi_job(host='pi'), pi_job(remote_state=None), pi_job(model=3),
+            {**inventory(), 'jobs': [{**inventory()['jobs'][0], 'host': 'mac'}]},
+            {**mac, 'jobs': [{**mac['jobs'][0], 'remote_state': 'running'}]},
+            {**inventory(), 'jobs': [{k: v for k, v in inventory()['jobs'][0].items() if k != 'remote_run'}]},
+        )
+        for broken in broken_cases:
+            adapter = DeferredAdapter(FakeRunner([json_command(broken)]))
+            try:
+                with self.assertRaises(ApiError, msg=broken['jobs'][0]) as raised:
+                    adapter.read()
+                self.assertEqual(raised.exception.status, 502)
+            finally:
+                adapter.tasks.close()
+
+    def test_cancel_relays_a_refusal_and_abandon_is_the_explicit_override(self):
+        refusal = 'Could not read run 1117-x on vanpi. The job is kept so its run is not left on vanpi unseen.'
+        runner = FakeRunner([CommandResult(6, stderr=refusal), CommandResult(0, 'cancelled test-job')])
+        adapter = DeferredAdapter(runner)
+        try:
+            with self.assertRaises(ApiError) as raised:
+                adapter.mutate({'action': 'cancel', 'id': 'test-job', 'confirmed': True})
+            self.assertEqual((raised.exception.status, raised.exception.code), (409, 'remote-active'))
+            self.assertIn('1117-x', str(raised.exception))
+            self.assertEqual(runner.calls[0], ((*DEFERRED, 'cancel', 'test-job'), 200))
+            reply = adapter.mutate({'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': True})
+            self.assertEqual(reply.body, {'message': 'cancelled test-job'})
+            self.assertEqual(runner.calls[1][0], (*DEFERRED, 'cancel', '--abandon', 'test-job'))
+            for body in ({'action': 'retry', 'id': 'test-job', 'abandon': True},
+                         {'action': 'cancel', 'id': 'test-job', 'confirmed': True, 'abandon': False},
+                         {'action': 'cancel', 'id': 'test-job', 'abandon': True}):
+                with self.subTest(body=body), self.assertRaises(ApiError):
+                    adapter.mutate(body)
+            self.assertEqual(len(runner.calls), 2)
+        finally:
+            adapter.tasks.close()
+
+    def test_retry_of_an_unknown_launch_needs_confirmation(self):
+        held = pi_job(remote_state='launch-unknown')
+        runner = FakeRunner([json_command(held), json_command(inventory()), CommandResult(0, 'retrying')])
+        adapter = DeferredAdapter(runner)
+        try:
+            with self.assertRaises(ApiError) as raised:
+                adapter.mutate({'action': 'retry', 'id': 'test-job'})
+            self.assertEqual(raised.exception.status, 400)
+            adapter.mutate({'action': 'retry', 'id': 'test-job'})  # an ordinary failed job needs none
+            self.assertEqual(runner.calls[-1][0], (*DEFERRED, 'retry', 'test-job'))
+            runner.results.append(CommandResult(0, 'retrying'))
+            adapter.mutate({'action': 'retry', 'id': 'test-job', 'confirmed': True})
+            self.assertEqual(len(runner.calls), 4)
+        finally:
+            adapter.tasks.close()
+
+    def test_remote_states_match_the_run_script_that_reports_them(self):
+        # The job's run script is a standalone copy, so the panel keeps its own enum; this keeps them equal.
+        spec = importlib.util.spec_from_file_location('deferred_pi_run', ROOT / 'macbook/scripts/deferred_pi_run.py')
+        script = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = script  # dataclasses resolve the module's annotations through it
+        self.addCleanup(sys.modules.pop, spec.name)
+        spec.loader.exec_module(script)
+        self.assertEqual([state.value for state in script.RemoteState], [state.value for state in RemoteState])
 
     def test_invalid_cli_payload_fails_closed(self):
         adapter = DeferredAdapter(FakeRunner([json_command({'jobs': []})]))
