@@ -31,11 +31,14 @@ const knownId = id => known.includes(id) ? id : null;
 // Sections drawn inside another section instead of having a nav entry or a page of their own; the table also
 // maps the id that old bookmarks, stored tabs and links used to the section that now shows it.
 const HOSTED = {'llm-restore': {id: 'usage', anchor: 'snapshots'}};
-/** Maps a hash or stored id to {id, anchorId} of a known nav section, following the hosting table; else null. */
+/**
+ * Maps a hash or stored id to {id, anchorId, frame} of a known nav section, following the hosting table; else null.
+ * `frame` is the frame that draws the anchor: the hosted one a hosted id names, else the section.
+ */
 export function resolveSection(raw, ids = known) {
   const host = HOSTED[raw];
   const id = host?.id ?? raw;
-  return ids.includes(id) ? {id, anchorId: host?.anchor} : null;
+  return ids.includes(id) ? {id, anchorId: host?.anchor, frame: host ? raw : id} : null;
 }
 /** Ids of the sections shown inside the given one. */
 export const hostedIn = id => Object.keys(HOSTED).filter(key => HOSTED[key].id === id);
@@ -148,34 +151,42 @@ export function revealAnchor(id, anchorId, {focus = false} = {}) {
 // The watch of the latest bookmark landing; opening any section ends it.
 let stopRevealing = () => {};
 
+/** The frame that draws a row: the hosted frame whose bookmark anchor it is, else the section itself. */
+const anchorFrame = (id, anchorId) => hostedIn(id).find(key => HOSTED[key].anchor === anchorId) ?? id;
+
 // Opening a cached section starts a refresh too, and a section that hosts others (usage shows llm-restore) draws its
 // anchors from the hosted frames, which render on their own schedule, however long their loads take. So the landing is
 // repeated whenever the section or a hosted one renders and the row it highlighted was replaced. Watching ends once the
-// row is shown with none of them still loading (later polls must not scroll the page), when the reader opens a
-// section, or when one of them fails to load.
-export function revealWhenRendered(id, anchorId, options) {
+// row is shown with none of them still loading (later polls must not scroll the page); once `frame`, the one that draws
+// the row, has rendered without it (a definitive miss: a later row that happens to match is not scrolled to); when the
+// reader opens a section; or when `frame` fails to load. Another frame's failure does not end it.
+export function revealWhenRendered(id, anchorId, options, frame = anchorFrame(id, anchorId)) {
   stopRevealing();
   const find = () => document.querySelector(`#${CSS.escape(id)} [data-anchor="${CSS.escape(anchorId)}"]`);
   const watched = [id, ...hostedIn(id)];
   let shown = null;
+  let frameRendered = false;
   const land = () => { if (revealAnchor(id, anchorId, options)) shown = find(); };
   // A section's state is recorded just before its load is marked finished, so the one that just rendered counts as done.
-  const settled = rendered => Boolean(shown?.isConnected) && watched.every(member => member === rendered || !isLoading(member));
+  const settled = rendered => (shown?.isConnected
+    ? watched.every(member => member === rendered || !isLoading(member))
+    : frameRendered);
   land();
   if (settled(null)) return;
   const stop = onState((changed, entry) => {
     if (!watched.includes(changed)) return;
-    if (currentSection() !== id || entry.error) {
+    if (currentSection() !== id || (changed === frame && entry.error)) {
       stop();
       return;
     }
+    if (changed === frame) frameRendered = true;
     if (!shown?.isConnected) land();
     if (settled(changed)) stop();
   });
   stopRevealing = stop;
 }
 
-function openSection(id, anchorId, options) {
+function openSection(id, anchorId, options, frame) {
   stopRevealing();
   known.filter(entry => !HOSTED[entry]).forEach(entry => { document.getElementById(entry).hidden = entry !== id; });
   document.querySelectorAll('#nav a').forEach(link => {
@@ -187,7 +198,7 @@ function openSection(id, anchorId, options) {
   setDrawer(false, false);
   document.querySelector('main').scrollTo({top: 0});
   afterOpen(id);
-  if (anchorId) revealWhenRendered(id, anchorId, options);
+  if (anchorId) revealWhenRendered(id, anchorId, options, frame);
 }
 
 export function goTo(raw, anchorId, options) {
@@ -196,20 +207,20 @@ export function goTo(raw, anchorId, options) {
   const id = target.id;
   anchorId ??= target.anchorId;
   if (location.hash === `#${id}`) {
-    openSection(id, anchorId, options);
+    openSection(id, anchorId, options, target.frame);
     return;
   }
-  pendingAnchor = {anchorId, options};
+  pendingAnchor = {anchorId, options, frame: target.frame};
   location.hash = id;
 }
 
 function onHashChange() {
   const target = resolveSection(location.hash.slice(1));
   if (!target) return;
-  const {anchorId = target.anchorId, options} = pendingAnchor ?? {};
+  const {anchorId = target.anchorId, options, frame = target.frame} = pendingAnchor ?? {};
   pendingAnchor = null;
   if (location.hash !== `#${target.id}`) history.replaceState(null, '', `#${target.id}`);
-  openSection(target.id, anchorId, options);
+  openSection(target.id, anchorId, options, frame);
 }
 
 // ---- theme ----
@@ -258,7 +269,7 @@ export function buildShell({ids, onOpen, onRefresh, fallback}) {
   addEventListener('hashchange', onHashChange);
   const first = resolveSection(location.hash.slice(1)) ?? resolveSection(storedSection()) ?? {id: fallback};
   history.replaceState(null, '', `#${first.id}`);
-  openSection(first.id, first.anchorId);
+  openSection(first.id, first.anchorId, undefined, first.frame);
 }
 
 /** A link that opens a section (and scrolls to one of its rows) through the same path as the nav. */

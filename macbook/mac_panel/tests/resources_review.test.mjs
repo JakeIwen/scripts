@@ -176,6 +176,9 @@ test('retrying after both reads failed shows the recovered settings form, not th
 
 // ---- finding 11: the hosted restore bookmark lands whichever render finishes last ----
 
+let bookmarkPlace = () => {};
+let bookmarkAnchor = () => null;
+
 function bookmarkSetup(context, restoreLoad = null) {
   context.mock.timers.enable({apis: ['setTimeout']});
   const host = section('usage');
@@ -190,6 +193,8 @@ function bookmarkSetup(context, restoreLoad = null) {
     return target;
   };
   const place = target => { host.parts['[data-anchor="snapshots"]'] = target; };
+  bookmarkPlace = place;
+  bookmarkAnchor = anchor;
   const open = {id: 'usage'};
   document.querySelector = selector => (selector.startsWith('main >') ? open : original(selector));
   register([
@@ -283,6 +288,36 @@ test('the watch ends when the reader opens another section or the restore load f
   await refresh('llm-restore');
   done();
   assert.ok(!late.classList.contains('flash'), 'a failed load ended the watch');
+});
+
+test('low note: the watch ends on a definitive miss, so a later row with the same anchor is not scrolled to', async context => {
+  const {made, done} = bookmarkSetup(context);
+  const absent = {id: 'llm-restore', endpoint: null, render: () => ({node: new Element(), summary: '', level: 'ok'})};
+  register([{...absent, render: () => { bookmarkPlace(null); return absent.render(); }}]);
+  revealWhenRendered('usage', 'snapshots', {});
+  // The frame that draws the row finished without it: the bookmark's row is gone.
+  await refresh('llm-restore');
+  register([{id: 'llm-restore', endpoint: null,
+    render: () => { bookmarkPlace(bookmarkAnchor()); return {node: new Element(), summary: '', level: 'ok'}; }}]);
+  await refresh('llm-restore');
+  done();
+  assert.equal(made.length, 1);
+  assert.ok(!made[0].classList.contains('flash'), 'a later row with the same anchor was left alone');
+});
+
+test('low note: a failed load of a frame that does not draw the row leaves the watch running', async context => {
+  const slow = slowLoad();
+  const {made, done} = bookmarkSetup(context, slow.load);
+  const loading = refresh('llm-restore');
+  revealWhenRendered('usage', 'snapshots', {});
+  register([{id: 'usage', endpoint: null, load: () => Promise.reject(new Error('usage tool down')),
+    render: () => ({node: new Element(), summary: '', level: 'ok'})}]);
+  await refresh('usage');
+  slow.finish();
+  await loading;
+  done();
+  assert.equal(made.length, 1);
+  assert.ok(made[0].classList.contains('flash'), 'the restore row landed after the usage card failed');
 });
 
 // ---- finding 12: unknown pressure is not drawn as healthy ----

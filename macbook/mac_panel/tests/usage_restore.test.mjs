@@ -82,8 +82,8 @@ test('a failed restore load records an error for its own section only', async ()
 
 test('the retired llm-restore id opens the LLM section at the snapshots block', () => {
   const ids = ['overview', 'usage', 'llm-restore'];
-  assert.deepEqual(resolveSection('llm-restore', ids), {id: 'usage', anchorId: 'snapshots'});
-  assert.deepEqual(resolveSection('usage', ids), {id: 'usage', anchorId: undefined});
+  assert.deepEqual(resolveSection('llm-restore', ids), {id: 'usage', anchorId: 'snapshots', frame: 'llm-restore'});
+  assert.deepEqual(resolveSection('usage', ids), {id: 'usage', anchorId: undefined, frame: 'usage'});
   assert.equal(resolveSection('nope', ids), null);
   assert.equal(resolveSection(null, ids), null);
   assert.deepEqual(hostedIn('usage'), ['llm-restore']);
