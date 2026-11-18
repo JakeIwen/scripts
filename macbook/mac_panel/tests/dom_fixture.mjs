@@ -6,7 +6,8 @@ export class Element extends EventTarget {
     this.childNodes = [];
     this.dataset = {};
     this.classes = new Set();
-    this.classList = {add: name => this.classes.add(name), remove: name => this.classes.delete(name), contains: name => this.classes.has(name)};
+    this.classList = {add: name => this.classes.add(name), remove: name => this.classes.delete(name), contains: name => this.classes.has(name),
+      toggle: (name, force) => ((force ?? !this.classes.has(name)) ? this.classes.add(name) : this.classes.delete(name))};
     this.style = {setProperty: (key, value) => { this[key] = value; }};
     this.offsetWidth = 80;
     this.isConnected = true;

@@ -66,4 +66,7 @@ export function formatAge(started, now = Date.now()) {
   return ms === null ? PLACEHOLDER : formatDuration((now - ms) / 1000);
 }
 
+/** A working folder with the home directory shortened to ~, the way a shell prompt shows it; null stays null. */
+export const shortFolder = folder => (folder ? String(folder).replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~') : null);
+
 export const plural = (count, singular, many = `${singular}s`) => `${count} ${count === 1 ? singular : many}`;

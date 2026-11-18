@@ -5,6 +5,7 @@ import {RESOURCES_COPY as COPY} from './section_copy.mjs';
 import {Level, status} from './status_cell.mjs';
 import {sessionAction} from './resources_actions.mjs';
 import {numberTable} from './resources_table.mjs';
+import {UNPROVEN_NAME_SOURCES} from './resources_names.mjs';
 import {formatAge, formatBytes, formatPercent, plural} from './resources_format.mjs';
 
 export const GroupKind = Object.freeze({CLAUDE: 'claude', CODEX: 'codex', INFRA: 'infra', COMPUTE: 'compute', APP: 'app'});
@@ -72,6 +73,7 @@ function sessionCells(group) {
   const name = node('span', null, 'session-name');
   name.append(tag(COPY.kinds[group.kind] ?? group.kind), group.name);
   if (group.detail) name.append(' ', node('span', group.detail, 'muted small'));
+  if (UNPROVEN_NAME_SOURCES.includes(group.name_source)) name.append(' ', node('span', COPY.sessions.unconfirmedName, 'muted small'), info(COPY.sessions.info.unconfirmedName));
   const cells = [name, group.status ? status(level, COPY.sessions.status[group.status] ?? group.status) : node('span', '—', 'muted'),
     formatPercent(group.cpu), formatBytes(group.rss), String(group.count ?? '—'), formatAge(group.started)];
   return cells;

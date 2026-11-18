@@ -20,6 +20,7 @@
 .gauge-fill.level-ok { fill: var(--accent); }
 .gauge-fill.level-warn { fill: var(--warn); }
 .gauge-fill.level-error { fill: var(--bad); }
+.gauge-fill.level-unknown { fill: var(--line-strong); }
 .gauge-marker { fill: var(--text); }
 .lane-label { fill: var(--muted); font: var(--text-small) var(--font); }
 .lane-rule { stroke: var(--line); stroke-width: 1; }

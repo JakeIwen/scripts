@@ -3,7 +3,8 @@
 import {button, confirmText, info, node, notice} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
 import {RESOURCES_COPY as COPY} from './section_copy.mjs';
-import {plural} from './resources_format.mjs';
+import {plural, shortFolder} from './resources_format.mjs';
+import {UNPROVEN_NAME_SOURCES} from './resources_names.mjs';
 
 export const SECTION = 'resources';
 const ENDPOINT = '/api/resources';
@@ -13,6 +14,9 @@ export const ActionId = Object.freeze({TERMINATE: 'terminate', KILL: 'kill', PAU
 export const Scope = Object.freeze({PROCESS: 'process', TREE: 'tree'});
 // The reply counts, in the order the result line lists them after "applied".
 const REPLY_COUNTS = ['gone', 'changed', 'skipped', 'refused', 'unchanged'];
+// Lowering a process that is already low is the goal reached, so it is the one action whose `unchanged` is no problem.
+const NO_OP_IS_SUCCESS = new Set([ActionId.LOWER]);
+const identityKey = (prefix, target) => `${prefix}-${target.pid}-${target.started}`;
 
 /** What the backend's mutate() expects: identity (pid + start token), scope and the explicit confirmation. */
 export function requestBody(actionId, target, scope = Scope.PROCESS) {
@@ -29,7 +33,8 @@ export function processActions(row) {
 /** One sentence from a mutate reply (six flat counts); zero counts are left out. */
 export function resultText(actionId, counts) {
   const applied = Number(counts.applied) || 0;
-  const parts = [applied ? `${COPY.actions[actionId].done} ${plural(applied, 'process', 'processes')}` : COPY.results.none];
+  const onlyNoOp = !applied && NO_OP_IS_SUCCESS.has(actionId) && REPLY_COUNTS.every(key => key === 'unchanged' || !Number(counts[key]));
+  const parts = applied ? [`${COPY.actions[actionId].done} ${plural(applied, 'process', 'processes')}`] : onlyNoOp ? [] : [COPY.results.none];
   REPLY_COUNTS.forEach(key => {
     const count = Number(counts[key]) || 0;
     if (count) parts.push(`${plural(count, 'process', 'processes')} ${COPY.results[key]}`);
@@ -38,11 +43,14 @@ export function resultText(actionId, counts) {
 }
 
 // A result that signalled nothing while something was refused or changed is shown as a problem, not a success.
-const resultKind = counts => (Number(counts?.applied) > 0 || !REPLY_COUNTS.some(key => key !== 'gone' && Number(counts?.[key]) > 0) ? 'ok' : 'error');
+const resultKind = (actionId, counts) => {
+  const ignored = NO_OP_IS_SUCCESS.has(actionId) ? ['gone', 'unchanged'] : ['gone'];
+  return Number(counts?.applied) > 0 || !REPLY_COUNTS.some(key => !ignored.includes(key) && Number(counts?.[key]) > 0) ? 'ok' : 'error';
+};
 
 export function runAction(actionId, target, scope = Scope.PROCESS) {
   return action(SECTION, ENDPOINT, requestBody(actionId, target, scope), {
-    after: reply => notice(SECTION, resultText(actionId, reply), resultKind(reply)),
+    after: reply => notice(SECTION, resultText(actionId, reply), resultKind(actionId, reply)),
   });
 }
 
@@ -53,7 +61,7 @@ export const confirmPhrase = (actionId, row) => `${COPY.actions[actionId].verb} 
 
 function actionButton(actionId, row) {
   return button(COPY.actions[actionId].label, () => runAction(actionId, row), {
-    confirm: confirmText(confirmPhrase(actionId, row)), key: `${actionId}-${row.pid}`, className: 'secondary',
+    confirm: confirmText(confirmPhrase(actionId, row)), key: rowKey(actionId, row), className: 'secondary',
   });
 }
 
@@ -68,9 +76,13 @@ export function rowActions(row) {
   return cell;
 }
 
-export const sessionKey = group => `session-${group.root_pid}`;
-export const sessionConfirm = (group, rows) => confirmText(COPY.sessions.terminateConfirm(group.name,
-  `${plural(rows, 'process', 'processes')} seen`));
+// Every armed button is keyed by the row's identity (pid and start token), so a pid that was reused after a poll never
+// matches a key staged for its predecessor.
+export const rowKey = (actionId, row) => identityKey(actionId, row);
+export const sessionKey = group => identityKey('session', {pid: group.root_pid, started: group.started});
+export const sessionConfirm = (group, rows) => confirmText(COPY.sessions.terminateConfirm({
+  kind: COPY.kinds[group.kind] ?? group.kind, name: group.name, pid: group.root_pid, folder: shortFolder(group.cwd),
+  seen: `${plural(rows, 'process', 'processes')} seen`, unconfirmed: UNPROVEN_NAME_SOURCES.includes(group.name_source)}));
 
 /** "Terminate session" for a session group; absent, with the reason, when the group has a nested session. */
 export function sessionAction(group) {

@@ -214,11 +214,24 @@ function restoreSlot() {
   return slot;
 }
 
+// The settings form can hold unsaved edits, so retrying the failed allowance read hands the same form back to the next
+// render instead of building a fresh one from the saved values.
+let errorSettings = null;
+let keptSettings = null;
+
+async function retryAllowance() {
+  keptSettings = errorSettings;
+  try { await refresh(SECTION); } finally { keptSettings = null; }
+}
+
+const settingsFor = data => keptSettings ?? settingsCard(data);
+
 function renderUnavailable(data) {
   const left = node('div', null, 'usage-main');
-  left.append(card({title: COPY.budgetsTitle, body: loadError(`Could not load usage: ${data.error}`, () => refresh(SECTION)), anchor: 'budgets'}), restoreSlot());
+  left.append(card({title: COPY.budgetsTitle, body: loadError(`Could not load usage: ${data.error}`, retryAllowance), anchor: 'budgets'}), restoreSlot());
   const top = node('div', null, 'usage-top');
-  top.append(left, settingsCard(data));
+  errorSettings = settingsFor(data);
+  top.append(left, errorSettings);
   const root = node('div');
   root.append(top);
   return {node: root, summary: 'unavailable', level: Level.ERROR};
@@ -237,7 +250,7 @@ export function render(data) {
   const left = node('div', null, 'usage-main');
   left.append(budgetsCard(data), restoreSlot());
   const top = node('div', null, 'usage-top');
-  top.append(left, settingsCard(data));
+  top.append(left, settingsFor(data));
   root.append(top, routingCard(data), historyCard());
   return {node: root, summary, level};
 }

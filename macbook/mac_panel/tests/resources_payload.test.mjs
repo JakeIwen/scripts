@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {section} from './dom_fixture.mjs';
-import {findAll, hasClass, withKey} from './resources_fixture.mjs';
+import {findAll, hasClass, withIdentity, withKey} from './resources_fixture.mjs';
 
 const real = () => JSON.parse(readFileSync(new URL('./resources_payload.json', import.meta.url), 'utf8'));
 
@@ -49,7 +49,7 @@ test('tree_blocked sessions offer no terminate button and show their reason; the
   const data = real();
   const {node} = resources.render(data);
   for (const group of data.groups.filter(entry => ['claude', 'codex'].includes(entry.kind))) {
-    assert.equal(withKey(node, `session-${group.root_pid}`).length, group.tree_blocked ? 0 : 1, group.name);
+    assert.equal(withIdentity(node, 'session', group.root_pid).length, group.tree_blocked ? 0 : 1, group.name);
   }
   assert.ok(findAll(node, element => element.dataset?.tip).some(element => element.dataset.tip.includes('end those first')));
 });
@@ -59,9 +59,9 @@ test('process rows tag the kind taken from the group id and offer buttons only w
   const data = real();
   const {node} = resources.render(data);
   const member = data.processes.find(row => row.group && !row.blocked);
-  assert.equal(withKey(node, `terminate-${member.pid}`).length, 1);
+  assert.equal(withIdentity(node, 'terminate', member.pid).length, 1);
   const blocked = data.processes.find(row => row.blocked);
-  assert.equal(withKey(node, `terminate-${blocked.pid}`).length, 0);
+  assert.equal(withIdentity(node, 'terminate', blocked.pid).length, 0);
   assert.ok(text(node).includes('Claude'), 'kind tag from claude:<pid>');
   Object.assign(view, {mode: ViewMode.APP});
 });

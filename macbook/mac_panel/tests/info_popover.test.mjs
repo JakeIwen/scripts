@@ -54,3 +54,29 @@ test('hovering shows the popover, leaving hides it, and a click while hovering p
   button.click();
   assert.equal(pop.hidden, true);
 });
+
+test('keyboard focus shows the note as hover does, and aria-expanded follows every way it is shown', () => {
+  globalThis.innerWidth = 1440;
+  const root = info('Focus text');
+  const [button, pop] = root.childNodes;
+  root.getBoundingClientRect = () => ({left: 100, top: 100, bottom: 116});
+  const expanded = () => button.attributes['aria-expanded'];
+  button.dispatchEvent(new Event('focus'));
+  assert.equal(pop.hidden, false, 'focus alone reveals it');
+  assert.equal(expanded(), 'true');
+  button.dispatchEvent(new Event('blur'));
+  assert.equal(pop.hidden, true);
+  assert.equal(expanded(), 'false');
+  root.dispatchEvent(new Event('mouseenter'));
+  assert.equal(expanded(), 'true', 'hover is expanded too');
+  root.dispatchEvent(new Event('mouseleave'));
+  assert.equal(expanded(), 'false');
+  button.dispatchEvent(new Event('focus'));
+  button.click();
+  button.dispatchEvent(new Event('blur'));
+  assert.equal(pop.hidden, false, 'a pinned note outlives focus');
+  assert.equal(expanded(), 'true');
+  button.click();
+  assert.equal(pop.hidden, true, 'a second click closes it even while focused');
+  assert.equal(expanded(), 'false');
+});

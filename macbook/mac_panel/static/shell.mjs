@@ -146,14 +146,17 @@ export function revealAnchor(id, anchorId, {focus = false} = {}) {
   return true;
 }
 
-// Opening a cached section starts a refresh too; keep the landing highlight on its replacement row.
-function revealWhenRendered(id, anchorId, options) {
-  const initial = document.querySelector(`#${CSS.escape(id)} [data-anchor="${CSS.escape(anchorId)}"]`);
-  revealAnchor(id, anchorId, options);
+// Opening a cached section starts a refresh too, and a section that hosts others (usage shows llm-restore) draws its
+// anchors from the hosted frames, which render on their own schedule. So the landing is repeated whenever the section or
+// a hosted one renders and the row it highlighted was replaced, until the wait ends.
+export function revealWhenRendered(id, anchorId, options) {
+  const find = () => document.querySelector(`#${CSS.escape(id)} [data-anchor="${CSS.escape(anchorId)}"]`);
+  let shown = null;
+  const land = () => { if (revealAnchor(id, anchorId, options)) shown = find(); };
+  land();
+  const watched = new Set([id, ...hostedIn(id)]);
   const stop = onState(changed => {
-    if (changed !== id) return;
-    stop();
-    if (currentSection() === id && !initial?.isConnected) revealAnchor(id, anchorId, options);
+    if (watched.has(changed) && currentSection() === id && !shown?.isConnected) land();
   });
   setTimeout(stop, REVEAL_WAIT_MS);
 }

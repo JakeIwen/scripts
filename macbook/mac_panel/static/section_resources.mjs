@@ -1,15 +1,15 @@
 // Resources: what the Mac is spending, by LLM session, infrastructure, m4-compute job and app.
 // Page layout only; each card is built in its own module.
-import {node} from './panel_dom.mjs';
+import {node, notice} from './panel_dom.mjs';
 import {stageAction} from './search_actions.mjs';
 import {RESOURCES_COPY as COPY} from './section_copy.mjs';
 import {goTo} from './shell.mjs';
 import {Level, status} from './status_cell.mjs';
-import {SECTION, processActions, sessionKey} from './resources_actions.mjs';
+import {SECTION, sessionKey} from './resources_actions.mjs';
 import {formatBytes, formatPercent, plural} from './resources_format.mjs';
-import {SESSION_KINDS, computeCard, groupKind, groupsOfKind, sessionAnchor, sessionsCard} from './resources_groups.mjs';
+import {SESSION_KINDS, computeCard, groupsOfKind, sessionAnchor, sessionsCard} from './resources_groups.mjs';
 import {historyCard} from './resources_history.mjs';
-import {processesCard, revealProcessList} from './resources_processes.mjs';
+import {processesCard} from './resources_processes.mjs';
 import {healthLevel, systemCard} from './resources_system.mjs';
 
 function summaryText(data) {
@@ -43,28 +43,25 @@ export function attentionItems(data) {
 
 function sessionItem(group) {
   const anchor = sessionAnchor(group);
-  const actions = group.tree_blocked ? [] : [{label: COPY.sessions.terminate, run: () => stageAction(SECTION, anchor, sessionKey(group), {arm: true})}];
+  const stage = () => stageAction(SECTION, anchor, sessionKey(group),
+    {arm: true, onMissing: () => notice(SECTION, COPY.sessions.staleTarget, 'error')});
+  const actions = group.tree_blocked ? [] : [{label: COPY.sessions.terminate, run: stage}];
   return {title: group.name, subtitle: `${COPY.kinds[group.kind]} session · ${plural(group.count ?? 0, 'process', 'processes')}`,
     keywords: ['session', 'resources', 'process', group.kind], anchor, actions: [{label: 'Open', run: () => goTo(SECTION, anchor)}, ...actions]};
 }
 
-// A process button exists only in the By process list, so the search action switches to it before arming.
-function processItem(row) {
-  const reveal = () => revealProcessList();
-  const actions = row.blocked ? [] : processActions(row).map(id => ({
-    label: COPY.actions[id].label,
-    run: () => { reveal(); stageAction(SECTION, 'processes', `${id}-${row.pid}`, {arm: true}); },
-  }));
-  return {title: row.name, subtitle: `pid ${row.pid} · ${formatPercent(row.cpu)} CPU · ${formatBytes(row.rss)}`,
-    keywords: ['process', 'resources', 'kill', 'terminate', 'memory', 'cpu', groupKind(row.group)].filter(Boolean), anchor: 'processes',
-    actions: [{label: 'Open', run: () => { reveal(); goTo(SECTION, 'processes'); }}, ...actions]};
-}
+// Cards the page draws whole, so opening one always lands on something rendered. Individual processes are not indexed:
+// the list's own filter finds them, and a result beyond its first rows would have no row to reveal.
+const cardItem = (title, subtitle, anchor, keywords) => ({title, subtitle, keywords: ['resources', ...keywords], anchor,
+  actions: [{label: 'Open', run: () => goTo(SECTION, anchor)}]});
 
 export function searchItems(data) {
   return [
-    {title: COPY.system.title, subtitle: 'CPU, memory, swap, disk, pressure', keywords: ['resources', 'cpu', 'memory', 'swap', 'disk', 'load', 'thermal', 'battery'],
-      anchor: 'system', actions: [{label: 'Open', run: () => goTo(SECTION, 'system')}]},
+    cardItem(COPY.system.title, 'CPU, memory, swap, disk, pressure', 'system', ['cpu', 'memory', 'swap', 'disk', 'load', 'thermal', 'battery']),
+    cardItem(COPY.sessions.title, 'Claude and Codex sessions, their processes and infrastructure', 'sessions', ['claude', 'codex', 'terminate', 'infrastructure']),
     ...groupsOfKind(data, SESSION_KINDS).map(sessionItem),
-    ...(data.processes ?? []).map(processItem),
+    cardItem(COPY.compute.title, 'van-compute worker and jobs', 'compute', ['van-compute', 'worker', 'job']),
+    cardItem(COPY.processes.title, 'every process: filter, sort, pause, terminate', 'processes', ['process', 'kill', 'terminate', 'pause', 'memory', 'cpu', 'app']),
+    cardItem(COPY.history.title, 'CPU and memory over time', 'history', ['history', 'chart', 'cpu', 'memory']),
   ];
 }

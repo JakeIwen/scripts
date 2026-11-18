@@ -9,8 +9,9 @@ const RETRY_MS = 400;
 /**
  * Opens `section` at `anchorId`, then focuses the control with data-key `key`. With `arm` (for a button that
  * asks for confirmation) it idempotently arms "Confirm: ..." without a click. Only the reader can act.
+ * `onMissing` runs when no such control ever appeared (the row changed identity or left), so the reader is told nothing was armed.
  */
-export function stageAction(section, anchorId, key, {arm = false} = {}) {
+export function stageAction(section, anchorId, key, {arm = false, onMissing} = {}) {
   goTo(section, anchorId);
   const deadline = Date.now() + WAIT_MS;
   const attempt = () => {
@@ -22,6 +23,8 @@ export function stageAction(section, anchorId, key, {arm = false} = {}) {
       if (arm) setTimeout(() => { if (!target.isConnected && target.classList.contains('armed') && Date.now() < deadline) attempt(); }, RETRY_MS);
     } else if (Date.now() < deadline) {
       setTimeout(attempt, POLL_MS);
+    } else if (!target) {
+      onMissing?.();
     }
   };
   setTimeout(attempt, POLL_MS);

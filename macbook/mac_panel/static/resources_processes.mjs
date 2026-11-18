@@ -16,7 +16,6 @@ export const SortKey = Object.freeze({CPU: 'cpu', MEMORY: 'rss'});
 export const view = {mode: ViewMode.APP, sort: SortKey.CPU, filter: '', paused: false};
 // Rows built per render: enough to scan, cheap to draw; the filter reaches the rest.
 export const WINDOW_ROWS = 50;
-let current = null;
 
 const lower = value => String(value ?? '').toLowerCase();
 const byName = (a, b) => lower(a.name).localeCompare(lower(b.name));
@@ -138,14 +137,5 @@ export function processesCard(data) {
   const body = node('div');
   body.append(controls, list);
   redraw();
-  current = {redraw, sync: () => { mode.sync(); sort.sync(); chip.sync(); filter.value = view.filter; filter.defaultValue = view.filter; }};
   return card({title: COPY_PROCESSES.title, body, anchor: 'processes', actions: info(COPY_PROCESSES.info.table)});
-}
-
-/** For a search result that must press a per-process button: shows the By process list with no filter, as the button lives only there. */
-export function revealProcessList() {
-  Object.assign(view, {mode: ViewMode.PROCESS, filter: '', paused: false});
-  if (!current) return;
-  current.sync();
-  current.redraw();
 }
