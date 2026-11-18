@@ -227,7 +227,9 @@ job copies in `scripts/deferred_pi_run.py` and starts the run through
 pi-agent tier: `astra`, `sol` or `luna`), effort `medium`, `--cwd` `~` (the Pi's
 home, stored as typed), `--attempts` 1 and `--run-timeout` 120 minutes (the
 longest a run may last before the job stops it). `--run-timeout` with
-`--host mac` is a usage error, as is a `vanpi:` prompt with `--host mac`.
+`--host mac` is refused, as is a `vanpi:` prompt with `--host mac`; like the other
+option checks of `add` and `add-agent` (bad `--host`, `--model` tier, `--cwd` or
+`vanpi:` path) these exit 1, and only a malformed command line exits 2.
 `--ready` still runs on the Mac, and only a job with no launch on record
 evaluates it. Each pass of the job (the hourly checker, or `run-now`) first
 dispatches on state files in the job directory, shown by `list --json` as
@@ -261,8 +263,10 @@ reports `host`, `model` and `effort`):
   the old id in the job's `runs.log`.
 
 `cancel JOB` for a vanpi job stops its Pi run first and deletes the job only once
-the run is shown not running. When the Pi cannot be reached or listed, a stop
-stays unconfirmed, or a launch cannot be matched to one run, `cancel` keeps the job
+the run is shown not running. After sending the stop it waits up to about 30 s
+for the run to end (polling its status every few seconds). When the Pi cannot be
+reached or listed, the run still shows running (or cannot be read) after that
+wait, or a launch cannot be matched to one run, `cancel` keeps the job
 and exits 6, printing the recovery commands; `cancel --abandon JOB` deletes the job
 anyway and prints the same commands for a run that may still be active.
 

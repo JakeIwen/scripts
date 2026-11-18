@@ -47,6 +47,11 @@ LIST_LIMIT = 500  # runs listed to find a launch token; the Pi prunes runs after
 # normally gives up first and reports why.
 SSH_TIMEOUT, STATUS_TIMEOUT, LAUNCH_TIMEOUT = 30, 90, 180
 CANCEL_CALL_TIMEOUT = 45  # cancel runs while the panel waits on it
+# After a stop the run needs a few seconds to end (SIGTERM, then the launcher
+# records the exit), so its status is polled for this long before the stop
+# counts as unconfirmed. Worst case for cancel, which the panel waits 200 s on:
+# 3 calls of 45 s, this window, and one last read of at most STOP_MIN_READ.
+STOP_CONFIRM_WINDOW, STOP_CONFIRM_INTERVAL, STOP_MIN_READ = 30, 3, 10
 POLL_WINDOW, POLL_INTERVAL = 240, 20
 # Seconds of the job's --timeout kept for launching, stopping and the final
 # status read; only the rest is spent polling a running run.
@@ -282,14 +287,23 @@ def runs_with_token(token, timeout=STATUS_TIMEOUT):
 
 
 def stop_confirmed(run_id, timeout=STATUS_TIMEOUT):
-    """Sends the stop, then trusts only a parsed status that no longer says running.
+    """Sends the stop, then polls for a parsed status that no longer says running.
 
-    Returns that status, or None while the stop is unconfirmed. It proves the
-    launcher's recorded state, not that every detached descendant is gone.
+    Returns that status, or None while the stop is unconfirmed after
+    STOP_CONFIRM_WINDOW. Only a positive terminal state confirms: an unreadable
+    or malformed status is just another poll that did not confirm. It proves
+    the launcher's recorded state, not that every detached descendant is gone.
     """
     launcher(['stop', run_id], timeout)
-    status = run_status(run_id, timeout)
-    return status if status and status.state != 'running' else None
+    deadline = time.monotonic() + STOP_CONFIRM_WINDOW
+    while True:
+        remaining = deadline - time.monotonic()
+        status = run_status(run_id, min(timeout, max(STOP_MIN_READ, remaining)))
+        if status and status.state != 'running':
+            return status
+        if time.monotonic() + STOP_CONFIRM_INTERVAL >= deadline:
+            return None
+        time.sleep(STOP_CONFIRM_INTERVAL)
 
 
 # ---- one pass ----
@@ -442,7 +456,8 @@ def collect(settings, run, clock):
         raise NotReady(f'Could not read run {run_id} on vanpi; the next check tries again.\n'
                        f'{give_up_note(run_id)}')
     if status.state == 'running' and time.time() < deadline:
-        raise NotReady(f'Run {run_id} is still running on vanpi.\n{give_up_note(run_id)}')
+        raise NotReady(f'{give_up_note(run_id)}\n'
+                       f'Pi run {run_id} is still running on vanpi; a later check collects it.')
     if status.state == 'running':
         status = stop_confirmed(run_id)
         if status is None:

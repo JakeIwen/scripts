@@ -44,17 +44,25 @@ class AddPiJobTests(PiHarness):
             ("--run-timeout", "0"),
             ("--cwd", "two\nlines"),
         )
+        # Like the other add option checks (`--attempts`, `--timeout`), these exit 1 through die;
+        # status 2 is only for a malformed command line.
         for args in cases:
             with self.subTest(args=args):
-                self.assertNotEqual(self.add_pi(*args, check=False).returncode, 0)
+                self.assertEqual(self.add_pi(*args, check=False).returncode, 1)
+        result = self.deferred("add-agent", "--host", "elsewhere", YESTERDAY, "bad", str(self.prompt), check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.deferred("add-agent", "--bogus", YESTERDAY, "bad", str(self.prompt),
+                                       check=False).returncode, 2)
         for prompt in ("vanpi:relative/path.md", "vanpi:/two\nlines.md", "vanpi:/" + "a" * 1100):
             with self.subTest(prompt=prompt):
                 result = self.deferred("add-agent", YESTERDAY, "bad", prompt, check=False)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, 1)
         result = self.deferred("add-agent", "--host", "mac", YESTERDAY, "bad", "vanpi:/x.md", check=False)
+        self.assertEqual(result.returncode, 1)
         self.assertIn("--host mac", result.stderr)
         result = self.deferred("add-agent", "--run-timeout", "5", "--cwd", str(self.tmp), YESTERDAY, "bad",
                                str(self.prompt), check=False)
+        self.assertEqual(result.returncode, 1)
         self.assertIn("only to --host vanpi", result.stderr)
         self.assertFalse((self.root / "jobs").exists() and any((self.root / "jobs").iterdir()))
 
@@ -94,6 +102,8 @@ class LaunchAndCollectTests(PiHarness):
         [run_id] = self.runs()
         self.assertEqual((record["remote_state"], record["remote_run"], record["attempts"]), ("running", run_id, 0))
         self.assertIn(f"status {run_id}", self.last_log(job))
+        self.assertEqual(self.last_log(job).splitlines()[-1],
+                         f"Pi run {run_id} is still running on vanpi; a later check collects it.")
         flag.unlink()
         self.set_run(run_id, state="done")
         self.deferred("run-due")
@@ -150,6 +160,7 @@ class LaunchAndCollectTests(PiHarness):
     def test_a_stop_that_returns_while_the_run_still_shows_running_is_not_stopped(self):
         self.control("stop-mode", "ignore")
         job = self.add_pi("--run-timeout", "1")
+        self.quick_stop_polling(job)
         self.deferred("run-due")
         run = self.record(job, "remote-run.json")
         (job / "remote-run.json").write_text(json.dumps({**run, "launched": run["launched"] - 120}))
@@ -159,6 +170,19 @@ class LaunchAndCollectTests(PiHarness):
         self.assertIn("not confirmed", self.last_log(job))
         self.deferred("run-due")
         self.assertEqual(len(self.calls("stop")), 2)
+
+    def test_a_slow_ending_overdue_run_is_confirmed_by_polling_in_one_pass(self):
+        self.control("stop-lag", "2")
+        job = self.add_pi("--run-timeout", "1")
+        self.quick_stop_polling(job, window="5")
+        self.deferred("run-due")
+        run = self.record(job, "remote-run.json")
+        (job / "remote-run.json").write_text(json.dumps({**run, "launched": run["launched"] - 120}))
+        self.deferred("run-due")
+        self.assertEqual(len(self.calls("stop")), 1)
+        record = self.listed(job)
+        self.assertEqual((record["remote_state"], record["state"]), ("failed", "failed"))
+        self.assertIn("timed out", self.last_log(job))
 
     def test_remote_failure_is_terminal_and_a_retry_starts_a_new_run(self):
         self.control("next-state", "done")
@@ -330,10 +354,52 @@ class CancelTests(PiHarness):
     def test_unconfirmed_stop_refuses(self):
         self.control("stop-mode", "ignore")
         job = self.add_pi()
+        self.quick_stop_polling(job)
         self.deferred("run-due")
         result = self.deferred("cancel", job.name, check=False)
         self.assertEqual(result.returncode, 6)
         self.assertTrue(job.exists())
+        self.assertIn("still shows running", result.stderr)
+
+    def test_a_slow_ending_run_is_confirmed_within_one_cancel(self):
+        self.control("stop-lag", "3")
+        job = self.add_pi()
+        self.quick_stop_polling(job, window="5")
+        self.deferred("run-due")
+        self.deferred("cancel", job.name)
+        self.assertFalse(job.exists())
+        self.assertEqual(len(self.calls("stop")), 1)
+        self.assertGreaterEqual(len(self.calls("status")), 4)
+
+    def test_a_run_still_running_for_the_whole_window_is_refused(self):
+        self.control("stop-lag", "100000")
+        job = self.add_pi()
+        self.quick_stop_polling(job)
+        self.deferred("run-due")
+        result = self.deferred("cancel", job.name, check=False)
+        self.assertEqual(result.returncode, 6)
+        self.assertTrue(job.exists())
+        self.assertGreater(len(self.calls("status")), 3)
+
+    def test_unreadable_status_while_polling_never_confirms_the_stop(self):
+        self.control("stop-lag", "0")
+        self.control("empty-reads", "100000")
+        job = self.add_pi()
+        self.quick_stop_polling(job)
+        self.deferred("run-due")
+        result = self.deferred("cancel", job.name, check=False)
+        self.assertEqual(result.returncode, 6)
+        self.assertTrue(job.exists())
+
+    def test_polling_goes_on_past_an_unreadable_status(self):
+        self.control("stop-lag", "1")
+        self.control("empty-reads", "2")
+        job = self.add_pi()
+        self.quick_stop_polling(job, window="5")
+        self.deferred("run-due")
+        self.deferred("cancel", job.name)
+        self.assertFalse(job.exists())
+        self.assertGreaterEqual(len(self.calls("status")), 5)
 
     def test_launching_job_without_an_id_refuses_when_unreachable(self):
         self.control("launch-mode", "lost")
