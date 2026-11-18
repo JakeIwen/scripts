@@ -12,8 +12,9 @@ scheduling and cancelling never execute anything the job directory holds.
 field present and typed, and only the combinations a pass interrupted between
 two writes can leave. Anything else raises StateError, which the listing shows
 as an invalid row, the checker flags without running the job, plain cancel
-refuses and retry/run-now accept only with `--relaunch` naming an id found in
-the records.
+refuses and retry/run-now refuse whatever `--relaunch` id is given: records that
+disagree cannot say which attempt the user would be replacing, so only
+`cancel --abandon` removes such a job.
 """
 from __future__ import annotations
 
@@ -80,6 +81,9 @@ class FailureKind(str, Enum):
 
 # Failures that prove the Pi run is over; any other unfinished state may still be active there.
 CONFIRMED_TERMINAL = frozenset((FailureKind.REMOTE, FailureKind.TIMED_OUT, FailureKind.NO_REPORT))
+# A remote result names the run whose status established it. Only the scheduler's collection
+# deadline can end a launch whose run id was never learned (a held launch is its own record, HOLD).
+TOKEN_ONLY_FAILURES = frozenset((FailureKind.COLLECTION_DEADLINE,))
 OWED = frozenset((RemoteState.RUNNING, RemoteState.LAUNCHING, RemoteState.FINISHED))
 
 
@@ -241,8 +245,9 @@ def _records(job):
         _enum(HoldReason, hold, 'reason', HOLD)
         _text(hold, 'detail', HOLD)
     if failure is not None:
-        _ids(failure, FAILURE)
-        _enum(FailureKind, failure, 'kind', FAILURE)
+        kind = _enum(FailureKind, failure, 'kind', FAILURE)
+        if _ids(failure, FAILURE)[0] is None and kind not in TOKEN_ONLY_FAILURES:
+            raise StateError(f'{FAILURE} of kind {kind.value} names no run id')
         _text(failure, 'reason', FAILURE)
     if checks is not None:
         _ids(checks, REPORT_CHECKS, run=True)

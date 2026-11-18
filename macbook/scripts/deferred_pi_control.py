@@ -12,7 +12,8 @@ pi_agent.py, so a damaged or missing job `run` cannot change what these say.
                                   unless --abandon is given instead
   rearm DIR VERB [ID]             retry/run-now: exit 0 when VERB may go ahead (an ended attempt is
                                   cleared); 7 when the previous attempt is unresolved and ID does
-                                  not name it, or ID names nothing unresolved
+                                  not name it, ID names nothing unresolved, or the records cannot
+                                  be trusted (then no ID is accepted)
   expire DIR [MINUTES]            exit 0 after recording a collection-deadline failure for a run
                                   owed past launch + MINUTES (the job's --run-timeout, default
                                   DEFAULT_RUN_TIMEOUT) + the grace; 1 otherwise
@@ -119,15 +120,16 @@ def rearm(job, verb, given):
     """retry/run-now: whether VERB may go ahead, and the ended attempt cleared so it can.
 
     A confirmed-terminal attempt needs no consent. An unresolved one (it may
-    still be active on vanpi) needs GIVEN naming exactly that attempt, as
-    `list` shows it; run-now without one collects a run the job still owes.
+    still be active on vanpi) needs GIVEN naming exactly that attempt of a
+    valid snapshot, as `list --json` shows it; run-now without one collects a
+    run the job still owes. Records that cannot be trusted refuse every id.
     """
     name = job.path.name
     try:
         snap = snapshot(job)
-        unresolved, ids, problem = snap.unresolved, [i for i in (snap.run_id, snap.token) if i], None
     except StateError as error:
-        snap, unresolved, ids, problem = None, True, job.recoverable_ids(), str(error)
+        return untrusted_refusal(job, error)
+    unresolved, ids = snap.unresolved, [i for i in (snap.run_id, snap.token) if i]
     if not unresolved:
         if given:
             print(f'{name}: nothing on vanpi is unresolved, so --relaunch {given} names no current attempt '
@@ -136,19 +138,29 @@ def rearm(job, verb, given):
         if snap.state == RemoteState.FAILED:
             clear_attempt(job, f'attempt {snap.attempt_id} ended ({snap.failure_kind.value}); cleared by {verb}')
         return DONE
-    if given is None and verb == 'run-now' and snap is not None and snap.owes:
+    if given is None and verb == 'run-now' and snap.owes:
         return DONE  # run-now collects the run the job owes; it starts nothing
     if given is None or given not in ids:
-        what = f'its Pi state is unreadable ({problem})' if problem else \
-            f'its Pi attempt {snap.attempt_id} is {snap.failure_kind.value if snap.failure_kind else snap.state.value}'
-        named = ' or '.join(ids) or '(no id recoverable; cancel --abandon is the way out)'
+        what = snap.failure_kind.value if snap.failure_kind else snap.state.value
         wrong = f'--relaunch {given} does not name it. ' if given else ''
-        print(f'{name}: {what} and may still be active on vanpi. {wrong}To start another run anyway: '
-              f'deferred.zsh {verb} {name} --relaunch {named}', file=sys.stderr)
+        print(f'{name}: its Pi attempt {snap.attempt_id} is {what} and may still be active on vanpi. {wrong}'
+              f'To start another run anyway: deferred.zsh {verb} {name} --relaunch {" or ".join(ids)}',
+              file=sys.stderr)
         return RELAUNCH_REFUSED
     clear_attempt(job, f'attempt {given} abandoned by {verb} --relaunch; it may still be active on vanpi')
     print(f'Cleared the unresolved attempt {given}; the next launch starts a new run.')
     return DONE
+
+
+def untrusted_refusal(job, error):
+    """Records that disagree (or cannot be read) do not say which attempt may still be active."""
+    found = job.recoverable_ids()
+    named = ', '.join(found) or 'none recoverable'
+    print(f'{job.path.name}: its Pi state is not trusted ({error}), so which attempt may still be active on '
+          f'vanpi cannot be told and no --relaunch id is accepted; nothing was cleared. Ids found: {named}.\n'
+          f'{recovery(found)}\ndeferred.zsh cancel --abandon {job.path.name} deletes the job anyway.',
+          file=sys.stderr)
+    return RELAUNCH_REFUSED
 
 
 def expire(job, minutes):
