@@ -214,12 +214,27 @@ class PolicyTests(unittest.TestCase):
             (90, 1, 'make all', {'tty': 'ttys012'}),
             (91, 90, 'cc -c x.c', {'tty': 'ttys012'}),
             (95, 1, '/usr/bin/plain-daemon'))
-        self.assertEqual(self.reason(70, table=table), hosts_reason(2))
+        # Its terminal, the session on it and the app server: three units.
+        self.assertEqual(self.reason(70, table=table), hosts_reason(3))
         self.assertEqual(self.reason(80, table=table), hosts_reason(2))
         # A keep-awake helper below a session is that session's own, not a host above it.
         self.assertIsNone(self.reason(74, table=table))
         for pid in (90, 91, 95):
             self.assertIsNone(self.reason(pid, table=table), pid)
+
+    def test_a_supervisor_on_the_same_terminal_as_its_session_is_blocked(self):
+        # A timeout wrapper forwards SIGTERM to the Codex session it runs, on the same tty.
+        table = make_table(
+            (1, 0, '/sbin/launchd', {'uid': 0}),
+            (PANEL_PID, 1, 'python server.py'),
+            (100, 1, '/Applications/iTerm.app/Contents/MacOS/iTerm2'),
+            (101, 100, '-zsh', {'tty': 'ttys004'}),
+            (150, 101, '/usr/bin/timeout 3600 codex exec run', {'tty': 'ttys004'}),
+            (151, 150, 'codex exec run', {'tty': 'ttys004'}),
+            (152, 101, 'make all', {'tty': 'ttys004'}),
+            (153, 152, 'cc -c x.c', {'tty': 'ttys004'}))
+        self.assertEqual(self.reason(150, table=table), hosts_reason(1))
+        self.assertIsNone(self.reason(152, table=table))
 
     def test_a_gap_in_the_ancestry_blocks_rather_than_guesses(self):
         table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),

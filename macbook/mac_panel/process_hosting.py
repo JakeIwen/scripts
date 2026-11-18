@@ -3,8 +3,9 @@
 A name list cannot cover every terminal emulator, multiplexer or IDE helper, so the policy
 also asks what a process has beneath it. A process "hosts" a unit when that unit is among
 its descendants: a terminal (a tty any descendant is attached to, other than the process's
-own tty) or a session, infra or compute group root that has no tty of its own (a root on a
-tty is already counted through that tty). Ending the host could end every unit below it.
+own tty) or a session, infra or compute group root. Every group root counts on its own,
+whatever tty it shares: a supervisor on the same terminal as the session it watches (a
+timeout wrapper forwarding its signal) would end that session too.
 """
 from process_table import ProcessTable
 from resource_groups import Grouping
@@ -15,15 +16,14 @@ def hosted_units(table: ProcessTable, grouping: Grouping) -> dict[int, int]:
     roots = {group.root.pid: gid for gid, group in grouping.groups.items()}
     units: dict[int, set] = {}
     for pid, row in table.rows.items():
-        if row.tty is not None:
-            unit = ('tty', row.tty)
-        elif pid in roots:
-            unit = ('group', roots[pid])
-        else:
+        found = [('tty', row.tty)] if row.tty is not None else []
+        if pid in roots:
+            found.append(('group', roots[pid]))
+        if not found:
             continue
         for ancestor in table.ancestors(pid):
             if ancestor in table.rows:
-                units.setdefault(ancestor, set()).add(unit)
+                units.setdefault(ancestor, set()).update(found)
     counts = {}
     for pid, found in units.items():
         own = table.rows[pid].tty
