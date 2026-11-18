@@ -1,5 +1,6 @@
 """Process-table and probe fakes for the Resources tests; nothing here reads the live machine."""
 from dataclasses import replace
+import os
 
 from cli_runner import CommandResult
 from panel_contracts import ApiError
@@ -13,15 +14,44 @@ PANEL_PID = 9000
 
 
 def ps_line(pid, ppid, command, uid=UID, nice=0, state='S', cpu=0.0, rss_kb=1024,
-            started=STARTED, pgid=None):
+            started=STARTED, pgid=None, tty='??'):
+    """One line of the main `ps` pass (process_table.FIELDS)."""
     return (f'{pid:>5} {ppid:>5} {pgid or pid:>5} {uid:>5} {nice:>2} {state:<4} {cpu:>5.1f} '
-            f'{rss_kb:>7} {started}     {command}')
+            f'{rss_kb:>7} {tty:<8} {started}     {command}')
 
 
-def make_table(*specs, is_file=lambda _path: False):
-    """specs: (pid, ppid, command) or (pid, ppid, command, {ps_line keyword overrides})."""
-    lines = [ps_line(*spec[:3], **(spec[3] if len(spec) > 3 else {})) for spec in specs]
-    return parse_table('\n'.join(lines), is_file)
+def name_line(pid, name, started=STARTED):
+    """One line of an argv[0] (`comm`) or kernel-name (`ucomm`) pass."""
+    return f'{pid:>5} {started} {name}'
+
+
+def kernel_name_for(argv0):
+    """What the kernel would call a process started as argv0 (its file's base name)."""
+    return os.path.basename(argv0.lstrip('-'))[:16] or 'x'
+
+
+def make_texts(*specs):
+    """The three `ps` outputs for specs: (pid, ppid, command[, overrides]).
+
+    Overrides are ps_line keywords plus `argv0` (default: the command's first word) and
+    `ucomm` (default: argv0's base name).
+    """
+    main, argv0s, kernel = [], [], []
+    for spec in specs:
+        pid, ppid, command = spec[:3]
+        options = dict(spec[3]) if len(spec) > 3 else {}
+        argv0 = options.pop('argv0', command.split(' ', 1)[0])
+        ucomm = options.pop('ucomm', kernel_name_for(argv0))
+        started = options.get('started', STARTED)
+        main.append(ps_line(pid, ppid, command, **options))
+        argv0s.append(name_line(pid, argv0, started))
+        kernel.append(name_line(pid, ucomm, started))
+    return '\n'.join(main), '\n'.join(argv0s), '\n'.join(kernel)
+
+
+def make_table(*specs):
+    """specs: (pid, ppid, command) or (pid, ppid, command, {overrides}); see make_texts."""
+    return parse_table(*make_texts(*specs))
 
 
 class FakeReader:
@@ -30,9 +60,9 @@ class FakeReader:
     def __init__(self, table):
         self.rows = dict(table.rows)
         self.table_calls = 0
-        self.row_calls = []
         self.fail_table = False
-        # Runs after a table read: lets a test change the world between snapshot and signal.
+        # Runs once, after the next table read: lets a test change the world between the
+        # request's first read and the per-target re-reads.
         self.after_table = None
 
     def table(self, timeout=5):
@@ -40,13 +70,10 @@ class FakeReader:
         if self.fail_table:
             raise ApiError(502, 'Process table unavailable')
         snapshot = ProcessTable(dict(self.rows))
-        if self.after_table:
-            self.after_table(self)
+        hook, self.after_table = self.after_table, None
+        if hook:
+            hook(self)
         return snapshot
-
-    def row(self, pid, timeout=5):
-        self.row_calls.append(pid)
-        return self.rows.get(pid)
 
     def reparent_children(self, pid, new_parent=1):
         for child, row in list(self.rows.items()):

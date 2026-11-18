@@ -7,14 +7,28 @@ from dataclasses import replace
 import signal
 import subprocess
 import unittest
+from unittest import mock
 
 from cli_runner import CliRunner
 from panel_contracts import ApiError
-from process_signals import NICE_FLOOR, ProcessSignaller
+from process_signals import NICE_FLOOR, TREE_TOO_LARGE, ProcessSignaller
 from process_table import ProcessReader
 from resources_adapter import ResourcesAdapter
 from resources_fixtures import LATER, PANEL_PID, STARTED, FakeReader, make_table
 from signal_policy import SHELL, SignalPolicy
+from signal_recheck import (MUTATION_BUDGET, STOPPED_NESTED, STOPPED_ROOT, STOPPED_TIME,
+                            STOPPED_UNREADABLE)
+
+COUNTS = ('applied', 'gone', 'changed', 'skipped', 'refused', 'unchanged')
+
+
+def counts(stopped=None, **values):
+    return {**{key: values.get(key, 0) for key in COUNTS}, 'stopped': stopped}
+
+
+def row_with(row, command, **overrides):
+    """The same process (pid and start) after an exec into another program."""
+    return replace(make_table((row.pid, row.ppid, command)).rows[row.pid], **overrides)
 
 WORLD = (
     (1, 0, '/sbin/launchd', {'uid': 0}),
@@ -104,20 +118,23 @@ class SignalTests(unittest.TestCase):
             del self.reader.rows[pid]
         self.signaller.kill = kill
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, {'applied': 4, 'gone': 0, 'changed': 0, 'skipped': 0,
-                                  'refused': 0, 'unchanged': 0})
+        self.assertEqual(result, counts(applied=4))
         self.assertEqual([pid for pid, _ in self.recorder.calls], [203, 201, 202, 200])
         self.assertTrue(all(sig == signal.SIGTERM for _, sig in self.recorder.calls))
+        # One full re-read per target, after the request's own read.
+        self.assertEqual(self.reader.table_calls, 5)
 
     def test_root_first_order_would_leave_children_running(self):
-        # The same fixture under pause (root first) shows why terminate must not use it.
+        # The same reparenting fixture under pause (root first) shows why terminate must not
+        # use it: once the root's children are reparented, none of the subtree is the
+        # session's any more, the grandchild included, so only the root is signalled.
         def kill(pid, sig):
             self.recorder.calls.append((pid, sig))
             self.reader.reparent_children(pid)
         self.signaller.kill = kill
         result = self.signaller.mutate(body(200, 'pause', 'tree'))
-        self.assertEqual([pid for pid, _ in self.recorder.calls], [200, 203])
-        self.assertEqual(result['changed'], 2)
+        self.assertEqual([pid for pid, _ in self.recorder.calls], [200])
+        self.assertEqual(result, counts(applied=1, changed=3))
 
     def test_pause_goes_root_first_and_resume_deepest_first(self):
         self.signaller.mutate(body(200, 'pause', 'tree'))
@@ -135,19 +152,89 @@ class SignalTests(unittest.TestCase):
             rows = reader.rows
             rows[203] = replace(rows[203], started=LATER)
             rows[202] = replace(rows[202], uid=502)
-            rows[201] = replace(rows[201], argv_text='/usr/bin/tmux', executable='/usr/bin/tmux')
+            rows[201] = row_with(rows[201], '/usr/bin/tmux')
         self.reader.after_table = change_world
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result['changed'], 3)
-        self.assertEqual(result['applied'], 1)
+        self.assertEqual(result, counts(applied=1, changed=3))
         self.assertEqual(self.recorder.calls, [(200, signal.SIGTERM)])
-        self.assertEqual(self.reader.row_calls, [203, 201, 202, 200])
 
     def test_a_member_reparented_out_of_the_tree_is_not_signalled(self):
         self.reader.after_table = lambda reader: reader.reparent_children(202)
         result = self.signaller.mutate(body(200, scope='tree'))
         self.assertEqual(result['changed'], 1)
         self.assertNotIn(203, [pid for pid, _ in self.recorder.calls])
+
+    def test_a_grandchild_whose_parent_left_the_session_is_not_signalled(self):
+        # 202 is reparented out of the session; its child 203 still has 202 as its parent,
+        # which was in the planned set, but its ancestry no longer reaches the root.
+        self.reader.after_table = lambda reader: reader.rows.update(
+            {202: replace(reader.rows[202], ppid=1)})
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(applied=2, changed=2))
+        self.assertEqual(sorted(pid for pid, _ in self.recorder.calls), [200, 201])
+
+    def test_a_gap_in_a_members_ancestry_refuses_it(self):
+        self.reader.after_table = lambda reader: reader.rows.pop(202)
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(applied=2, gone=1, changed=1))
+        self.assertNotIn(203, [pid for pid, _ in self.recorder.calls])
+
+    def test_a_member_that_execs_into_a_session_stops_the_whole_action(self):
+        self.reader.after_table = lambda reader: reader.rows.update(
+            {202: row_with(reader.rows[202], 'claude -p nested')})
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(changed=4, stopped=STOPPED_NESTED))
+        self.assertEqual(self.recorder.calls, [])
+
+    def test_a_session_appearing_midway_stops_the_rest(self):
+        def kill(pid, sig):
+            self.recorder.calls.append((pid, sig))
+            if pid == 203:
+                self.reader.rows.update(make_table((209, 201, 'codex --no-alt-screen')).rows)
+        self.signaller.kill = kill
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(self.recorder.calls, [(203, signal.SIGTERM)])
+        self.assertEqual(result, counts(applied=1, changed=3, stopped=STOPPED_NESTED))
+
+    def test_a_root_that_execs_into_an_app_server_stops_the_whole_action(self):
+        self.reader.after_table = lambda reader: reader.rows.update(
+            {200: row_with(reader.rows[200], '/x/codex app-server --listen x')})
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(changed=4, stopped=STOPPED_ROOT))
+        self.assertEqual(self.recorder.calls, [])
+
+    def test_a_process_that_execs_into_something_protected_is_refused(self):
+        self.reader.after_table = lambda reader: reader.rows.update(
+            {300: row_with(reader.rows[300], 'innocent', kernel_name='tmux')})
+        self.assertEqual(self.signaller.mutate(body(300)), counts(changed=1))
+        self.assertEqual(self.recorder.calls, [])
+
+    def test_a_process_that_starts_hosting_a_terminal_is_refused(self):
+        self.reader.after_table = lambda reader: reader.rows.update(
+            make_table((310, 300, '-zsh', {'tty': 'ttys020'})).rows)
+        self.assertEqual(self.signaller.mutate(body(300)), counts(changed=1))
+
+    def test_an_unreadable_re_read_or_the_time_bound_stops_the_action(self):
+        def fail(reader):
+            reader.fail_table = True
+        self.reader.after_table = fail
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(changed=4, stopped=STOPPED_UNREADABLE))
+        self.reader.fail_table = False
+        now = [0.0]
+        self.signaller.clock = lambda: now[0]
+
+        def kill(pid, sig):
+            self.recorder.calls.append((pid, sig))
+            now[0] += MUTATION_BUDGET
+        self.signaller.kill = kill
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(applied=1, skipped=3, stopped=STOPPED_TIME))
+
+    def test_a_tree_above_the_size_cap_is_refused(self):
+        with mock.patch('process_signals.TREE_TARGET_LIMIT', 3):
+            self.assertStatus(403, body(200, scope='tree'))
+        self.assertIn('processes in this session', TREE_TOO_LARGE)
 
     def test_blocked_members_are_skipped_and_counted(self):
         self.reader.rows.update(make_table((205, 200, '/usr/bin/tmux new')).rows)
@@ -171,8 +258,7 @@ class SignalTests(unittest.TestCase):
     def test_gone_and_refused_are_counted_without_raising(self):
         self.recorder.failures = {203: ProcessLookupError(), 202: PermissionError()}
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, {'applied': 2, 'gone': 1, 'changed': 0, 'skipped': 0,
-                                  'refused': 1, 'unchanged': 0})
+        self.assertEqual(result, counts(applied=2, gone=1, refused=1))
         del self.reader.rows[203]
         self.recorder.failures = {}
         self.assertEqual(self.signaller.mutate(body(202))['applied'], 1)

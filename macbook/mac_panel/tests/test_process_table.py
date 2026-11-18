@@ -1,28 +1,36 @@
-"""ps parsing, the executable boundary and display names that never carry arguments."""
+"""ps parsing, the argv[0] boundary from its own pass, and names that never carry arguments."""
 import unittest
 
 from cli_runner import CommandResult
 from panel_contracts import ApiError
-from process_table import (PS_ENV, TABLE_COMMAND, ProcessReader, display_name, parse_row,
-                           parse_table, resolve_executable)
-from resources_fixtures import STARTED, ArgvRunner, make_table, ps_line
+from process_table import (ARGV0_COMMAND, KERNEL_NAME_COMMAND, PS_ENV, TABLE_COMMAND,
+                           ProcessReader, display_name, normal_started, parse_table)
+from resources_fixtures import STARTED, ArgvRunner, make_table, make_texts, name_line, ps_line
 
 
-def row_for(command, is_file=lambda _path: False):
-    return parse_row(ps_line(10, 1, command), is_file)
+def row_for(command, **overrides):
+    return make_table((10, 1, command, overrides)).rows[10]
+
+
+def reader_for(*specs, answers=None):
+    texts = make_texts(*specs)
+    runner = ArgvRunner({argv: text + '\n' for argv, text in
+                         zip((TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND), texts)})
+    runner.answers.update(answers or {})
+    return ProcessReader(runner), runner
 
 
 class PsParsingTests(unittest.TestCase):
-    def test_fields_lstart_and_command_remainder(self):
-        line = ps_line(4242, 1, 'claude --permission-mode bypassPermissions', nice=5, state='T+',
-                       cpu=12.5, rss_kb=2048, pgid=4000)
-        row = parse_row(line)
+    def test_fields_lstart_tty_and_command_remainder(self):
+        row = make_table((4242, 1, 'claude --permission-mode bypassPermissions',
+                          {'nice': 5, 'state': 'T+', 'cpu': 12.5, 'rss_kb': 2048, 'pgid': 4000,
+                           'tty': 'ttys004'})).rows[4242]
         self.assertEqual((row.pid, row.ppid, row.pgid, row.uid, row.nice), (4242, 1, 4000, 501, 5))
         self.assertTrue(row.stopped)
-        self.assertEqual(row.cpu, 12.5)
-        self.assertEqual(row.rss_bytes, 2048 * 1024)
-        self.assertEqual(row.started, STARTED)
+        self.assertEqual((row.cpu, row.rss_bytes, row.started, row.tty), (12.5, 2048 * 1024, STARTED, 'ttys004'))
         self.assertEqual(row.argv_text, 'claude --permission-mode bypassPermissions')
+        self.assertEqual((row.executable, row.arguments), ('claude', ('--permission-mode', 'bypassPermissions')))
+        self.assertIsNone(row_for('sleep 5').tty)
 
     def test_awkward_commands_keep_their_text_and_never_shift_fields(self):
         commands = ['/bin/echo  two  spaces', 'node ünïcødé → 名前.js', '/usr/bin/tool 1 2 3 4 5 6 7 8',
@@ -32,24 +40,32 @@ class PsParsingTests(unittest.TestCase):
         self.assertEqual([table.rows[100 + i].argv_text for i in range(len(commands))], commands)
         self.assertTrue(all(row.cpu == 0.0 and row.uid == 501 for row in table.rows.values()))
 
+    def test_argv0_from_its_own_pass_bounds_a_path_with_spaces(self):
+        app = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        row = row_for(f'{app} --type=renderer --secret value', argv0=app)
+        self.assertEqual((row.exe, row.arguments_text), ('Google Chrome', ' --type=renderer --secret value'))
+        self.assertEqual(display_name(row), 'Google Chrome')
+
+    def test_rows_that_do_not_join_on_pid_and_start_are_malformed(self):
+        main, argv0s, kernel = make_texts((5, 1, 'ok'), (6, 1, 'sleep 9'), (7, 1, 'other'))
+        # pid 6's argv[0] row is from a different process (another start); pid 7 has none.
+        argv0s = '\n'.join([name_line(5, 'ok'), name_line(6, 'sleep', 'Wed Nov 18 04:11:36 2026')])
+        table = parse_table(main, argv0s, kernel)
+        self.assertEqual((sorted(table.rows), table.malformed), ([5], 2))
+        # A command that does not begin with its argv[0] is a reused pid between passes.
+        main, argv0s, kernel = make_texts((8, 1, 'vim notes', {'argv0': 'emacs'}))
+        self.assertEqual(parse_table(main, argv0s, kernel).malformed, 1)
+
     def test_malformed_rows_are_dropped_and_counted(self):
-        good = ps_line(5, 1, 'ok')
-        text = '\n'.join([good, 'garbage', '  7 1 7 501 0 S 0.0 12 Tue Nov 17 22:19:53',
+        main, argv0s, kernel = make_texts((5, 1, 'ok'), (11, 1, 'later'))
+        lines = main.splitlines()
+        text = '\n'.join([lines[0], 'garbage', '  7 1 7 501 0 S 0.0 12 ?? Tue Nov 17 22:19:53',
                           ps_line(8, 1, 'x').replace('Tue', 'Xyz'), ps_line(9, 1, 'y').replace(' 0.0 ', ' -1 '),
-                          good, '', ps_line(11, 1, 'later')])
-        table = parse_table(text)
+                          lines[0], '', lines[1]])
+        table = parse_table(text, argv0s, kernel)
         self.assertEqual(sorted(table.rows), [5, 11])
         # A duplicate pid is malformed too: the first row wins.
         self.assertEqual(table.malformed, 5)
-
-    def test_paths_with_spaces_resolve_to_the_shortest_existing_file(self):
-        app = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-        argv = f'{app} --type=renderer --secret value'
-        self.assertEqual(resolve_executable(argv, lambda path: path == app), app)
-        self.assertEqual(resolve_executable(argv, lambda _path: False), '/Applications/Google')
-        self.assertEqual(resolve_executable('/bin/zsh -c x', lambda path: path == '/bin/zsh'), '/bin/zsh')
-        row = row_for(argv, lambda path: path == app)
-        self.assertEqual(display_name(row), 'Google Chrome')
 
     def test_tree_helpers(self):
         table = make_table((1, 0, '/sbin/launchd'), (10, 1, 'app'), (11, 10, 'child'),
@@ -59,28 +75,53 @@ class PsParsingTests(unittest.TestCase):
         self.assertEqual(table.ancestors(12), [11, 10, 1])
         self.assertEqual(table.top_ancestor(12), 10)
         self.assertEqual(table.top_ancestor(20), 20)
+        self.assertEqual(table.complete_chain(12), [11, 10, 1])
+        self.assertTrue(table.chain_reaches(12, 10))
+        self.assertFalse(table.chain_reaches(20, 10))
+
+    def test_a_missing_parent_breaks_the_chain_but_not_the_display_ancestor(self):
+        table = make_table((1, 0, '/sbin/launchd'), (10, 1, 'app'), (12, 11, 'orphaned view'))
+        # 11 exited (or its row was unreadable): the highest ancestor actually present is 12.
+        self.assertEqual(table.top_ancestor(12), 12)
+        self.assertIsNone(table.complete_chain(12))
+        self.assertFalse(table.chain_reaches(12, 10))
+        self.assertIsNone(make_table((10, 1, 'no launchd row')).complete_chain(10))
 
     def test_reader_uses_fixed_argv_and_environment(self):
-        runner = ArgvRunner({TABLE_COMMAND: ps_line(5, 1, 'ok') + '\n'})
-        table = ProcessReader(runner, is_file=lambda _path: False).table()
-        self.assertEqual(list(table.rows), [5])
-        runner = ArgvRunner({TABLE_COMMAND: CommandResult(1, '', 'ps: failed')})
-        with self.assertRaises(ApiError) as caught:
-            ProcessReader(runner).table()
-        self.assertEqual(caught.exception.status, 502)
+        reader, runner = reader_for((5, 1, 'ok'))
+        self.assertEqual(list(reader.table().rows), [5])
+        self.assertEqual(runner.calls, [TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND])
         self.assertEqual(PS_ENV, {'LC_ALL': 'C', 'TZ': 'UTC'})
 
-    def test_single_row_read_returns_none_for_a_gone_pid(self):
-        argv = ('/bin/ps', '-ww', '-o', TABLE_COMMAND[-1], '-p', '77')
-        reader = ProcessReader(ArgvRunner({argv: CommandResult(1, '')}))
-        self.assertIsNone(reader.row(77))
-        reader = ProcessReader(ArgvRunner({argv: ps_line(77, 1, 'sleep 600')}))
-        self.assertEqual(reader.row(77).exe, 'sleep')
+    def assertFails(self, reader):
+        with self.assertRaises(ApiError) as caught:
+            reader.table()
+        self.assertEqual(caught.exception.status, 502)
+
+    def test_a_failed_or_timed_out_pass_is_502(self):
+        self.assertFails(reader_for((5, 1, 'ok'), answers={TABLE_COMMAND: CommandResult(1, '', 'ps: failed')})[0])
+        # The runner reports a timeout as 504; the section's declared failure is 502.
+        self.assertFails(reader_for((5, 1, 'ok'), answers={ARGV0_COMMAND: ApiError(504, 'timed out')})[0])
+
+    def test_a_table_with_no_usable_rows_or_mostly_malformed_is_502(self):
+        self.assertFails(reader_for((5, 1, 'ok'), answers={TABLE_COMMAND: 'garbage\nmore garbage\n'})[0])
+        good = [(100 + n, 1, f'tool{n}') for n in range(100)]
+        main, argv0s, kernel = make_texts(*good)
+        broken = '\n'.join(argv0s.splitlines()[:80])
+        reader = reader_for(*good, answers={ARGV0_COMMAND: broken + '\n'})[0]
+        self.assertFails(reader)
+        tolerable = '\n'.join(argv0s.splitlines()[:95])
+        self.assertEqual(len(reader_for(*good, answers={ARGV0_COMMAND: tolerable})[0].table().rows), 95)
+
+    def test_start_times_normalise_day_padding(self):
+        self.assertEqual(normal_started('Mon Nov  2 01:00:00 2026'), 'Mon Nov 2 01:00:00 2026')
+        for bad in (None, True, 1, '', 'yesterday', 'Mon Nov 2 01:00:00'):
+            self.assertIsNone(normal_started(bad), bad)
 
 
 class DisplayNameTests(unittest.TestCase):
-    def assertName(self, command, expected):
-        row = row_for(command)
+    def assertName(self, command, expected, **overrides):
+        row = row_for(command, **overrides)
         self.assertEqual(display_name(row), expected, command)
         self.assertEqual(row.name, expected)
 
@@ -89,25 +130,46 @@ class DisplayNameTests(unittest.TestCase):
         self.assertName('/usr/local/bin/mysql --password hunter2 --user root', 'mysql')
         self.assertName('grep needle /private/haystack positional text', 'grep')
         self.assertName('-zsh', 'zsh')
-        self.assertName('npm exec kapture-mcp@latest bridge', 'npm')
 
-    def test_interpreters_show_their_script_or_module_only(self):
+    def test_a_title_in_argv0_gives_way_to_the_kernel_name(self):
+        # Programs that rewrite argv[0] can put arguments in it.
+        self.assertName('npm exec kapture-mcp@latest bridge', 'node',
+                        argv0='npm exec kapture-mcp@latest bridge', ucomm='node')
+        self.assertName('tmux: server', 'tmux', argv0='tmux: server', ucomm='tmux')
+        self.assertName('ssh: /Users/me/.ssh/sock [mux]', 'ssh', argv0='ssh: /Users/me/.ssh/sock [mux]', ucomm='ssh')
+
+    def test_interpreters_show_a_confident_script_or_module_only(self):
         self.assertName('/usr/bin/python3 -P -m van_compute.worker --serve --token abc', 'python3 -m van_compute.worker')
         self.assertName('/opt/x/Python -B /Users/me/dev/server.py --password X', 'Python server.py')
         self.assertName('node /Users/me/tools/script.js secret-argument', 'node script.js')
-        self.assertName('node --require /tmp/hook.js app.mjs --key value', 'node app.mjs')
-        self.assertName('python3 -c "import os; print(os.environ[\'TOKEN\'])"', 'python3 -c')
-        self.assertName('/bin/bash -lc "curl https://x?token=abc"', 'bash -lc')
-        self.assertName('/bin/zsh -c source ~/.claude/shell-snapshots/snap.sh', 'zsh -c')
         self.assertName('python3 -Bm package.cli run', 'python3 -m package.cli')
+        self.assertName('python3 -OO -I tool.py', 'python3 tool.py')
+        self.assertName('/bin/sh /Users/me/Library/Caches/van-compute/jobs/j1/run.sh', 'sh run.sh')
 
-    def test_interpreter_operands_that_are_not_scripts_are_hidden(self):
-        # An unknown option's value lands in the script position; it is not a path, so it stays hidden.
-        self.assertName('node --password hunter2 app.js', 'node')
-        self.assertName('python3 my secret positional text', 'python3')
-        self.assertName('python3 -m "os; import x"', 'python3 -m')
-        self.assertName('ruby -e "puts ENV[\'SECRET\']"', 'ruby -e')
-        self.assertName('perl', 'perl')
+    def test_anything_not_parsed_with_confidence_shows_the_bare_executable(self):
+        cases = {
+            'node --password hunter2 app.js': 'node',
+            'node --require /tmp/hook.js app.mjs --key value': 'node',
+            'node --redirect-warnings=/Users/me/secret-notes.js app.js': 'node',
+            'node --redirect-warnings /Users/me/secret-notes.js app.js': 'node',
+            'bash --rcfile /Users/me/private-rc.sh': 'bash',
+            'perl -esleep': 'perl',
+            'perl -e "print $ENV{SECRET}"': 'perl',
+            'ruby -e "puts ENV[\'SECRET\']"': 'ruby',
+            'python3 -c "import os; print(os.environ[\'TOKEN\'])"': 'python3',
+            '/bin/bash -lc "curl https://x?token=abc"': 'bash',
+            '/bin/zsh -c source ~/.claude/shell-snapshots/snap.sh': 'zsh',
+            'python3 -W ignore secret.py': 'python3',
+            'python3 -mvenv /tmp/x': 'python3',
+            'python3 my secret positional text': 'python3',
+            'python3 -m "os; import x"': 'python3',
+            # One argument with a space: "/Users/me/tax notes/run.py" arrives cut at the space.
+            'python3 /Users/me/tax notes/run.py': 'python3',
+            'node /tmp/a$b.js': 'node',
+            'perl': 'perl',
+        }
+        for command, expected in cases.items():
+            self.assertName(command, expected)
 
     def test_argument_text_is_kept_out_of_repr(self):
         row = row_for('claude -p "secret prompt"')

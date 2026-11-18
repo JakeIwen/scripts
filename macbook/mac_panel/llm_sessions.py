@@ -1,14 +1,17 @@
 """Name Claude and Codex sessions from their own records, never from argv or transcripts.
 
 Claude Code keeps `~/.claude/sessions/<pid>.json` per interactive session (name, status,
-cwd); only those `.json` files are opened, never the `.key` files beside them. Codex keeps
-no per-pid record: its thread title is found by locating the session's rollout file (open
-in the process, or else the one whose timestamp matches the process start) and looking the
-rollout id up in `~/.codex/session_index.jsonl`. Codex naming is best-effort under a time
-budget and falls back to "codex · <cwd name>"; it never delays the core numbers.
+cwd); only those `.json` files are opened, by name, for pids that are `claude` processes in
+the current table, never the `.key` files beside them. Codex keeps no per-pid record: its
+thread title is found by locating the session's rollout file and looking the rollout id up
+in `~/.codex/session_index.jsonl`. A rollout the process holds open (lsof) proves the match;
+a rollout whose timestamp matches the process start is only a guess, used when exactly one
+unclaimed process and one unclaimed rollout fall in the window, never cached, and marked as
+such (`NameSource`) so a destructive confirmation can say the name is unproven. Naming runs
+under a time budget and falls back to "codex · <cwd name>"; it never delays the core numbers.
 """
-from collections import OrderedDict
 from dataclasses import dataclass
+from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -17,27 +20,35 @@ import stat
 import time
 
 from panel_contracts import ApiError
-from process_table import ProcessRow, started_epoch
+from process_table import ProcessRow, normal_started, started_epoch
 from resource_groups import Kind, codex_detail
 
 CLAUDE_SESSIONS = Path('.claude/sessions')
 CODEX_INDEX = Path('.codex/session_index.jsonl')
 CODEX_ROLLOUTS = Path('.codex/sessions')
-REGISTRY_NAME = re.compile(r'(\d{1,10})\.json')
 REGISTRY_LIMIT = 64 * 1024
-REGISTRY_FILES = 512
+# At most this many registry files are opened per snapshot (one per Claude process).
+REGISTRY_FILES = 64
 INDEX_LIMIT = 4 * 1024 * 1024
 ROLLOUT_NAME = re.compile(r'rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-'
                           r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl')
 ROLLOUT_STAMP = '%Y-%m-%dT%H-%M-%S'
 # Codex creates its rollout within a second or two of starting.
 ROLLOUT_WINDOW = 5
-ROLLOUT_LISTING = 5000
+# Directory entries examined per snapshot across the dated rollout folders.
+ROLLOUT_SCAN = 2000
 NAME_LIMIT = 120
-NAME_CACHE = 256
 LSOF = '/usr/sbin/lsof'
 LSOF_FLOOR = 0.05
 SESSION_STATUSES = frozenset(('busy', 'idle'))
+
+
+class NameSource(str, Enum):
+    """How a session's name was established; the page shows unproven names as such."""
+    REGISTRY = 'registry'          # Claude's own record for this exact process
+    ROLLOUT_OPEN = 'rollout-open'  # the Codex rollout this process holds open
+    ROLLOUT_TIME = 'rollout-time'  # the only Codex rollout created near its start: a guess
+    FALLBACK = 'fallback'          # kind and working directory only
 
 
 @dataclass(frozen=True)
@@ -46,6 +57,7 @@ class SessionInfo:
     detail: str
     status: str | None
     cwd: str | None
+    source: NameSource = NameSource.FALLBACK
 
 
 @dataclass(frozen=True)
@@ -85,25 +97,18 @@ def path_name(cwd) -> str | None:
     return (os.path.basename(cwd.rstrip('/')) or cwd) if cwd else None
 
 
-def read_claude_registry(home: Path) -> dict[int, dict]:
+def read_claude_registry(home: Path, pids, deadline, clock) -> dict[int, dict]:
+    """`<pid>.json` for each given pid, opened by name; no directory listing."""
     directory = home / CLAUDE_SESSIONS
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return {}
     entries = {}
-    for name in names:
-        match = REGISTRY_NAME.fullmatch(name)
-        if not match:
-            continue
-        if len(entries) >= REGISTRY_FILES:
+    for pid in sorted(pids)[:REGISTRY_FILES]:
+        if clock() >= deadline:
             break
-        raw = bounded_read(directory / name, REGISTRY_LIMIT)
+        raw = bounded_read(directory / f'{int(pid)}.json', REGISTRY_LIMIT)
         try:
             value = json.loads(raw) if raw else None
         except ValueError:
             continue
-        pid = int(match.group(1))
         if isinstance(value, dict) and value.get('pid') == pid:
             entries[pid] = value
     return entries
@@ -116,9 +121,11 @@ def claude_info(row: ProcessRow, entry: dict | None, cwd: str | None) -> Session
         return SessionInfo(f'claude · {name}' if name else 'claude', 'headless', None, cwd)
     cwd = short_path(entry.get('cwd'))
     status = entry.get('status')
+    # Each field is checked on its own: a malformed one is dropped, not fatal.
     return SessionInfo(short_text(entry.get('name')) or path_name(cwd) or 'claude',
                        short_text(entry.get('kind')) or 'interactive',
-                       status if status in SESSION_STATUSES else None, cwd)
+                       status if isinstance(status, str) and status in SESSION_STATUSES else None,
+                       cwd, NameSource.REGISTRY)
 
 
 def short_path(value) -> str | None:
@@ -152,17 +159,25 @@ def rollout_stamp_epoch(stamp) -> float | None:
         return None
 
 
+def rollout_days(starts) -> list[str]:
+    """The dated folders a rollout created at most ROLLOUT_WINDOW after a start can be in."""
+    days = set()
+    for start in starts:
+        days.update(time.strftime('%Y/%m/%d', time.localtime(start + offset))
+                    for offset in (0, ROLLOUT_WINDOW))
+    return sorted(days)
+
+
 class CodexNamer:
+    """Codex titles: proven by an open rollout, else a guarded start-time match, else none.
+
+    Nothing is cached between snapshots except the session index (by mtime and size): an
+    interactive Codex process can move to another thread, so only a current proof counts.
+    """
+
     def __init__(self, runner, home: Path, clock=time.monotonic):
         self.runner, self.home, self.clock = runner, home, clock
-        self.cache: OrderedDict[tuple[int, str], CodexFacts] = OrderedDict()
         self.index_key, self.index = None, {}
-
-    def remember(self, key, facts):
-        self.cache[key] = facts
-        self.cache.move_to_end(key)
-        while len(self.cache) > NAME_CACHE:
-            self.cache.popitem(last=False)
 
     def lsof(self, pids, deadline) -> dict[int, CodexFacts]:
         remaining = deadline - self.clock()
@@ -176,25 +191,40 @@ class CodexNamer:
         # lsof exits 1 when any pid has gone; the rest of its output still stands.
         return parse_lsof(result.stdout)
 
-    def rollout_by_start(self, row, claimed) -> str | None:
-        start = started_epoch(row.started)
-        if start is None:
-            return None
-        days = {time.strftime('%Y/%m/%d', time.localtime(start + offset))
-                for offset in (-ROLLOUT_WINDOW, 0, ROLLOUT_WINDOW)}
-        matches = set()
-        for day in days:
+    def rollout_stamps(self, starts, deadline) -> dict[str, float]:
+        """rollout id -> creation stamp, from the dated folders near the given starts."""
+        stamps, examined = {}, 0
+        for day in rollout_days(starts):
             try:
-                names = os.listdir(self.home / CODEX_ROLLOUTS / day)[:ROLLOUT_LISTING]
+                entries = os.scandir(self.home / CODEX_ROLLOUTS / day)
             except OSError:
                 continue
-            for name in names:
-                match = ROLLOUT_NAME.fullmatch(name)
-                stamp = match and rollout_stamp_epoch(match.group(1))
-                if stamp is not None and abs(stamp - start) <= ROLLOUT_WINDOW:
-                    matches.add(match.group(2))
-        matches -= claimed
-        return matches.pop() if len(matches) == 1 else None
+            with entries:
+                for entry in entries:
+                    examined += 1
+                    if examined > ROLLOUT_SCAN or self.clock() >= deadline:
+                        return stamps
+                    match = ROLLOUT_NAME.fullmatch(entry.name)
+                    stamp = match and rollout_stamp_epoch(match.group(1))
+                    if stamp is not None:
+                        stamps[match.group(2)] = stamp
+        return stamps
+
+    def guesses(self, rows, claimed, deadline) -> dict[int, str]:
+        """pid -> rollout id where exactly one process and one unclaimed rollout share a window."""
+        starts = {row.pid: start for row in rows if (start := started_epoch(row.started)) is not None}
+        if not starts or self.clock() >= deadline:
+            return {}
+        stamps = {rollout: stamp for rollout, stamp in self.rollout_stamps(starts.values(), deadline).items()
+                  if rollout not in claimed}
+        near = lambda at, values: [key for key, value in values.items() if abs(value - at) <= ROLLOUT_WINDOW]
+        result = {}
+        for pid, start in starts.items():
+            candidates = near(start, stamps)
+            if (len(near(start, starts)) == 1 and len(candidates) == 1
+                    and near(stamps[candidates[0]], starts) == [pid]):
+                result[pid] = candidates[0]
+        return result
 
     def thread_names(self) -> dict[str, str]:
         path = self.home / CODEX_INDEX
@@ -220,39 +250,28 @@ class CodexNamer:
             self.index_key, self.index = key, names
         return self.index
 
-    def unresolved(self, rows: list[ProcessRow]) -> list[int]:
-        """Pids whose rollout is not cached yet: the ones worth an lsof lookup."""
-        return [row.pid for row in rows
-                if not (facts := self.cache.get((row.pid, row.started))) or not facts.rollout]
-
     def describe(self, rows: list[ProcessRow], found: dict[int, CodexFacts],
                  deadline) -> dict[int, SessionInfo]:
         if not rows:
             return {}
-        known = {row.pid: self.cache.get((row.pid, row.started)) for row in rows}
-        claimed = {facts.rollout for facts in known.values() if facts and facts.rollout}
-        result = {}
-        for row in rows:
-            facts = known[row.pid] or CodexFacts(None, None)
-            fresh = found.get(row.pid, CodexFacts(None, None))
-            rollout = facts.rollout or fresh.rollout
-            if rollout is None and self.clock() < deadline:
-                rollout = self.rollout_by_start(row, claimed)
-            if rollout:
-                claimed.add(rollout)
-            facts = CodexFacts(rollout, facts.cwd or fresh.cwd)
-            if facts.rollout or facts.cwd:
-                self.remember((row.pid, row.started), facts)
-            result[row.pid] = facts
+        facts = {row.pid: found.get(row.pid, CodexFacts(None, None)) for row in rows}
+        # Rollouts proven open by any process are reserved before any start-time guess.
+        claimed = {item.rollout for item in facts.values() if item.rollout}
+        unproven = [row for row in rows if not facts[row.pid].rollout]
+        guessed = self.guesses(unproven, claimed, deadline)
         names = self.thread_names() if self.clock() < deadline else self.index
-        return {row.pid: codex_info(row, result[row.pid], names) for row in rows}
+        return {row.pid: codex_info(row, facts[row.pid], guessed.get(row.pid), names)
+                for row in rows}
 
 
-def codex_info(row, facts: CodexFacts, names) -> SessionInfo:
-    title = names.get(facts.rollout) if facts.rollout else None
+def codex_info(row, facts: CodexFacts, guessed: str | None, names) -> SessionInfo:
     place = path_name(facts.cwd)
     fallback = f'codex · {place}' if place else 'codex'
-    return SessionInfo(title or fallback, codex_detail(row), None, facts.cwd)
+    for rollout, source in ((facts.rollout, NameSource.ROLLOUT_OPEN),
+                            (guessed, NameSource.ROLLOUT_TIME)):
+        if rollout and (title := names.get(rollout)):
+            return SessionInfo(title, codex_detail(row), None, facts.cwd, source)
+    return SessionInfo(fallback, codex_detail(row), None, facts.cwd, NameSource.FALLBACK)
 
 
 class SessionDirectory:
@@ -263,12 +282,12 @@ class SessionDirectory:
         self.codex = CodexNamer(runner, home, clock)
 
     def describe(self, roots: dict[int, tuple[Kind, ProcessRow]], deadline) -> dict[int, SessionInfo]:
-        registry = read_claude_registry(self.home)
         claude = {pid: row for pid, (kind, row) in roots.items() if kind is Kind.CLAUDE}
+        registry = read_claude_registry(self.home, claude, deadline, self.clock)
         headless = [pid for pid, row in claude.items() if not registered(row, registry.get(pid))]
         codex = [row for kind, row in roots.values() if kind is Kind.CODEX]
-        # One lsof call covers headless Claude cwds and uncached Codex rollouts.
-        found = self.codex.lsof(headless + self.codex.unresolved(codex), deadline)
+        # One lsof call covers headless Claude cwds and Codex rollouts.
+        found = self.codex.lsof(headless + [row.pid for row in codex], deadline)
         result = {pid: claude_info(row, registry.get(pid), found[pid].cwd if pid in found else None)
                   for pid, row in claude.items()}
         result.update(self.codex.describe(codex, found, deadline))
@@ -276,5 +295,8 @@ class SessionDirectory:
 
 
 def registered(row, entry) -> bool:
-    proc_start = entry.get('procStart') if entry else None
-    return entry is not None and not (isinstance(proc_start, str) and proc_start != row.started)
+    """The entry is this process's own: a well-formed `procStart` equal to its start time."""
+    if not isinstance(entry, dict):
+        return False
+    proc_start = normal_started(entry.get('procStart'))
+    return proc_start is not None and proc_start == normal_started(row.started)

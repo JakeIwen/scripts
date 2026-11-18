@@ -6,9 +6,11 @@ merely mentions `van_compute.worker` or `model-gateway.js` is not grouped with t
 """
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 import re
 
-from process_table import Family, ProcessRow, ProcessTable
+from process_invocation import Family
+from process_table import ProcessRow, ProcessTable
 
 
 class Kind(str, Enum):
@@ -42,7 +44,9 @@ INFRA_SUBCOMMANDS = {('codex', CODEX_APP_SERVER): 'Codex app server'}
 
 COMPUTE_MODULE = 'van_compute.worker'
 COMPUTE_WORKER_LABEL = 'worker'
-JOB_PATH = re.compile(r'Caches/van-compute/jobs/([A-Za-z0-9._-]{1,80})(?:/|\s|$)')
+# Relative to the home directory; a job is named only from an argument under this root.
+JOBS_ROOT = Path('Library/Caches/van-compute/jobs')
+JOB_NAME = re.compile(r'[A-Za-z0-9._-]{1,80}')
 # ssh options that consume the next token; a control master runs with -N and -M.
 SSH_VALUE_LETTERS = frozenset('BbcDEeFIiJLlmOoPpQRSWw')
 SSH_MASTER_FLAGS = frozenset('NM')
@@ -58,10 +62,17 @@ def codex_subcommand(row: ProcessRow) -> str | None:
     return None
 
 
+def is_codex_app_server(row: ProcessRow) -> bool:
+    # A `-c` value containing a space shifts every later token, so the positional
+    # subcommand can be misread; any whole `app-server` token also counts. The error then
+    # falls on the side of infra (never signalled), not on a session tree's actions.
+    return codex_subcommand(row) == CODEX_APP_SERVER or CODEX_APP_SERVER in row.arguments
+
+
 def session_kind(row: ProcessRow) -> Kind | None:
     if row.exe == 'claude':
         return Kind.CLAUDE
-    if row.exe == 'codex' and codex_subcommand(row) != CODEX_APP_SERVER:
+    if row.exe == 'codex' and not is_codex_app_server(row):
         return Kind.CODEX
     return None
 
@@ -78,7 +89,7 @@ def infra_label(row: ProcessRow) -> str | None:
     if row.exe in INFRA_EXECUTABLES:
         return INFRA_EXECUTABLES[row.exe]
     if row.exe == 'codex':
-        return INFRA_SUBCOMMANDS.get((row.exe, codex_subcommand(row)))
+        return INFRA_SUBCOMMANDS[(row.exe, CODEX_APP_SERVER)] if is_codex_app_server(row) else None
     call = row.invocation
     if call.module is not None:
         return INFRA_MODULES.get(call.module)
@@ -109,9 +120,19 @@ def is_control_master(row: ProcessRow) -> bool:
     return SSH_MASTER_FLAGS <= letters
 
 
-def job_label(row: ProcessRow) -> str:
-    match = JOB_PATH.search(row.argv_text)
-    return match.group(1) if match else f'job · {row.name}'
+def job_label(row: ProcessRow, jobs_root: str) -> str:
+    """The job directory named by an argument that starts with the jobs root, else the program."""
+    prefix = jobs_root.rstrip('/') + '/'
+    for token in row.arguments:
+        if token.startswith(prefix):
+            name = token[len(prefix):].split('/', 1)[0]
+            if JOB_NAME.fullmatch(name) and name not in ('.', '..'):
+                return name
+    return f'job · {row.name}'
+
+
+def default_jobs_root() -> str:
+    return str(Path.home() / JOBS_ROOT)
 
 
 @dataclass(frozen=True)
@@ -173,10 +194,13 @@ def compute_assignment(table, root, owned):
     return assign
 
 
-def build_grouping(table: ProcessTable) -> Grouping:
-    sessions = {pid: kind for pid, row in table.rows.items() if (kind := session_kind(row))}
-    computes = {pid for pid, row in table.rows.items() if is_compute_root(row)}
-    infras = {pid: label for pid, row in table.rows.items() if (label := infra_label(row))}
+def build_grouping(table: ProcessTable, jobs_root: str | None = None) -> Grouping:
+    jobs_root = jobs_root or default_jobs_root()
+    # A zombie is named only by the kernel ("codex"), with no arguments: it roots nothing.
+    live = {pid: row for pid, row in table.rows.items() if not row.zombie}
+    sessions = {pid: kind for pid, row in live.items() if (kind := session_kind(row))}
+    computes = {pid for pid, row in live.items() if is_compute_root(row)}
+    infras = {pid: label for pid, row in live.items() if (label := infra_label(row))}
     owner: dict[int, tuple[Kind, int]] = {}
     for pid in table.rows:
         chain = [pid, *table.ancestors(pid)]
@@ -199,7 +223,7 @@ def build_grouping(table: ProcessTable) -> Grouping:
         if gid not in groups:
             row = table.rows[root]
             label = (infras.get(root) if kind is Kind.INFRA else
-                     (COMPUTE_WORKER_LABEL if root in computes else job_label(row))
+                     (COMPUTE_WORKER_LABEL if root in computes else job_label(row, jobs_root))
                      if kind is Kind.COMPUTE else None)
             groups[gid] = Group(gid, kind, row, label)
     for group in groups.values():

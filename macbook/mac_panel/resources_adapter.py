@@ -2,8 +2,10 @@
 
 Page polls and the history sampler read the same snapshot: a single collection at a time,
 reused for SNAPSHOT_TTL seconds. A failed process table fails the section (502); any other
-probe only marks itself unavailable. Signals go through `process_signals`, which never
-uses this snapshot.
+probe only marks itself unavailable. Session naming (file reads and lsof) runs on its own
+thread and is waited for at most ENRICHMENT_BUDGET plus a grace period, so a stalled read
+there never holds the collection past its bound: the snapshot goes out with fallback names.
+Signals go through `process_signals`, which never uses this snapshot.
 """
 from functools import lru_cache
 import logging
@@ -14,19 +16,21 @@ import threading
 import time
 
 from cli_runner import CliRunner
-from llm_sessions import SessionDirectory, SessionInfo
+from llm_sessions import NameSource, SessionDirectory, SessionInfo
 from panel_contracts import (AppRecord, ApiError, GroupProcessRecord, KindTotals, Level,
                              ProcessRecord, ResourceGroupRecord, ResourcesHealth,
                              ResourcesPayload, SignalResult, SystemRecord)
 from process_signals import ProcessSignaller
 from process_table import ProcessReader, ProcessTable
-from resource_groups import (SESSION_KINDS, TOTAL_KINDS, Group, Grouping, Kind, build_grouping,
-                             is_compute_root)
-from signal_policy import Scope, SignalPolicy, tree_blocked
+from resource_groups import (JOBS_ROOT, SESSION_KINDS, TOTAL_KINDS, Group, Grouping, Kind,
+                             build_grouping, is_compute_root)
+from signal_policy import PolicyContext, Scope, SignalPolicy, tree_blocked
 from system_metrics import Pressure, Probe, SystemFacts, SystemMetrics, Thermal, cpu_percent
 
 SNAPSHOT_TTL = 5
 ENRICHMENT_BUDGET = 1
+# Beyond the budget the naming thread gets this long to return what it has.
+ENRICHMENT_GRACE = 0.25
 # Every process is listed so the page's filter finds an idle one by name; the cap only bounds a runaway table.
 PROCESS_LIST_CAP = 2000
 TOP_APPS = 25
@@ -63,6 +67,7 @@ def health(facts: SystemFacts, table: ProcessTable) -> ResourcesHealth:
         levels.append(Level.WARN)
         reasons.append('Memory pressure is elevated')
     elif pressure is None:
+        # Stays in the reasons and the unavailable list even when another warning outranks it.
         levels.append(Level.UNKNOWN)
         reasons.append('Memory pressure is unavailable')
     if facts.get(Probe.THERMAL) is Thermal.WARNING:
@@ -74,8 +79,11 @@ def health(facts: SystemFacts, table: ProcessTable) -> ResourcesHealth:
         reasons.append(f"Disk has {disk['free'] / disk['total']:.0%} free")
     if table.malformed:
         reasons.append(f'{table.malformed} process rows could not be read')
+    unavailable = list(facts.unavailable)
+    if pressure is None and Probe.PRESSURE.value not in unavailable:
+        unavailable.append(Probe.PRESSURE.value)
     return ResourcesHealth(level=max(levels, key=LEVEL_RANK.get).value, reasons=reasons,
-                           unavailable=list(facts.unavailable))
+                           unavailable=unavailable)
 
 
 def system_record(facts: SystemFacts, table: ProcessTable) -> SystemRecord:
@@ -102,14 +110,15 @@ def system_record(facts: SystemFacts, table: ProcessTable) -> SystemRecord:
 class SnapshotBuilder:
     """Turns one table, grouping and set of session names into the wire payload."""
 
-    def __init__(self, table, grouping: Grouping, infos: dict[int, SessionInfo], policy, lineage):
+    def __init__(self, table, grouping: Grouping, infos: dict[int, SessionInfo], policy,
+                 context: PolicyContext):
         self.table, self.grouping, self.infos = table, grouping, infos
-        self.policy, self.lineage = policy, lineage
+        self.policy, self.context = policy, context
         self.names = {gid: self.group_name(group) for gid, group in grouping.groups.items()}
 
     def blocked(self, row, kind=None):
         kind = self.grouping.kind(row.pid) if kind is None else kind
-        return self.policy.blocked(row, kind, Scope.PROCESS, self.lineage)
+        return self.policy.blocked(row, kind, Scope.PROCESS, self.context)
 
     def group_name(self, group: Group) -> str:
         info = self.infos.get(group.root.pid)
@@ -123,14 +132,17 @@ class SnapshotBuilder:
             pid=m.row.pid, ppid=m.row.ppid, depth=m.depth, name=m.row.name, cpu=round(m.row.cpu, 1),
             rss=m.row.rss_bytes, nice=m.row.nice, stopped=m.row.stopped, started=m.row.started,
             blocked=self.blocked(m.row, group.kind)) for m in group.members]
+        source = None
+        if group.kind in SESSION_KINDS:
+            source = (info.source if info else NameSource.FALLBACK).value
         return ResourceGroupRecord(
-            id=group.id, kind=group.kind.value, name=self.names[group.id],
+            id=group.id, kind=group.kind.value, name=self.names[group.id], name_source=source,
             detail=info.detail if info else group.root.name,
             status=info.status if info else None, cwd=info.cwd if info else None,
             parent=group.parent, root_pid=group.root.pid, started=group.root.started,
             cpu=round(sum(m.row.cpu for m in group.members), 1),
             rss=sum(m.row.rss_bytes for m in group.members), count=len(group.members),
-            tree_blocked=tree_blocked(self.policy, group, self.lineage, self.names),
+            tree_blocked=tree_blocked(self.policy, group, self.context, self.names),
             processes=processes)
 
     def groups(self) -> list[ResourceGroupRecord]:
@@ -188,17 +200,39 @@ def resource_samples(payload: ResourcesPayload):
     return rows
 
 
+class BoundedCall:
+    """Runs one call on a daemon thread; the caller waits on `done` for as long as it likes."""
+
+    def __init__(self, function, *args):
+        self.value, self.error, self.done = None, None, threading.Event()
+        threading.Thread(target=self.run, args=(function, args), daemon=True,
+                         name='resources-naming').start()
+
+    def run(self, function, args):
+        try:
+            self.value = function(*args)
+        except Exception as exc:  # noqa: BLE001 - reported by the waiting caller
+            self.error = exc
+        finally:
+            self.done.set()
+
+
 class ResourcesAdapter:
     def __init__(self, runner=None, reader=None, metrics=None, clock=time.monotonic,
                  wall_clock=time.time, home=None, kill=os.kill, getpriority=os.getpriority,
                  setpriority=os.setpriority, policy=None):
         runner = runner or CliRunner()
-        self.reader = reader or ProcessReader(runner)
+        home = Path(home) if home else Path.home()
+        self.jobs_root = str(home / JOBS_ROOT)
+        self.reader = reader or ProcessReader(runner, clock)
         self.metrics = metrics or SystemMetrics(runner, clock=clock, wall_clock=wall_clock)
-        self.sessions = SessionDirectory(runner, Path(home) if home else Path.home(), clock)
+        self.sessions = SessionDirectory(runner, home, clock)
         self.policy = policy or SignalPolicy()
-        self.signaller = ProcessSignaller(self.reader, self.policy, kill, getpriority, setpriority)
+        self.signaller = ProcessSignaller(self.reader, self.policy, kill, getpriority, setpriority,
+                                          clock, self.jobs_root)
         self.clock, self.wall_clock = clock, wall_clock
+        # The naming call still running from an earlier snapshot, if one overran its wait.
+        self.naming: BoundedCall | None = None
         # Held for the whole collection: concurrent readers wait and then share its result.
         self.collect_lock = threading.Lock()
         # Guards only the cache fields, so a mutation never waits on a slow collection.
@@ -231,21 +265,30 @@ class ResourcesAdapter:
         return cached
 
     def describe_sessions(self, grouping) -> dict[int, SessionInfo]:
+        """Session names, or {} (fallback names) when naming fails or overruns its budget."""
         roots = {group.root.pid: (group.kind, group.root) for group in grouping.groups.values()
                  if group.kind in SESSION_KINDS}
-        try:
-            return self.sessions.describe(roots, self.clock() + ENRICHMENT_BUDGET)
-        except (OSError, ValueError, ApiError):
-            # Names are enrichment; the numbers must not wait on or fail with them.
-            LOG.exception('Session naming failed')
+        if not roots:
             return {}
+        if self.naming is not None and not self.naming.done.is_set():
+            # One stalled naming call at a time; this snapshot uses fallback names.
+            return {}
+        self.naming = BoundedCall(self.sessions.describe, roots, self.clock() + ENRICHMENT_BUDGET)
+        if not self.naming.done.wait(ENRICHMENT_BUDGET + ENRICHMENT_GRACE):
+            LOG.warning('Session naming overran its budget; using fallback names')
+            return {}
+        if self.naming.error is not None:
+            # Names are enrichment; the numbers must not wait on or fail with them.
+            LOG.error('Session naming failed', exc_info=self.naming.error)
+            return {}
+        return self.naming.value
 
     def collect(self) -> ResourcesPayload:
         table = self.reader.table()
         facts = self.metrics.collect()
-        grouping = build_grouping(table)
+        grouping = build_grouping(table, self.jobs_root)
         builder = SnapshotBuilder(table, grouping, self.describe_sessions(grouping), self.policy,
-                                  self.policy.lineage(table))
+                                  self.policy.context(table, grouping))
         groups = builder.groups()
         return ResourcesPayload(sampled_at=self.wall_clock(), health=health(facts, table),
                                 system=system_record(facts, table), totals=builder.totals(groups),

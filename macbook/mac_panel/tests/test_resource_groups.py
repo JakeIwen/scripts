@@ -1,11 +1,17 @@
 """Grouping by position and the signal policy's block reasons."""
 import unittest
 
-from resource_groups import Kind, build_grouping
+from functools import partial
+
+from resource_groups import Kind
+from resource_groups import build_grouping as build_any_grouping
 from resources_fixtures import PANEL_PID, make_table
-from signal_policy import (KIND_REASONS, OTHER_USER, PANEL, PANEL_ANCESTOR, PANEL_DESCENDANT,
-                           PROTECTED_REASON, SHELL, SYSTEM_PID, TREE_ONLY_SESSIONS, Scope,
-                           SignalPolicy, tree_blocked)
+from signal_policy import (INCOMPLETE, KIND_REASONS, OTHER_USER, PANEL, PANEL_ANCESTOR,
+                           PANEL_DESCENDANT, PANEL_UNKNOWN, PROTECTED_REASON, SHELL, SYSTEM_PID,
+                           TREE_ONLY_SESSIONS, Scope, SignalPolicy, hosts_reason, tree_blocked)
+
+JOBS_ROOT = '/Users/me/Library/Caches/van-compute/jobs'
+build_grouping = partial(build_any_grouping, jobs_root=JOBS_ROOT)
 
 WORLD = (
     (1, 0, '/sbin/launchd', {'uid': 0}),
@@ -74,6 +80,35 @@ class GroupingTests(unittest.TestCase):
         table = make_table((500, 1, 'python3 -m van_compute.worker'), (502, 500, '/usr/bin/sandbox-exec -p x tool'))
         self.assertEqual(build_grouping(table).groups['compute:502'].label, 'job · sandbox-exec')
 
+    def test_a_job_name_comes_only_from_an_argument_under_the_jobs_root(self):
+        table = make_table(
+            (500, 1, 'python3 -m van_compute.worker'),
+            (502, 500, 'python3 -c print("Caches/van-compute/jobs/secret-name/x")'),
+            (503, 500, '/bin/sh --cwd=/Users/me/Library/Caches/van-compute/jobs/also-secret/x'),
+            (504, 500, f'/bin/sh {JOBS_ROOT}/job-7/run.sh'))
+        labels = {gid: group.label for gid, group in build_grouping(table).groups.items()}
+        self.assertEqual(labels['compute:502'], 'job · python3')
+        self.assertEqual(labels['compute:503'], 'job · sh')
+        self.assertEqual(labels['compute:504'], 'job-7')
+
+    def test_a_zombie_roots_no_group(self):
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),
+                           (47, 1, '/x/codex app-server daemon'),
+                           (48, 47, '<defunct>', {'state': 'Z', 'ucomm': 'codex'}),
+                           (49, 1, '<defunct>', {'state': 'Z', 'ucomm': 'claude'}))
+        grouping = build_grouping(table)
+        self.assertEqual(set(grouping.groups), {'infra:47'})
+        self.assertEqual(grouping.membership[48], 'infra:47')
+        self.assertEqual((grouping.kind(49), table.rows[49].name), (Kind.APP, 'claude'))
+
+    def test_a_codex_option_value_with_a_space_cannot_turn_an_app_server_into_a_session(self):
+        # ps shows `-c 'model=a b'` as three words, so "b" sits where the subcommand would be.
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),
+                           (301, 1, '/Users/me/.codex/bin/codex -c model=a b app-server --listen x'))
+        grouping = build_grouping(table)
+        self.assertEqual(grouping.kind(301), Kind.INFRA)
+        self.assertEqual(grouping.groups['infra:301'].label, 'Codex app server')
+
     def test_a_session_inside_a_compute_job_or_infra_is_its_own_group(self):
         table = make_table((400, 1, 'node /x/model-gateway.js'), (405, 400, 'claude -p x'), (406, 405, 'sleep 1'))
         grouping = build_grouping(table)
@@ -95,10 +130,13 @@ class PolicyTests(unittest.TestCase):
             (9001, PANEL_PID, '/bin/ps -axww'))
         self.grouping = build_grouping(self.table)
         self.policy = SignalPolicy(uid=501, panel_pid=PANEL_PID)
-        self.lineage = self.policy.lineage(self.table)
+        self.context = self.policy.context(self.table, self.grouping)
 
-    def reason(self, pid, scope=Scope.PROCESS):
-        return self.policy.blocked(self.table.rows[pid], self.grouping.kind(pid), scope, self.lineage)
+    def reason(self, pid, scope=Scope.PROCESS, table=None):
+        table = table or self.table
+        grouping = build_grouping(table)
+        return self.policy.blocked(table.rows[pid], grouping.kind(pid), scope,
+                                   self.policy.context(table, grouping))
 
     def test_each_block_reason(self):
         self.assertEqual(self.reason(703), OTHER_USER)
@@ -117,7 +155,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_pid_one_is_blocked_even_for_its_owner(self):
         policy = SignalPolicy(uid=0, panel_pid=PANEL_PID)
-        self.assertEqual(policy.blocked(self.table.rows[1], Kind.APP, Scope.PROCESS, self.lineage), SYSTEM_PID)
+        self.assertEqual(policy.blocked(self.table.rows[1], Kind.APP, Scope.PROCESS, self.context), SYSTEM_PID)
 
     def test_shells_are_allowed_as_session_tree_members(self):
         self.assertIsNone(self.reason(201, Scope.TREE))
@@ -126,17 +164,66 @@ class PolicyTests(unittest.TestCase):
 
     def test_tree_blocked_for_nested_sessions_and_panel_ancestors(self):
         outer, inner = self.grouping.groups['claude:200'], self.grouping.groups['claude:210']
-        reason = tree_blocked(self.policy, outer, self.lineage, {'claude:210': 'inner work'})
+        reason = tree_blocked(self.policy, outer, self.context, {'claude:210': 'inner work'})
         self.assertIn('inner work', reason)
         self.assertIn('end those first', reason)
-        self.assertIsNone(tree_blocked(self.policy, inner, self.lineage))
-        self.assertEqual(tree_blocked(self.policy, self.grouping.groups['infra:400'], self.lineage),
+        self.assertIsNone(tree_blocked(self.policy, inner, self.context))
+        self.assertEqual(tree_blocked(self.policy, self.grouping.groups['infra:400'], self.context),
                          TREE_ONLY_SESSIONS)
         # A session that (in a dev instance) hosts the panel cannot be ended as a tree.
-        table = make_table((50, 1, 'claude'), (51, 50, '/bin/zsh -c x'), (PANEL_PID, 51, 'python server.py'))
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}), (50, 1, 'claude'),
+                           (51, 50, '/bin/zsh -c x'), (PANEL_PID, 51, 'python server.py'))
         grouping = build_grouping(table)
-        lineage = self.policy.lineage(table)
-        self.assertEqual(tree_blocked(self.policy, grouping.groups['claude:50'], lineage), PANEL_ANCESTOR)
+        context = self.policy.context(table, grouping)
+        self.assertEqual(tree_blocked(self.policy, grouping.groups['claude:50'], context), PANEL_ANCESTOR)
+
+    def test_terminal_hosts_are_protected_by_kernel_name_and_decorated_titles(self):
+        table = make_table(
+            (1, 0, '/sbin/launchd', {'uid': 0}),
+            (60, 1, 'tmux: server', {'argv0': 'tmux: server', 'ucomm': 'tmux'}),
+            (61, 1, 'SCREEN -S work', {'ucomm': 'screen'}),
+            (62, 1, '/Applications/Ghostty.app/Contents/MacOS/ghostty'),
+            # A host started under another argv[0] is still known by its kernel name.
+            (63, 1, 'innocent', {'ucomm': 'iTerm2'}),
+            (64, 1, '/Applications/WezTerm.app/Contents/MacOS/wezterm-gui start'))
+        for pid in (60, 61, 62, 63, 64):
+            self.assertEqual(self.reason(pid, table=table), PROTECTED_REASON, pid)
+
+    def test_a_process_hosting_terminals_or_llm_roots_is_blocked_by_structure(self):
+        table = make_table(
+            (1, 0, '/sbin/launchd', {'uid': 0}),
+            # An IDE helper parenting a Codex app server (infra) and a terminal with a session.
+            (70, 1, '/Applications/Code.app/Contents/MacOS/Code Helper (Plugin) --type=x',
+             {'argv0': '/Applications/Code.app/Contents/MacOS/Code Helper (Plugin)'}),
+            (71, 70, '/Users/me/.vscode/bin/codex app-server --analytics'),
+            (72, 70, '/bin/zsh -il', {'tty': 'ttys009'}),
+            (73, 72, 'claude', {'tty': 'ttys009'}),
+            (74, 73, 'caffeinate -i -t 300', {'tty': 'ttys009'}),
+            # An unknown multiplexer with two panes.
+            (80, 1, '/opt/bin/newmux --daemon'),
+            (81, 80, '-zsh', {'tty': 'ttys010'}),
+            (82, 80, '-zsh', {'tty': 'ttys011'}),
+            # A foreground job and its children on its own terminal host nothing.
+            (90, 1, 'make all', {'tty': 'ttys012'}),
+            (91, 90, 'cc -c x.c', {'tty': 'ttys012'}),
+            (95, 1, '/usr/bin/plain-daemon'))
+        self.assertEqual(self.reason(70, table=table), hosts_reason(2))
+        self.assertEqual(self.reason(80, table=table), hosts_reason(2))
+        # A keep-awake helper below a session is that session's own, not a host above it.
+        self.assertIsNone(self.reason(74, table=table))
+        for pid in (90, 91, 95):
+            self.assertIsNone(self.reason(pid, table=table), pid)
+
+    def test_a_gap_in_the_ancestry_blocks_rather_than_guesses(self):
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),
+                           (500, 1, 'python3 -m van_compute.worker'),
+                           # 501 (the job's shell) is missing: 502 could be a compute job.
+                           (502, 501, 'python3 work.py'))
+        self.assertEqual(self.reason(502, table=table), INCOMPLETE)
+        # The panel's own row with a gap above it: its ancestors are unknown, so nothing goes.
+        table = make_table((1, 0, '/sbin/launchd', {'uid': 0}), (8001, 7999, 'launcher'),
+                           (PANEL_PID, 8001, 'python server.py'), (603, 1, 'vim notes'))
+        self.assertEqual(self.reason(603, table=table), PANEL_UNKNOWN)
 
 
 if __name__ == '__main__':

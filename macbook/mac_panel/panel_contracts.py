@@ -434,6 +434,8 @@ class ResourceGroupRecord(TypedDict):
     id: str
     kind: str
     name: str
+    # Session groups only: how `name` was established (llm_sessions.NameSource); null otherwise.
+    name_source: str | None
     detail: str | None
     status: str | None
     cwd: str | None
@@ -488,6 +490,9 @@ class SignalResult(TypedDict):
     skipped: int
     refused: int
     unchanged: int
+    # Why the action stopped before every target was handled (a session nested inside it,
+    # its root changed, the time bound); None when it ran to the end.
+    stopped: str | None
 
 
 class Level(str, Enum):

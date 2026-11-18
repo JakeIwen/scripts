@@ -10,11 +10,12 @@ import unittest
 from unittest import mock
 
 from cli_runner import CommandResult
-from llm_sessions import LSOF
+from llm_sessions import LSOF, NameSource
 from panel_contracts import ApiError, Level, Section
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, auth, request, running_server
 from process_table import started_epoch
+import resources_adapter
 from resources_adapter import SNAPSHOT_TTL, ResourcesAdapter, health
 from resources_fixtures import (PANEL_PID, STARTED, ArgvRunner, FakeMetrics, FakeReader,
                                 make_table)
@@ -52,6 +53,11 @@ WORLD = (
     (500, 1, 'python3 -m van_compute.worker', {'rss_kb': 2048}),
     (600, 1, 'Mail', {'cpu': 3.0}),
     (601, 600, 'mail-helper', {'cpu': 2.0}),
+    # Argument values the display names must not pick up.
+    (700, 1, 'bash --rcfile /Users/me/private-rc.sh'),
+    (701, 1, 'node --redirect-warnings /Users/me/warn.js app.js'),
+    (702, 1, 'perl -esleep 9'),
+    (703, 1, 'python3 /Users/me/tax notes/run.py'),
 )
 
 
@@ -155,7 +161,14 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(low['level'], 'warn')
         self.assertIn('9% free', low['reasons'][0])
         self.assertEqual(self.level({}, ['pressure'])['level'], 'unknown')
-        self.assertEqual(self.level({Probe.DISK: {'total': 100, 'free': 1}}, ['pressure'])['level'], 'warn')
+
+    def test_unknown_pressure_stays_visible_under_a_stronger_warning(self):
+        # Precedence is error > warn > unknown > ok, and the unknown probe is still reported.
+        for unavailable in (['pressure'], []):
+            result = self.level({Probe.DISK: {'total': 100, 'free': 1}}, unavailable)
+            self.assertEqual(result['level'], 'warn')
+            self.assertIn('Memory pressure is unavailable', result['reasons'])
+            self.assertEqual(result['unavailable'], ['pressure'])
 
 
 class AdapterFixture(unittest.TestCase):
@@ -193,12 +206,18 @@ class AdapterReadTests(AdapterFixture):
         self.assertEqual(set(payload), {'sampled_at', 'health', 'system', 'totals', 'groups', 'apps',
                                         'processes'})
         text = json.dumps(payload)
-        for secret in ('payroll', 'hunter2', 'sk-live', 'tax bug', 'from the key', '--'):
+        for secret in ('payroll', 'hunter2', 'sk-live', 'tax bug', 'from the key', '--', 'rcfile',
+                       'private', 'notes', 'sleep 9', 'esleep', 'warn.js'):
             self.assertNotIn(secret, text)
         groups = {group['id']: group for group in payload['groups']}
         claude = groups['claude:200']
         self.assertEqual((claude['name'], claude['status'], claude['cwd'], claude['count']),
                          ('Budget review', 'busy', '/Users/me/dev/pay', 2))
+        self.assertEqual(claude['name_source'], 'registry')
+        self.assertEqual(groups['codex:300']['name_source'], 'fallback')
+        self.assertIsNone(groups['infra:400']['name_source'])
+        names = {p['pid']: p['name'] for p in payload['processes']}
+        self.assertEqual([names[pid] for pid in (700, 701, 702, 703)], ['bash', 'node', 'perl', 'python3'])
         self.assertEqual(claude['cpu'], 75.0)
         self.assertIsNone(claude['tree_blocked'])
         self.assertEqual([p['name'] for p in claude['processes']], ['claude', 'node tool.js'])
@@ -241,12 +260,54 @@ class AdapterReadTests(AdapterFixture):
         self.assertNotIn(2001, listed)
 
     def test_a_registry_entry_for_a_reused_pid_is_ignored(self):
-        self.write_registry(200, name='Old session', procStart='Mon Nov  2 01:00:00 2026')
         self.runner.answers[(LSOF, '-a', '-p', '200,300', '-Fpfn')] = CommandResult(
             1, 'p200\nfcwd\nn/Users/me/dev/other\np300\nfcwd\nn/Users/me/dev/taxes\n')
+        # Another start, or no well-formed procStart at all, is not this process's record.
+        for proc_start in ('Mon Nov  2 01:00:00 2026', None, True, 17, '', 'garbage'):
+            fields = {} if proc_start is None else {'procStart': proc_start}
+            self.write_registry(200, name='Old session', **fields)
+            self.clock.now += SNAPSHOT_TTL
+            groups = {group['id']: group for group in self.adapter().read()['groups']}
+            self.assertEqual((groups['claude:200']['name'], groups['claude:200']['detail'],
+                              groups['claude:200']['name_source']),
+                             ('claude · other', 'headless', 'fallback'), proc_start)
+
+    def test_registry_start_matches_across_day_padding(self):
+        padded = 'Mon Nov  2 01:00:00 2026'
+        self.reader = FakeReader(make_table(*[(pid, ppid, command, {**(extra[0] if extra else {}), 'started': padded})
+                                              for pid, ppid, command, *extra in WORLD]))
+        self.write_registry(200, name='Padded', status='idle', procStart=padded)
         groups = {group['id']: group for group in self.adapter().read()['groups']}
-        self.assertEqual((groups['claude:200']['name'], groups['claude:200']['detail']),
-                         ('claude · other', 'headless'))
+        self.assertEqual(groups['claude:200']['name'], 'Padded')
+
+    def test_malformed_registry_fields_are_dropped_not_fatal(self):
+        self.write_registry(200, name=['x'], status=['busy'], kind={'a': 1}, cwd=7, procStart=STARTED)
+        payload = self.adapter().read()
+        claude = {group['id']: group for group in payload['groups']}['claude:200']
+        self.assertEqual((claude['name'], claude['status'], claude['detail'], claude['cwd']),
+                         ('claude', None, 'interactive', None))
+        self.assertEqual(payload['totals']['claude']['count'], 2)
+
+    def test_only_registry_files_of_current_claude_processes_are_opened(self):
+        for pid in range(5000, 5020):
+            self.write_registry(pid, name=f'stale {pid}', procStart=STARTED)
+        opened = []
+        real_open = os.open
+        with mock.patch('llm_sessions.os.open', side_effect=lambda p, *a: opened.append(str(p)) or real_open(p, *a)), \
+                mock.patch('llm_sessions.os.listdir', side_effect=AssertionError('no listing')):
+            self.adapter().read()
+        self.assertEqual([os.path.basename(path) for path in opened], ['200.json'])
+
+    def test_a_parent_missing_from_the_table_does_not_fail_the_section(self):
+        # 601's parent exited between reads: Mail's helper still shows, under itself.
+        rows = dict(self.reader.rows)
+        del rows[600]
+        self.reader.rows = rows
+        payload = self.adapter().read()
+        helper = next(app for app in payload['apps'] if app['root_pid'] == 601)
+        self.assertEqual(helper['name'], 'mail-helper')
+        process = next(p for p in payload['processes'] if p['pid'] == 601)
+        self.assertIsNotNone(process['blocked'])
 
     def test_codex_title_from_the_rollout_matching_its_start(self):
         start = started_epoch(STARTED) + 1
@@ -263,12 +324,79 @@ class AdapterReadTests(AdapterFixture):
             + json.dumps({'id': uuid, 'thread_name': 'Export data'}) + '\n' + 'not json\n')
         adapter = self.adapter()
         groups = {group['id']: group for group in adapter.read()['groups']}
-        self.assertEqual(groups['codex:300']['name'], 'Export data')
-        # Cached per (pid, started): the next snapshot needs no lsof.
-        calls = len(self.runner.calls)
+        self.assertEqual((groups['codex:300']['name'], groups['codex:300']['name_source']),
+                         ('Export data', 'rollout-time'))
+        # A guess is never cached: a second rollout in the window makes the next one unproven.
+        (day / f'rollout-{stamp(start + 2)}-{other}.jsonl').touch()
         self.clock.now += SNAPSHOT_TTL
-        adapter.read()
-        self.assertEqual(len(self.runner.calls), calls)
+        groups = {group['id']: group for group in adapter.read()['groups']}
+        self.assertEqual((groups['codex:300']['name'], groups['codex:300']['name_source']),
+                         ('codex · taxes', 'fallback'))
+
+    def codex_world(self, uuids_at):
+        start = started_epoch(STARTED)
+        day = self.home / '.codex/sessions' / time.strftime('%Y/%m/%d', time.localtime(start))
+        day.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for uuid, offset in uuids_at.items():
+            stamp = time.strftime('%Y-%m-%dT%H-%M-%S', time.localtime(start + offset))
+            (day / f'rollout-{stamp}-{uuid}.jsonl').touch()
+            lines.append(json.dumps({'id': uuid, 'thread_name': f'title {uuid[:4]}'}))
+        (self.home / '.codex/session_index.jsonl').write_text('\n'.join(lines) + '\n')
+
+    def test_two_codex_processes_starting_together_are_not_guessed(self):
+        # One resumes an old thread, one starts a new one: the new rollout fits both.
+        self.reader.rows.update(make_table((301, 101, 'codex resume')).rows)
+        self.runner.answers[(LSOF, '-a', '-p', '300,301', '-Fpfn')] = CommandResult(0, '')
+        self.codex_world({'11111111-0000-0000-0000-000000000000': 1})
+        groups = {group['id']: group for group in self.adapter().read()['groups']}
+        for gid in ('codex:300', 'codex:301'):
+            self.assertEqual((groups[gid]['name'], groups[gid]['name_source']), ('codex', 'fallback'))
+
+    def test_an_open_rollout_is_reserved_before_any_guess(self):
+        proven, other = '22222222-0000-0000-0000-000000000000', '33333333-0000-0000-0000-000000000000'
+        self.reader.rows.update(make_table((301, 1, 'codex', {'started': 'Tue Nov 17 23:19:53 2026'})).rows)
+        self.codex_world({proven: 1, other: 3601})
+        self.runner.answers[(LSOF, '-a', '-p', '300,301', '-Fpfn')] = CommandResult(
+            0, f'p301\nf20w\nn/x/rollout-2026-11-17T00-00-00-{proven}.jsonl\n')
+        groups = {group['id']: group for group in self.adapter().read()['groups']}
+        self.assertEqual((groups['codex:301']['name'], groups['codex:301']['name_source']),
+                         ('title 2222', 'rollout-open'))
+        # 300's window holds only the rollout 301 has open, so it gets no name.
+        self.assertEqual(groups['codex:300']['name_source'], 'fallback')
+
+    def test_stalled_naming_returns_fallback_names_within_its_bound(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        adapter = self.adapter()
+        adapter.sessions.describe = lambda *args: release.wait(10) and {}
+        with mock.patch('resources_adapter.ENRICHMENT_BUDGET', 0.05), \
+                mock.patch('resources_adapter.ENRICHMENT_GRACE', 0.05):
+            began = time.monotonic()
+            payload = adapter.read()
+            self.assertLess(time.monotonic() - began, 1)
+            groups = {group['id']: group for group in payload['groups']}
+            self.assertEqual((groups['claude:200']['name'], groups['claude:200']['name_source']),
+                             ('claude', 'fallback'))
+            # The stalled call is not stacked on: the next snapshot does not wait at all.
+            self.clock.now += SNAPSHOT_TTL
+            began = time.monotonic()
+            adapter.read()
+            self.assertLess(time.monotonic() - began, 0.05)
+
+    def test_rollout_folders_are_read_by_date_and_bounded(self):
+        start = started_epoch(STARTED)
+        stale = self.home / '.codex/sessions/2020/01/01'
+        stale.mkdir(parents=True)
+        (stale / 'rollout-2020-01-01T00-00-00-44444444-0000-0000-0000-000000000000.jsonl').touch()
+        self.codex_world({f'{n:08d}-0000-0000-0000-000000000000': 3600 + n for n in range(30)})
+        scanned = []
+        real_scandir = os.scandir
+        with mock.patch('llm_sessions.os.scandir', side_effect=lambda p: scanned.append(str(p)) or real_scandir(p)), \
+                mock.patch('llm_sessions.ROLLOUT_SCAN', 10):
+            self.adapter().read()
+        days = {time.strftime('%Y/%m/%d', time.localtime(start + offset)) for offset in (0, 5)}
+        self.assertEqual({path.split('.codex/sessions/')[1] for path in scanned}, days)
 
     def test_naming_that_times_out_falls_back_without_failing(self):
         self.runner.answers[(LSOF, '-a', '-p', '300', '-Fpfn')] = ApiError(504, 'timed out')
