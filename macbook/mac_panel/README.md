@@ -356,8 +356,12 @@ interpreter's own flag table (`process_invocation.py`; an interpreter without on
 fish, shows the bare program), never an option or an argument value. argv[0] with
 whitespace may be a title carrying arguments, so none of it is shown: the program is the
 base name of the file the kernel says the process is running (`proc_pidpath`, in
-`executable_name.py`; `Google Chrome Helper (Renderer)`), believed only when the kernel's
-short name begins it, and otherwise the kernel's short name (16 characters). At most
+`executable_name.py`; `Google Chrome Helper (Renderer)`), used only when its first 16
+characters are the kernel's short name, and otherwise that short name, so the name shown
+always comes from the kernel and never from the title. The comparison only rejects a file
+name that does not begin with the short name (say, a lookup that reached another program on
+a reused pid); two programs whose names share their first 16 characters pass it, so it is
+no general protection against pid reuse. At most
 `EXECUTABLE_LOOKUP_LIMIT` (256) lookups run per table read; the full path never leaves the
 backend. Compute job rows are named `job · <program>`. A session's
 `name_source` (`registry`, `rollout-time` or `fallback`) says how its name was established.

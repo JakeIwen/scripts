@@ -103,9 +103,12 @@ def program_name(argv0, kernel_name, executable_file='') -> str:
     Without whitespace, argv[0] names the program: a path's base name or a plain word (`-zsh`
     for a login shell). With whitespace it may be a title the process gave itself (`tmux:
     server`, `Google Chrome Helper private draft`), which can carry anything, so none of it
-    is used: the running file's base name from the kernel stands in when the kernel's short
-    name begins it (which also rejects a lookup that reached a reused pid), else the short
-    name itself.
+    is used: the name shown always comes from the kernel, never from the title. That is the
+    running file's base name (looked up by pid) when its first 16 characters, the length the
+    kernel keeps, are the kernel's short name; else the short name itself. The comparison
+    only rejects a file name that does not begin with the short name, such as a lookup that
+    reached a different program on a reused pid. It is no general guard against pid reuse:
+    two programs whose names share those 16 characters pass it.
     """
     text = argv0.strip()
     if has_whitespace(text):
