@@ -209,12 +209,24 @@ class AdapterReadTests(AdapterFixture):
                          ('zsh', None, process['user']))
         self.assertIsNotNone(process['blocked'])
 
-    def test_a_paused_idle_process_stays_listed_so_it_can_be_resumed(self):
+    def test_every_process_is_listed_busiest_first_so_an_idle_one_can_be_found_by_name(self):
         busy = [(1000 + n, 1, f'/usr/bin/busy{n}', {'cpu': 50.0 + n, 'rss_kb': 100000 + n}) for n in range(100)]
+        idle = (2001, 1, '/bin/sleep 901', {'cpu': 0.0, 'rss_kb': 100})
+        self.reader = FakeReader(make_table(*WORLD, *busy, idle))
+        payload = self.adapter().read()
+        self.assertEqual(len(payload['processes']), len(WORLD) + 101)
+        self.assertEqual(payload['system']['process_count'], len(payload['processes']))
+        self.assertEqual(payload['processes'][0]['pid'], 1099)
+        self.assertIn(2001, {row['pid'] for row in payload['processes']})
+
+    def test_process_list_is_capped_but_keeps_paused_rows_resumable(self):
+        busy = [(1000 + n, 1, f'/usr/bin/busy{n}', {'cpu': 50.0 + n}) for n in range(10)]
         paused = (2000, 1, '/bin/sleep 900', {'state': 'T', 'cpu': 0.0, 'rss_kb': 100})
         idle = (2001, 1, '/bin/sleep 901', {'cpu': 0.0, 'rss_kb': 100})
-        self.reader = FakeReader(make_table(*WORLD, *busy, paused, idle))
-        listed = {row['pid']: row for row in self.adapter().read()['processes']}
+        self.reader = FakeReader(make_table(*busy, paused, idle))
+        with mock.patch('resources_adapter.PROCESS_LIST_CAP', 5):
+            listed = {row['pid']: row for row in self.adapter().read()['processes']}
+        self.assertEqual(len(listed), 6)
         self.assertTrue(listed[2000]['stopped'])
         self.assertNotIn(2001, listed)
 

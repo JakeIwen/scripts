@@ -27,7 +27,8 @@ from system_metrics import Pressure, Probe, SystemFacts, SystemMetrics, Thermal,
 
 SNAPSHOT_TTL = 5
 ENRICHMENT_BUDGET = 1
-TOP_PROCESSES = 40
+# Every process is listed so the page's filter finds an idle one by name; the cap only bounds a runaway table.
+PROCESS_LIST_CAP = 2000
 TOP_APPS = 25
 DISK_WARN_FRACTION = 0.10
 LEVEL_RANK = {Level.OK: 0, Level.UNKNOWN: 1, Level.WARN: 2, Level.ERROR: 3}
@@ -162,12 +163,9 @@ class SnapshotBuilder:
         return top_union(records, TOP_APPS, lambda r: r['cpu'], lambda r: r['rss'])
 
     def processes(self) -> list[ProcessRecord]:
-        busiest = top_union(list(self.table.rows.values()), TOP_PROCESSES,
-                            lambda row: row.cpu, lambda row: row.rss_bytes)
-        # A paused process stops using CPU and is small, so it would drop out of the busiest lists and
-        # could no longer be resumed from the page.
-        listed = {row.pid for row in busiest}
-        rows = busiest + [row for row in self.table.rows.values() if row.stopped and row.pid not in listed]
+        ordered = sorted(self.table.rows.values(), key=lambda row: (-row.cpu, -row.rss_bytes, row.pid))
+        # A paused process is idle and small, so it must survive the cap to stay resumable from the page.
+        rows = ordered[:PROCESS_LIST_CAP] + [row for row in ordered[PROCESS_LIST_CAP:] if row.stopped]
         return [ProcessRecord(pid=row.pid, ppid=row.ppid, user=user_name(row.uid), name=row.name,
                               cpu=round(row.cpu, 1), rss=row.rss_bytes, nice=row.nice,
                               stopped=row.stopped, started=row.started,
