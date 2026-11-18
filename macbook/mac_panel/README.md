@@ -317,14 +317,20 @@ matching with no option parsing, so no spelling of the options (`-Bmvan_compute.
 hides one, and a command that merely mentions one is read-only as a result. Inside a
 session, a process belongs to that session, with one exception: every Codex process roots a
 group of its own wherever it runs, even inside another session, because `ps` flattens its
-arguments and a prompt or an option value can look like a subcommand. Its role decides only
-how that group is shown and whether it may be ended: a Codex session only when it is
-certainly an interactive run (with or without a prompt), `exec` or `resume`; otherwise
-read-only infrastructure: `Codex app server`, `Codex service` (`exec-server`,
-`remote-control`), `Codex command` (any other subcommand), or `Codex (role unread)` when an
-option value could have shifted the words, where nothing at all may be signalled. A session with any other
-group's root (a session, a Codex process, infra or compute) beneath any of its processes has
-no whole-tree action, and the reason names those groups.
+arguments and a prompt or an option value can look like a subcommand. Its role decides only how that group is shown and
+whether it may be ended, and a session needs positive evidence: every option before the
+first operand is one of Codex's global options from `codex --help` (with which take a
+value), and there is no operand (interactive) or the operand is `exec`, `e` or `resume`.
+An option whose value is free text (`-c`, `-m`, `-C`, `-i` and the like) may be empty or
+hold spaces, so any word after it leaves the line unread. Everything else is read-only
+infrastructure: `Codex app server`, `Codex service` (`exec-server`, `remote-control`,
+`responses-api-proxy`, `stdio-to-uds`, `mcp-server`), `Codex command` (any other known
+subcommand, such as `mcp` or `login`), or `Codex (role unread)` for an unknown option, a
+free-text value with words after it, or an operand no table names. An interactive prompt
+given on the command line falls in the last group, since `ps` cannot tell it from a
+subcommand newer than the table; nothing in a `Codex (role unread)` group may be signalled.
+A session with any other group's root (a session, a Codex process, infra or compute)
+beneath any of its processes has no whole-tree action, and the reason names those groups.
 
 Before each signal the panel re-reads the whole process table and decides again from it:
 same pid, start time and uid; for a session tree, the root still the same session root,

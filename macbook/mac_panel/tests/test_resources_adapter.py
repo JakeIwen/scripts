@@ -50,7 +50,7 @@ WORLD = (
     (101, 1, '-zsh'),
     (200, 101, 'claude -p secret prompt about payroll --password hunter2', {'cpu': 50.0, 'rss_kb': 4096}),
     (201, 200, 'node /x/tool.js --api-key sk-live-123', {'cpu': 25.0}),
-    (300, 101, 'codex --no-alt-screen fix the tax bug'),
+    (300, 101, 'codex exec fix the tax bug'),
     (400, 1, 'node /x/model-gateway.js serve', {'cpu': 1.0}),
     (500, 1, 'python3 -m van_compute.worker', {'rss_kb': 2048}),
     (600, 1, 'Mail', {'cpu': 3.0}),

@@ -12,7 +12,7 @@ the signal policy refuses its whole-tree action.
 from dataclasses import dataclass, field
 from enum import Enum
 
-from process_roles import (CLAUDE, CODEX_LABELS, CODEX_VALUE_OPTIONS, CodexRole, codex_role,
+from process_roles import (CLAUDE, CODEX_LABELS, CodexRole, codex_operand, codex_role,
                            infra_label, is_codex, is_compute_root)
 from process_table import ProcessRow, ProcessTable
 
@@ -29,25 +29,13 @@ SESSION_KINDS = frozenset((Kind.CLAUDE, Kind.CODEX))
 # The kinds the payload totals; apps are reported per tree instead.
 TOTAL_KINDS = (Kind.CLAUDE, Kind.CODEX, Kind.INFRA, Kind.COMPUTE)
 
-# Subcommands worth naming in a session's detail; anything else (including a prompt
-# operand, which must never be shown) reads as an interactive session.
+# A session's detail from its subcommand; a session with no operand is interactive.
 CODEX_DETAILS = {'exec': 'exec', 'e': 'exec', 'resume': 'resumed'}
 
 COMPUTE_WORKER_LABEL = 'worker'
 # ssh options that consume the next token; a control master runs with -N and -M.
 SSH_VALUE_LETTERS = frozenset('BbcDEeFIiJLlmOoPpQRSWw')
 SSH_MASTER_FLAGS = frozenset('NM')
-
-
-def codex_subcommand(row: ProcessRow) -> str | None:
-    """The first operand after value options: display detail only, never a safety decision."""
-    tokens = iter(row.arguments)
-    for token in tokens:
-        if token in CODEX_VALUE_OPTIONS:
-            next(tokens, None)
-        elif not token.startswith('-'):
-            return token
-    return None
 
 
 def session_kind(row: ProcessRow) -> Kind | None:
@@ -59,7 +47,7 @@ def session_kind(row: ProcessRow) -> Kind | None:
 
 
 def codex_detail(row: ProcessRow) -> str:
-    return CODEX_DETAILS.get(codex_subcommand(row) or '', 'interactive')
+    return CODEX_DETAILS.get(codex_operand(row)[1] or '', 'interactive')
 
 
 def is_control_master(row: ProcessRow) -> bool:

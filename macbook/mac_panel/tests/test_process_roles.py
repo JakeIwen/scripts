@@ -49,7 +49,7 @@ class CodexRoleTests(unittest.TestCase):
             'codex --no-alt-screen --ask-for-approval never': CodexRole.SESSION,
             'codex resume --last': CodexRole.SESSION,
             'codex': CodexRole.SESSION,
-            'codex -c a=1 app-server --remote-control': CodexRole.APP_SERVER,
+            'codex -a never app-server --remote-control': CodexRole.APP_SERVER,
             'codex exec-server --listen 1': CodexRole.SERVICE,
             'codex remote-control start': CodexRole.SERVICE,
             'codex -a never exec-server': CodexRole.SERVICE,
@@ -63,16 +63,18 @@ class CodexRoleTests(unittest.TestCase):
             'codex -m gpt fix the login page': CodexRole.UNCERTAIN,
             'codex fix the exec-server tests': CodexRole.UNCERTAIN,
             '/x/codex app-server daemon pid-update-loop': CodexRole.APP_SERVER,
-            'codex --config=a=1 app-server': CodexRole.APP_SERVER,
+            # A free-text value may be empty or hold spaces: what follows it cannot be placed.
+            'codex --config=a=1 app-server': CodexRole.UNCERTAIN,
+            'codex -c a=1 app-server --remote-control': CodexRole.UNCERTAIN,
             # A value with a space shifts every later word: `b` is not a known subcommand.
             'codex -c model=a b app-server --listen x': CodexRole.UNCERTAIN,
             # A value option before a known subcommand: its value could have hidden words.
             'codex -m gpt exec about app-server': CodexRole.UNCERTAIN,
             # An option the table does not know may take a value.
             'codex --future-flag app-server': CodexRole.UNCERTAIN,
-            # An interactive prompt that mentions it.
+            # An interactive prompt cannot be told from a subcommand the table lacks.
             'codex fix the app-server tests': CodexRole.UNCERTAIN,
-            'codex fix the gateway tests': CodexRole.SESSION,
+            'codex fix the gateway tests': CodexRole.UNCERTAIN,
         }
         for command, role in cases.items():
             self.assertEqual(codex_role(row(command)), role, command)
@@ -192,12 +194,14 @@ class RoundThreeTests(unittest.TestCase):
         self.assertRefused(world, (200, 'tree'))
 
     def test_finding4_codex_service_subcommands_are_read_only_infra(self):
-        for command in ('codex exec-server --listen 1', 'codex remote-control start',
-                        '/x/codex -c a=1 exec-server'):
+        # After a free-text value (`-c`) the subcommand cannot be placed: the role is unread.
+        for command, reason in (('codex exec-server --listen 1', KIND_REASONS[Kind.INFRA]),
+                                ('codex remote-control start', KIND_REASONS[Kind.INFRA]),
+                                ('/x/codex -c a=1 exec-server', ROLE_UNKNOWN)):
             world = Harness((300, 101, command), (301, 300, 'node child.js'))
             self.assertEqual(world.grouping.kind(300), Kind.INFRA, command)
             self.assertEqual(world.grouping.kind(301), Kind.INFRA, command)
-            self.assertEqual(world.reason(300), KIND_REASONS[Kind.INFRA], command)
+            self.assertEqual(world.reason(300), reason, command)
             self.assertRefused(world, (300, 'tree'), (300, 'process'), (301, 'process'))
 
     def test_finding3_a_clustered_module_option_with_an_attached_operand_is_protected(self):
@@ -208,6 +212,60 @@ class RoundThreeTests(unittest.TestCase):
         self.assertEqual(world.reason(500), KIND_REASONS[Kind.COMPUTE])
         self.assertEqual(world.reason(510), KIND_REASONS[Kind.INFRA])
         self.assertRefused(world, (500, 'process'), (510, 'process'))
+
+
+class RoundFourTests(unittest.TestCase):
+    """The round-4 review's reproductions, verbatim as `ps` shows them (quotes are lost)."""
+
+    def assertRefused(self, world, *requests):
+        for pid, scope in requests:
+            with self.assertRaises(ApiError, msg=(pid, scope)) as caught:
+                world.post(pid, scope)
+            self.assertEqual(caught.exception.status, 403)
+        self.assertEqual(world.calls, [])
+
+    def test_finding1_a_codex_is_a_session_only_on_positive_evidence(self):
+        cases = {
+            # The installed binary's own services (`codex --help`, 0.170.0).
+            'codex responses-api-proxy': ('Codex service', None),
+            'codex stdio-to-uds /tmp/x.sock': ('Codex service', None),
+            'codex mcp-server': ('Codex service', None),
+            'codex mcp list': ('Codex command', None),
+            # A word no table knows: a future service or a prompt, which cannot be told apart.
+            'codex brand-new-service --listen x': ('Codex (role unread)', ROLE_UNKNOWN),
+            'codex fix the gateway tests': ('Codex (role unread)', ROLE_UNKNOWN),
+            # An option the table does not know, before what looks like a session.
+            'codex --future-flag exec run': ('Codex (role unread)', ROLE_UNKNOWN),
+            'codex --future-flag': ('Codex (role unread)', ROLE_UNKNOWN),
+            # A free-text value can be empty or hold spaces, so nothing after it can be placed.
+            'codex -c a=1 exec run': ('Codex (role unread)', ROLE_UNKNOWN),
+            'codex -m gpt-6 --no-alt-screen': ('Codex (role unread)', ROLE_UNKNOWN),
+            'codex -c a=1': ('Codex (role unread)', ROLE_UNKNOWN),
+        }
+        for command, (label, unknown) in cases.items():
+            world = Harness((210, 101, command), (211, 210, 'node child.js'))
+            self.assertEqual(world.grouping.kind(210), Kind.INFRA, command)
+            self.assertNotIn('codex:210', world.grouping.groups, command)
+            self.assertEqual(world.grouping.groups['infra:210'].label, label, command)
+            reason = unknown or KIND_REASONS[Kind.INFRA]
+            self.assertEqual(world.reason(210), reason, command)
+            self.assertEqual(world.reason(211), reason, command)
+            self.assertIsNotNone(world.tree_blocked('infra:210'), command)
+            self.assertRefused(world, (210, 'tree'), (210, 'process'), (211, 'process'))
+
+    def test_finding1_understood_sessions_stay_sessions(self):
+        for command in ('codex --no-alt-screen --ask-for-approval never', 'codex',
+                        'codex exec review the app-server implementation', 'codex e run',
+                        'codex -a never -s workspace-write resume --last',
+                        'codex --ask-for-approval=never exec run', 'codex --config=a=1'):
+            self.assertEqual(codex_role(row(command)), CodexRole.SESSION, command)
+        # The live interactive session on this Mac, under the codex-retry wrapper.
+        world = Harness(
+            (205, 101, '/Users/me/.local/state/codex-autocontinue/codex-retry -I -c import runpy, sys',
+             {'ucomm': 'Python'}),
+            (210, 205, 'codex --no-alt-screen --ask-for-approval never'))
+        self.assertEqual(world.grouping.kind(210), Kind.CODEX)
+        self.assertIsNone(world.tree_blocked('codex:210'))
 
 
 class ShellTests(unittest.TestCase):

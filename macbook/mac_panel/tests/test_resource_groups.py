@@ -22,7 +22,7 @@ WORLD = (
     (210, 201, 'claude -p inner prompt text'),
     (211, 210, 'caffeinate -i -t 300'),
     (300, 101, 'codex --no-alt-screen --ask-for-approval never'),
-    (301, 1, '/Users/me/.codex/bin/codex -c a=1 app-server --remote-control'),
+    (301, 1, '/Users/me/.codex/bin/codex -a never app-server --remote-control'),
     (302, 301, 'node /Users/me/kapture-mcp/dist/cli.js bridge'),
     (400, 1, '/Users/me/.nvm/bin/node /Users/me/.claude/plugins/model-gateway.js serve-shim'),
     (401, 400, '/Users/me/.claude/model-gateway/bin/claude-code-proxy serve'),
