@@ -80,3 +80,17 @@ test('keyboard focus shows the note as hover does, and aria-expanded follows eve
   assert.equal(pop.hidden, true, 'a second click closes it even while focused');
   assert.equal(expanded(), 'false');
 });
+
+// The unconfirmed-name marker sits inside a session row's <summary>, whose default click action toggles the <details>.
+test('clicking the info button cancels the click default so an enclosing summary does not toggle', () => {
+  const root = info('Inside a summary');
+  const [button, pop] = root.childNodes;
+  root.getBoundingClientRect = () => ({left: 100, top: 100, bottom: 116});
+  pop.offsetWidth = 200;
+  pop.offsetHeight = 40;
+  const event = new Event('click', {bubbles: true, cancelable: true});
+  button.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(pop.hidden, false, 'the popover still opens');
+  button.click();
+});

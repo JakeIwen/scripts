@@ -39,11 +39,14 @@ export function resultText(actionId, counts) {
     const count = Number(counts[key]) || 0;
     if (count) parts.push(`${plural(count, 'process', 'processes')} ${COPY.results[key]}`);
   });
-  return parts.join(', ');
+  const line = parts.join(', ');
+  // The backend words the reason itself; the page only puts it after the counts.
+  return counts.stopped ? `${line}. ${COPY.results.stopped}: ${counts.stopped}` : line;
 }
 
-// A result that signalled nothing while something was refused or changed is shown as a problem, not a success.
+// A result that stopped early, or signalled nothing while something was refused or changed is shown as a problem, not a success.
 const resultKind = (actionId, counts) => {
+  if (counts?.stopped) return 'error';
   const ignored = NO_OP_IS_SUCCESS.has(actionId) ? ['gone', 'unchanged'] : ['gone'];
   return Number(counts?.applied) > 0 || !REPLY_COUNTS.some(key => !ignored.includes(key) && Number(counts?.[key]) > 0) ? 'ok' : 'error';
 };

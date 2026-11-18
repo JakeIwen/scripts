@@ -163,7 +163,9 @@ export function info(text) {
   root.addEventListener('mouseleave', () => { item.hover = false; syncInfo(item); });
   trigger.addEventListener('focus', () => show('focus'));
   trigger.addEventListener('blur', () => { item.focus = false; syncInfo(item); });
-  trigger.addEventListener('click', () => {
+  trigger.addEventListener('click', event => {
+    // A row's <summary> toggles its <details> on a bubbled click; cancelling it keeps the row as it was.
+    event.preventDefault();
     if (item.pinned) {
       Object.assign(item, {pinned: false, hover: false, focus: false});
       syncInfo(item);

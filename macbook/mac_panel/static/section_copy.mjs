@@ -416,6 +416,7 @@ export const RESOURCES_COPY = {
     refused: 'refused by the system',
     unchanged: 'already at low priority',
     none: 'Nothing was signalled',
+    stopped: 'Stopped early',
   },
   history: {
     title: 'History',
