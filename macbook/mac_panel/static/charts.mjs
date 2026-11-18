@@ -89,14 +89,22 @@ export function nearestByX(points, x) {
   return best;
 }
 
-/** Gauge of an amount left: fill fraction, spend-line position and a severity level. */
-export function gaugeGeometry({value, max, marker}, width) {
+/**
+ * Gauge geometry: fill fraction, spend-line position and a severity level. By default `value` is an amount left and
+ * a short fill is the worry. `worse: {warn, error}` flips it for a thing that is used up: `value` is what is used
+ * and the level turns warn or error once the fraction reaches those thresholds. `level` forces the level when
+ * something other than the fill decides it (memory by its pressure).
+ */
+export function gaugeGeometry({value, max, marker, worse, level: forced}, width) {
   const fraction = max > 0 ? clamp(value / max, 0, 1) : 0;
   const markerFraction = marker === undefined || marker === null || !(max > 0) ? null : clamp(marker / max, 0, 1);
   let level = 'ok';
-  if (fraction < 0.15) level = 'error';
+  if (worse) {
+    if (fraction >= worse.error) level = 'error';
+    else if (fraction >= worse.warn) level = 'warn';
+  } else if (fraction < 0.15) level = 'error';
   else if (fraction < 0.3 || (markerFraction !== null && fraction < markerFraction)) level = 'warn';
-  return {fraction, fill: round(fraction * width), markerX: markerFraction === null ? null : round(markerFraction * width), level};
+  return {fraction, fill: round(fraction * width), markerX: markerFraction === null ? null : round(markerFraction * width), level: forced ?? level};
 }
 
 /** Events [{ts, lane, label}] laid out one row per lane in first-seen order (or `laneOrder`). */
@@ -205,19 +213,19 @@ export function sparkline({points, from, to, min, max, height = 40, format = Str
   return wrap;
 }
 
-/** Horizontal meter of an amount left, with an optional spend-line marker. */
-export function gauge({value, max, marker, label, format = String, markerLabel = 'even spend'}) {
+/** Horizontal meter of an amount left (or, with `worse`, an amount used), with an optional spend-line marker. */
+export function gauge({value, max, marker, worse, level, valueText, label, format = String, markerLabel = 'even spend'}) {
   const wrap = html('div', 'chart chart-gauge');
   const head = html('div', 'gauge-head');
-  head.append(html('span', 'gauge-label', label), html('span', 'gauge-value', `${format(value)} of ${format(max)}`));
+  head.append(html('span', 'gauge-label', label), html('span', 'gauge-value', valueText ?? `${format(value)} of ${format(max)}`));
   const holder = html('div', 'chart-plot');
   wrap.append(head, holder);
   const tip = tooltip(wrap);
-  const meta = gaugeGeometry({value, max, marker}, 1);
+  const meta = gaugeGeometry({value, max, marker, worse, level}, 1);
   wrap.dataset.level = meta.level;
   responsive(holder, width => {
     holder.replaceChildren();
-    const geometry = gaugeGeometry({value, max, marker}, width);
+    const geometry = gaugeGeometry({value, max, marker, worse, level}, width);
     const svg = svgNode('svg', {viewBox: `0 0 ${width} 14`, width, height: 14, role: 'meter',
       'aria-valuemin': 0, 'aria-valuemax': max, 'aria-valuenow': value, 'aria-label': label});
     svg.append(svgNode('rect', {x: 0, y: 3, width, height: 8, rx: 4}, 'gauge-track'),
@@ -225,7 +233,7 @@ export function gauge({value, max, marker, label, format = String, markerLabel =
     if (geometry.markerX !== null) {
       svg.append(svgNode('rect', {x: clamp(geometry.markerX - 1, 0, width - 2), y: 0, width: 2, height: 14}, 'gauge-marker'));
     }
-    const lines = () => [`${format(value)} of ${format(max)}`,
+    const lines = () => [valueText ?? `${format(value)} of ${format(max)}`,
       geometry.markerX === null ? label : `${markerLabel}: ${format(marker)}`];
     bindTip(svg, tip, lines);
     holder.append(svg);

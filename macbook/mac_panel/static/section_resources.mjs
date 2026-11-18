@@ -32,17 +32,12 @@ export function render(data) {
   return {node: root, summary, level};
 }
 
-const pausedRows = data => [...(data.processes ?? []), ...(data.groups ?? []).flatMap(group => group.processes ?? [])]
-  .filter(row => row.stopped);
-
+// Overview attention comes only from the backend's health: a paused process is routine here and shows in the process list.
 export function attentionItems(data) {
   const level = healthLevel(data.health);
   const items = (data.health?.reasons ?? []).map(text => ({level: level === Level.ERROR ? Level.ERROR : Level.WARN, text, anchor: 'system'}));
   const unavailable = data.health?.unavailable ?? [];
   if (unavailable.length) items.push({level: Level.WARN, text: COPY.attention.probes(unavailable.join(', ')), anchor: 'system'});
-  // A process left stopped keeps its memory and does nothing, and nothing else on the page would say so.
-  const paused = new Set(pausedRows(data).map(row => row.pid)).size;
-  if (paused) items.push({level: Level.WARN, text: `${plural(paused, 'process', 'processes')} ${COPY.attention.paused}`, anchor: 'processes'});
   return items;
 }
 

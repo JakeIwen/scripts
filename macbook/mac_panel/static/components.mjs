@@ -82,7 +82,7 @@ export function card({title, level, summary, body, actions, anchor: id}) {
   return id ? anchor(result, id) : result;
 }
 
-// ---- info icon: hover/focus tooltip from data-tip (CSS attr()), click popover for touch and keyboard ----
+// ---- info icon: one fixed-position popover, shown on hover and pinned by a click, which also serves touch and keyboard ----
 
 const openInfos = new Set();
 let infoListeners = false;
@@ -92,8 +92,9 @@ function positionInfo({root, pop}) {
   const bounds = root.getBoundingClientRect();
   const left = Math.max(gutter, Math.min(bounds.left, innerWidth - pop.offsetWidth - gutter));
   const top = Math.max(gutter, Math.min(bounds.bottom + 6, innerHeight - pop.offsetHeight - gutter));
-  pop.style.setProperty('--popover-left', `${left - bounds.left}px`);
-  pop.style.setProperty('--popover-top', `${top - bounds.top}px`);
+  // Viewport coordinates: the popover is position: fixed so a table's overflow cannot clip it at a card edge.
+  pop.style.setProperty('--popover-left', `${left}px`);
+  pop.style.setProperty('--popover-top', `${top}px`);
 }
 
 function positionOpenInfos() {
@@ -108,6 +109,7 @@ function closeInfos(except) {
     if (item === except) return;
     item.button.setAttribute('aria-expanded', 'false');
     item.pop.hidden = true;
+    item.hover = false;
     openInfos.delete(item);
   });
 }
@@ -139,8 +141,29 @@ export function info(text) {
   const pop = node('span', text, 'info-pop');
   pop.setAttribute('role', 'note');
   pop.hidden = true;
-  const item = {root, button: trigger, pop};
+  const item = {root, button: trigger, pop, hover: false};
+  // The popover stands in for a CSS tooltip, which a table's overflow would clip at the card edge.
+  root.addEventListener('mouseenter', () => {
+    if (!pop.hidden) return;
+    closeInfos(item);
+    pop.hidden = false;
+    item.hover = true;
+    openInfos.add(item);
+    positionInfo(item);
+  });
+  root.addEventListener('mouseleave', () => {
+    if (!item.hover) return;
+    pop.hidden = true;
+    item.hover = false;
+    openInfos.delete(item);
+  });
   trigger.addEventListener('click', () => {
+    if (item.hover) {
+      // A click on a popover the hover opened pins it.
+      item.hover = false;
+      trigger.setAttribute('aria-expanded', 'true');
+      return;
+    }
     const opening = pop.hidden;
     closeInfos(item);
     pop.hidden = !opening;

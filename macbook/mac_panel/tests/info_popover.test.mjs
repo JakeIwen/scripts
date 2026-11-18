@@ -10,6 +10,7 @@ globalThis.innerHeight = 700;
 globalThis.getComputedStyle = () => ({getPropertyValue: () => '12px'});
 const {info} = await import('../static/components.mjs');
 
+// The popover is position: fixed, so its offsets are viewport coordinates rather than offsets from the icon.
 test('opening, resizing and scrolling keep the info popover in the viewport', () => {
   const root = info('Information');
   const [button, pop] = root.childNodes;
@@ -19,16 +20,37 @@ test('opening, resizing and scrolling keep the info popover in the viewport', ()
   pop.offsetHeight = 400;
   button.click();
   assert.equal(pop.hidden, false);
-  assert.equal(pop['--popover-left'], '-252px');
-  assert.equal(pop['--popover-top'], '-362px');
+  assert.equal(pop['--popover-left'], '98px');
+  assert.equal(pop['--popover-top'], '288px');
   globalThis.innerWidth = 300;
   pop.offsetWidth = 276;
   window.dispatchEvent(new Event('resize'));
-  assert.equal(pop['--popover-left'], '-338px');
+  assert.equal(pop['--popover-left'], '12px');
   bounds = {left: 40, top: 100, bottom: 116};
   window.dispatchEvent(new Event('scroll'));
-  assert.equal(pop['--popover-left'], '-28px');
-  assert.equal(pop['--popover-top'], '22px');
+  assert.equal(pop['--popover-left'], '12px');
+  assert.equal(pop['--popover-top'], '122px');
+  button.click();
+  assert.equal(pop.hidden, true);
+});
+
+test('hovering shows the popover, leaving hides it, and a click while hovering pins it', () => {
+  globalThis.innerWidth = 1440;
+  const root = info('Hover text');
+  const [button, pop] = root.childNodes;
+  root.getBoundingClientRect = () => ({left: 1400, top: 300, bottom: 316});
+  pop.offsetWidth = 280;
+  pop.offsetHeight = 60;
+  root.dispatchEvent(new Event('mouseenter'));
+  assert.equal(pop.hidden, false);
+  assert.equal(pop['--popover-left'], '1148px', 'kept inside the viewport at the right edge');
+  root.dispatchEvent(new Event('mouseleave'));
+  assert.equal(pop.hidden, true);
+  root.dispatchEvent(new Event('mouseenter'));
+  button.click();
+  root.dispatchEvent(new Event('mouseleave'));
+  assert.equal(pop.hidden, false, 'pinned by the click');
+  assert.equal(button.attributes['aria-expanded'], 'true');
   button.click();
   assert.equal(pop.hidden, true);
 });

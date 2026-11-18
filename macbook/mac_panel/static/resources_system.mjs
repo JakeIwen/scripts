@@ -1,4 +1,4 @@
-// The System card: health, four gauges of what is left, and the load, pressure, thermal and power readings.
+// The System card: health, four gauges of what is used, and the load, pressure, thermal and power readings.
 // A probe the backend could not read shows as unavailable, never as zero.
 import {gauge} from './charts.mjs';
 import {card, details, info, kv, node, tag} from './panel_dom.mjs';
@@ -16,17 +16,31 @@ export const healthLevel = health => HEALTH_LEVEL[health?.level] ?? Level.UNKNOW
 
 const known = value => value !== null && value !== undefined && Number.isFinite(Number(value));
 
-/** Gauge inputs as the amount left of a maximum, or null when either side is unreadable. */
+// Where each bar turns warn and error, as a fraction of what is used. Memory has none: the backend's pressure value
+// decides its colour, because a full cache is healthy and the fill alone would cry wolf.
+export const GAUGE_THRESHOLDS = Object.freeze({
+  cpu: {warn: 0.85, error: 0.95},
+  swap: {warn: 0.5, error: 0.8},
+  disk: {warn: 0.9, error: 0.95},
+});
+const PRESSURE_GAUGE_LEVEL = {normal: 'ok', warn: 'warn', critical: 'error'};
+
+/** Gauge inputs as the amount used of a maximum, or null when either side is unreadable. */
 const GAUGES = [
-  {key: 'cpu', format: formatPercent, read: system => (known(system.cpu_percent) ? {value: WHOLE - system.cpu_percent, max: WHOLE} : null)},
+  {key: 'cpu', format: formatPercent, read: system => (known(system.cpu_percent)
+    ? {value: system.cpu_percent, max: WHOLE, worse: GAUGE_THRESHOLDS.cpu, valueText: COPY_SYSTEM.cpuUsed(formatPercent(system.cpu_percent))} : null)},
   {key: 'memory', format: formatBytes, read: ({memory}) => (memory && known(memory.total) && known(memory.used)
-    ? {value: memory.total - memory.used, max: memory.total} : null)},
+    ? {value: memory.used, max: memory.total, level: PRESSURE_GAUGE_LEVEL[memory.pressure] ?? 'ok'} : null)},
   {key: 'swap', format: formatBytes, read: ({memory}) => {
     if (!memory || !known(memory.swap_total) || !known(memory.swap_used)) return null;
-    return memory.swap_total > 0 ? {value: memory.swap_total - memory.swap_used, max: memory.swap_total} : {note: COPY_SYSTEM.noSwap};
+    return memory.swap_total > 0 ? {value: memory.swap_used, max: memory.swap_total, worse: GAUGE_THRESHOLDS.swap} : {note: COPY_SYSTEM.noSwap};
   }},
-  {key: 'disk', format: formatBytes, read: ({disk}) => (disk && known(disk.total) && known(disk.free) ? {value: disk.free, max: disk.total} : null)},
+  {key: 'disk', format: formatBytes, read: ({disk}) => (disk && known(disk.total) && known(disk.free)
+    ? {value: disk.total - disk.free, max: disk.total, worse: GAUGE_THRESHOLDS.disk} : null)},
 ];
+
+/** Each gauge's input (what is used, its maximum, thresholds or forced level), or null / a note; exported for tests. */
+export const gaugeReadings = system => Object.fromEntries(GAUGES.map(spec => [spec.key, spec.read(system)]));
 
 function gaugeBlock(spec, system) {
   const label = COPY_SYSTEM.gauges[spec.key];

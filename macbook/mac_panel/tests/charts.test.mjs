@@ -77,6 +77,23 @@ test('gaugeGeometry clamps and grades the amount left against the spend line', (
   assert.equal(gaugeGeometry({value: 50, max: 100}, 100).markerX, null);
 });
 
+test('gaugeGeometry with `worse` fills with what is used and turns warn then error as it fills', () => {
+  const worse = {warn: 0.5, error: 0.8};
+  assert.deepEqual(gaugeGeometry({value: 20, max: 100, worse}, 200), {fraction: 0.2, fill: 40, markerX: null, level: 'ok'});
+  assert.equal(gaugeGeometry({value: 50, max: 100, worse}, 100).level, 'warn');
+  assert.equal(gaugeGeometry({value: 79, max: 100, worse}, 100).level, 'warn');
+  assert.equal(gaugeGeometry({value: 80, max: 100, worse}, 100).level, 'error');
+  assert.equal(gaugeGeometry({value: 100, max: 100, worse}, 100).fill, 100);
+  // Not "more is worse": the same fraction of an amount left stays graded by how little is left.
+  assert.equal(gaugeGeometry({value: 90, max: 100}, 100).level, 'ok');
+  assert.equal(gaugeGeometry({value: 10, max: 100}, 100).level, 'error');
+});
+
+test('gaugeGeometry takes an explicit level over the fill', () => {
+  assert.equal(gaugeGeometry({value: 95, max: 100, worse: {warn: 0.5, error: 0.8}, level: 'ok'}, 100).level, 'ok');
+  assert.equal(gaugeGeometry({value: 5, max: 100, level: 'warn'}, 100).level, 'warn');
+});
+
 test('scheduleLayout groups events into lanes, marks the future and places now', () => {
   const layout = scheduleLayout([
     {ts: 1800, lane: 'b'}, {ts: 1100, lane: 'a'}, {ts: 1600, lane: 'a'}, {ts: 5000, lane: 'a'},

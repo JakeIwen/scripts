@@ -13,16 +13,16 @@ globalThis.fetch = async (path, init) => {
 
 const {register} = await import('../static/panel_sections.mjs');
 const resources = await import('../static/section_resources.mjs');
-const {HEALTH_LEVEL, healthLevel} = await import('../static/resources_system.mjs');
+const {GAUGE_THRESHOLDS, HEALTH_LEVEL, gaugeReadings, healthLevel} = await import('../static/resources_system.mjs');
 const {ActionId, Scope, processActions, requestBody, resultText} = await import('../static/resources_actions.mjs');
-const {orderSessions} = await import('../static/resources_groups.mjs');
-const {ViewMode, SortKey, view, visibleRows} = await import('../static/resources_processes.mjs');
+const {SessionSort, orderSessions, processTree, sessionView} = await import('../static/resources_groups.mjs');
+const {ViewMode, SortKey, WINDOW_ROWS, listWindow, view, visibleRows} = await import('../static/resources_processes.mjs');
 const {Level} = await import('../static/status_cell.mjs');
 
 const noticeRoot = section('resources');
 register([{id: 'resources', endpoint: null, render: () => ({node: noticeRoot, summary: '', level: 'ok'})}]);
 const text = element => element.textContent;
-const reset = () => { Object.assign(view, {mode: ViewMode.APP, sort: SortKey.CPU, filter: ''}); calls.length = 0; reply = {applied: 1}; };
+const reset = () => { Object.assign(view, {mode: ViewMode.APP, sort: SortKey.CPU, filter: '', paused: false}); sessionView.sort = SessionSort.CPU; calls.length = 0; reply = {applied: 1}; };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 test('renders every card from the full fixture: sessions by name, nesting, totals, read-only rows', () => {
@@ -37,7 +37,7 @@ test('renders every card from the full fixture: sessions by name, nesting, total
   }
   const sessions = findAll(node, element => hasClass(element, 'session'));
   assert.deepEqual(sessions.map(element => element.dataset.key),
-    ['session-claude:5000', 'session-codex:6000', 'session-claude:4100', 'session-claude:4200']);
+    ['session-claude:4100', 'session-claude:4200', 'session-codex:6000', 'session-claude:5000'], 'default sort is CPU, busiest first');
   assert.ok(content.includes('Claude'), 'kind tag');
   assert.ok(content.includes('Codex'));
   assert.match(content, /Claude: 3 sessions · 9 processes/);
@@ -50,7 +50,45 @@ test('renders every card from the full fixture: sessions by name, nesting, total
 test('nested sessions sit directly under the session they started in, by the outer group id', () => {
   const groups = payload().groups.filter(group => group.kind === 'claude');
   const order = orderSessions(groups).map(({group, depth}) => `${depth}:${group.name}`);
-  assert.deepEqual(order, ['0:agent-b', '0:panel work', '1:inner']);
+  assert.deepEqual(order, ['0:panel work', '1:inner', '0:agent-b'], 'the default is CPU, busiest first');
+  const byName = orderSessions(groups, SessionSort.NAME).map(({group, depth}) => `${depth}:${group.name}`);
+  assert.deepEqual(byName, ['0:agent-b', '0:panel work', '1:inner']);
+  const nested = [...groups, {...groups[0], id: 'claude:4300', name: 'second inner', parent: 'claude:4100', cpu: 50, rss: 1}];
+  const memory = orderSessions(nested, SessionSort.MEMORY).map(({group}) => group.name);
+  assert.deepEqual(memory, ['panel work', 'inner', 'second inner', 'agent-b'], 'children stay under their parent, ordered by the sort');
+  const cpu = orderSessions(nested, SessionSort.CPU).map(({group}) => group.name);
+  assert.deepEqual(cpu, ['panel work', 'second inner', 'inner', 'agent-b']);
+});
+
+test('the session sort headers re-order the rows, mark the chosen one and survive a re-render', () => {
+  reset();
+  const {node} = resources.render(payload());
+  const keys = list => findAll(list, element => hasClass(element, 'session')).map(element => element.dataset.key);
+  const [byMemory] = withKey(node, 'session-sort-rss');
+  byMemory.click();
+  assert.equal(sessionView.sort, SessionSort.MEMORY);
+  assert.deepEqual(keys(node), ['session-claude:4100', 'session-claude:4200', 'session-codex:6000', 'session-claude:5000']);
+  assert.equal(withKey(node, 'session-sort-rss')[0].attributes['aria-pressed'], 'true');
+  assert.equal(withKey(node, 'session-sort-cpu')[0].attributes['aria-pressed'], 'false');
+  withKey(node, 'session-sort-name')[0].click();
+  assert.deepEqual(keys(node), ['session-claude:5000', 'session-codex:6000', 'session-claude:4100', 'session-claude:4200']);
+  assert.deepEqual(keys(resources.render(payload()).node), keys(node), 'a poll keeps the choice');
+});
+
+test('a session tree is a table flagged for the compact phone layout, one row per process, indented by depth', () => {
+  const group = payload().groups.find(entry => entry.id === 'claude:4100');
+  const tree = processTree(group);
+  assert.ok(tree.classes.has('tree-table'));
+  const rows = findAll(tree, element => element.tagName === 'TR');
+  assert.equal(rows.length, group.processes.length + 1);
+  const heads = findAll(rows[0], element => element.tagName === 'TH').map(element => element.textContent);
+  assert.deepEqual(heads, ['Process', 'PID', 'CPU', 'Memory', 'Age']);
+  const depths = findAll(tree, element => hasClass(element, 'tree-name')).map(element => element['--depth']);
+  assert.deepEqual(depths, group.processes.map(proc => String(proc.depth)));
+  const [name, pid, cpu] = findAll(rows[3], element => element.tagName === 'TD');
+  assert.equal(name.textContent, 'node');
+  assert.equal(pid.dataset.label, 'PID');
+  assert.equal(cpu.textContent, '4.9 %');
 });
 
 test('health levels map through one table, anything else is unknown', () => {
@@ -71,8 +109,8 @@ test('unavailable probes read as unavailable and every null is tolerated', () =>
   assert.equal(level, Level.UNKNOWN);
   assert.match(content, /Not available right now: pressure, thermal/);
   assert.match(content, /Memory pressure\s*unavailable/);
-  assert.match(content, /CPU idle\s*unavailable/);
-  assert.match(content, /Disk free\s*unavailable/);
+  assert.match(content, /CPU\s*unavailable/);
+  assert.match(content, /Disk\s*unavailable/);
   assert.ok(content.includes('No Claude or Codex sessions are running.'));
   assert.ok(content.includes('No LLM infrastructure processes found.'));
   assert.ok(content.includes('The van-compute worker is not running.'));
@@ -115,7 +153,23 @@ test('swap with no total reads as none in use, not as an empty gauge', () => {
   const data = payload();
   data.system.memory.swap_total = 0;
   data.system.memory.swap_used = 0;
-  assert.match(text(resources.render(data).node), /Swap free\s*none in use/);
+  assert.match(text(resources.render(data).node), /Swap\s*none in use/);
+});
+
+test('the System gauges read what is used, with colour thresholds in one table and memory graded by pressure', () => {
+  const GIB = 1024 ** 3;
+  const readings = gaugeReadings({cpu_percent: 20, memory: {total: 24 * GIB, used: 20 * GIB, pressure: 'warn', swap_total: 5 * GIB, swap_used: 4 * GIB},
+    disk: {total: 926 * GIB, free: 294 * GIB}});
+  assert.deepEqual(readings.cpu, {value: 20, max: 100, worse: GAUGE_THRESHOLDS.cpu, valueText: '20 % used'});
+  assert.deepEqual(readings.memory, {value: 20 * GIB, max: 24 * GIB, level: 'warn'});
+  assert.deepEqual(readings.swap, {value: 4 * GIB, max: 5 * GIB, worse: GAUGE_THRESHOLDS.swap});
+  assert.deepEqual(readings.disk, {value: 632 * GIB, max: 926 * GIB, worse: GAUGE_THRESHOLDS.disk});
+  assert.deepEqual(Object.keys(GAUGE_THRESHOLDS), ['cpu', 'swap', 'disk']);
+  const calm = gaugeReadings({memory: {total: GIB, used: GIB, pressure: 'normal', swap_total: 0, swap_used: 0}});
+  assert.equal(calm.memory.level, 'ok', 'a full memory at normal pressure is not an alarm');
+  assert.deepEqual(calm.swap, {note: 'none in use'});
+  assert.equal(calm.cpu, null);
+  assert.equal(gaugeReadings({memory: {total: GIB, used: GIB, pressure: 'critical'}}).memory.level, 'error');
 });
 
 test('blocked rows show no buttons, only their reason behind an info popover', () => {
@@ -209,10 +263,11 @@ test('sort, view and filter survive a second render', () => {
   view.filter = 'node';
   const second = resources.render(payload());
   const content = text(second.node);
-  assert.ok(content.includes('Showing 2 of 5 listed'));
+  assert.ok(content.includes('showing 2 of 2 matching'));
   const [filter] = findAll(second.node, element => element.dataset?.key === 'process-filter');
   assert.equal(filter.value, 'node');
-  const pressed = findAll(second.node, element => element.attributes?.['aria-pressed'] === 'true').map(element => element.textContent);
+  const controls = findAll(second.node, element => hasClass(element, 'process-controls'))[0];
+  const pressed = findAll(controls, element => element.attributes?.['aria-pressed'] === 'true').map(element => element.textContent);
   assert.ok(pressed.includes('By process') && pressed.includes('Memory'));
   assert.ok(!pressed.includes('By app') && !pressed.includes('CPU'));
 });
@@ -225,7 +280,7 @@ test('typing in the filter redraws only the list and keeps the input element', (
   filter.dispatchEvent(new Event('input'));
   assert.equal(view.filter, 'safari');
   assert.equal(filter.defaultValue, 'safari', 'a poll is not held back as an unsaved edit');
-  assert.ok(text(node).includes('Showing 1 of 2 listed'));
+  assert.ok(text(node).includes('showing 1 of 1 matching'));
   assert.equal(findAll(node, element => element.dataset?.key === 'process-filter')[0], filter);
 });
 
@@ -235,6 +290,56 @@ test('visibleRows filters on name, pid and group and sorts by the chosen key, ti
   assert.deepEqual(visibleRows(rows, {sort: 'rss', filter: ''}).map(row => row.name), ['c', 'a', 'b']);
   assert.deepEqual(visibleRows(rows, {sort: 'cpu', filter: 'CLAUDE'}).map(row => row.name), ['c']);
   assert.deepEqual(visibleRows(rows, {sort: 'cpu', filter: '3'}).map(row => row.name), ['a']);
+});
+
+const manyProcesses = count => Array.from({length: count}, (_, n) => ({pid: 1000 + n, ppid: 1, user: 'me', name: n === 77 ? 'cfprefsd' : `proc${n}`,
+  cpu: n === 77 ? 0 : 100 - n / 10, rss: (count - n) * 1024, nice: 0, stopped: n === 90 || n === 91, started: 'Tue Nov 17 06:00:00 2026', group: null, blocked: null}));
+const countRows = root => findAll(findAll(root, element => hasClass(element, 'process-list'))[0], element => element.tagName === 'TR').length - 1;
+
+test('the process list draws the first 50 matches and says how many more match, so a name always finds a row', () => {
+  reset();
+  view.mode = ViewMode.PROCESS;
+  const data = {...payload(), processes: manyProcesses(212)};
+  const {node} = resources.render(data);
+  assert.equal(countRows(node), WINDOW_ROWS);
+  assert.ok(text(node).includes('showing 50 of 212'));
+  assert.ok(!text(node).includes('cfprefsd'), 'idle process 77 sorts below the window');
+  const [filter] = findAll(node, element => element.dataset?.key === 'process-filter');
+  filter.value = 'cfprefsd';
+  filter.dispatchEvent(new Event('input'));
+  assert.equal(countRows(node), 1);
+  assert.ok(text(node).includes('cfprefsd'));
+  assert.ok(text(node).includes('showing 1 of 1 matching'));
+  filter.value = 'proc';
+  filter.dispatchEvent(new Event('input'));
+  assert.ok(text(node).includes('showing 50 of 211 matching'));
+  assert.equal(listWindow({rows: rows => rows.processes, pausedApplies: true}, data).rows.length, WINDOW_ROWS);
+});
+
+test('the Paused chip narrows By process to stopped rows, keeps its state across a render and is hidden in By app', () => {
+  reset();
+  view.mode = ViewMode.PROCESS;
+  const data = {...payload(), processes: manyProcesses(212)};
+  const {node} = resources.render(data);
+  const [chip] = withKey(node, 'process-paused');
+  assert.equal(chip.textContent, 'Paused (2)');
+  assert.equal(chip.attributes['aria-pressed'], 'false');
+  chip.click();
+  assert.equal(view.paused, true);
+  assert.equal(chip.attributes['aria-pressed'], 'true');
+  assert.equal(countRows(node), 2);
+  assert.ok(text(node).includes('showing 2 of 2 matching'));
+  assert.equal(withKey(resources.render(data).node, 'process-paused')[0].attributes['aria-pressed'], 'true', 'a poll keeps it');
+  withKey(node, 'view-app')[0].click();
+  assert.ok(!text(node).includes('matching'), 'the chip does not narrow By app, which has no stopped rows');
+  assert.equal(countRows(node), data.apps.length);
+  view.mode = ViewMode.PROCESS;
+});
+
+test('the paused tag stays on a stopped row', () => {
+  reset();
+  view.mode = ViewMode.PROCESS;
+  assert.ok(text(resources.render(payload()).node).includes('paused'));
 });
 
 test('search items stage armed actions for sessions and processes, and never run one', () => {
@@ -251,12 +356,13 @@ test('search items stage armed actions for sessions and processes, and never run
   assert.equal(calls.length, 0);
 });
 
-test('attention items name health reasons, unavailable probes and paused processes', () => {
+test('attention items come from the backend health only: a paused process is not an alarm', () => {
   const data = payload();
-  assert.deepEqual(resources.attentionItems(data).map(item => item.text), ['1 process paused']);
+  assert.ok(data.processes.some(row => row.stopped), 'the fixture has a paused process');
+  assert.deepEqual(resources.attentionItems(data), []);
   data.health = {level: 'warn', reasons: ['Memory pressure is high'], unavailable: ['thermal']};
   const items = resources.attentionItems(data);
-  assert.deepEqual(items.map(item => item.level), [Level.WARN, Level.WARN, Level.WARN]);
+  assert.deepEqual(items.map(item => item.level), [Level.WARN, Level.WARN]);
   assert.equal(items[0].text, 'Memory pressure is high');
   assert.equal(items[1].text, 'Resource probes unavailable: thermal');
   data.health = {level: 'error', reasons: ['Memory pressure is critical'], unavailable: []};
@@ -283,7 +389,8 @@ test('history series drop nulls, keep real zeros and skip a chart with nothing t
 test('choosing a view or sort updates the pressed state at once, without a re-render', () => {
   reset();
   const {node} = resources.render(payload());
-  const pressed = () => findAll(node, element => element.attributes?.['aria-pressed'] === 'true').map(element => element.textContent);
+  const controls = findAll(node, element => hasClass(element, 'process-controls'))[0];
+  const pressed = () => findAll(controls, element => element.attributes?.['aria-pressed'] === 'true').map(element => element.textContent);
   withKey(node, 'view-process')[0].click();
   withKey(node, 'sort-rss')[0].click();
   assert.ok(pressed().includes('By process') && pressed().includes('Memory'));

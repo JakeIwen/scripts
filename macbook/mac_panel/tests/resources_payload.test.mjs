@@ -11,7 +11,7 @@ const real = () => JSON.parse(readFileSync(new URL('./resources_payload.json', i
 globalThis.fetch = async () => ({ok: true, status: 200, json: async () => ({series: {}})});
 const {register} = await import('../static/panel_sections.mjs');
 const resources = await import('../static/section_resources.mjs');
-const {ViewMode, view} = await import('../static/resources_processes.mjs');
+const {ViewMode, view, visibleRows} = await import('../static/resources_processes.mjs');
 register([{id: 'resources', endpoint: null, render: () => ({node: section('resources'), summary: '', level: 'ok'})}]);
 
 const text = element => element.textContent;
@@ -74,4 +74,13 @@ test('summary, search and attention items read the real payload without error', 
   assert.ok(titles.includes('System'));
   assert.ok(data.groups.filter(group => ['claude', 'codex'].includes(group.kind)).every(group => titles.includes(group.name)));
   assert.ok(resources.attentionItems(data).some(item => item.text === 'Memory pressure is elevated'));
+});
+
+test('real paused rows are found by the Paused filter and never raise an Overview alarm; an idle process is found by name', () => {
+  const data = real();
+  const stopped = data.processes.filter(row => row.stopped);
+  assert.ok(stopped.length > 0, 'the payload holds paused processes');
+  assert.deepEqual(visibleRows(data.processes, {sort: 'cpu', filter: '', paused: true}).map(row => row.pid).sort(), stopped.map(row => row.pid).sort());
+  assert.ok(!resources.attentionItems(data).some(item => /paused/.test(item.text)));
+  assert.ok(visibleRows(data.processes, {sort: 'cpu', filter: 'cfprefsd'}).length > 0);
 });

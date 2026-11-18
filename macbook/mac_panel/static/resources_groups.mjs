@@ -21,15 +21,27 @@ export const groupKind = id => (id ? String(id).split(':')[0] : null);
 export const groupsOfKind = (data, kinds) => (data.groups ?? []).filter(group => kinds.includes(group.kind));
 const sum = (groups, key) => groups.reduce((total, group) => total + (group[key] ?? 0), 0);
 
-/** Sessions by name, each nested session directly under the one it started in (`parent` is the outer group's id). */
-export function orderSessions(groups) {
+// The choice lives in module state so the 15 s re-render keeps it, as the process list's sort does.
+export const SessionSort = Object.freeze({NAME: 'name', CPU: 'cpu', MEMORY: 'rss'});
+export const sessionView = {sort: SessionSort.CPU};
+const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+const SESSION_COMPARE = {
+  [SessionSort.NAME]: byName,
+  [SessionSort.CPU]: (a, b) => (b.cpu ?? 0) - (a.cpu ?? 0) || byName(a, b),
+  [SessionSort.MEMORY]: (a, b) => (b.rss ?? 0) - (a.rss ?? 0) || byName(a, b),
+};
+// Which header cell (by index into COPY.sessions.heads) sorts by what.
+const SORT_HEADS = Object.freeze({0: SessionSort.NAME, 2: SessionSort.CPU, 3: SessionSort.MEMORY});
+
+/** Sessions in the chosen order, each nested session directly under the one it started in (`parent` is the outer group's id), whatever the sort. */
+export function orderSessions(groups, sort = sessionView.sort) {
   const outer = group => groups.find(other => other.id === group.parent);
-  const byName = (a, b) => String(a.name).localeCompare(String(b.name));
-  const roots = groups.filter(group => !group.parent || !outer(group)).sort(byName);
+  const compare = SESSION_COMPARE[sort] ?? SESSION_COMPARE[SessionSort.CPU];
+  const roots = groups.filter(group => !group.parent || !outer(group)).sort(compare);
   const ordered = [];
   const place = (group, depth) => {
     ordered.push({group, depth});
-    groups.filter(child => child.parent && outer(child) === group).sort(byName).forEach(child => place(child, depth + 1));
+    groups.filter(child => child.parent && outer(child) === group).sort(compare).forEach(child => place(child, depth + 1));
   };
   roots.forEach(group => place(group, 0));
   return ordered;
@@ -42,14 +54,17 @@ function indented(content, depth) {
   return cell;
 }
 
-function processTree(group) {
+// Desktop shows a table; on a phone CSS lays each row out as name, CPU and memory on one line and PID and age under it.
+export function processTree(group) {
   const rows = (group.processes ?? []).map(proc => {
     const name = node('span');
     name.append(proc.name);
     if (proc.stopped) name.append(' ', tag(COPY.sessions.paused, Level.WARN));
     return [indented(name, proc.depth ?? 0), String(proc.pid), formatPercent(proc.cpu), formatBytes(proc.rss), formatAge(proc.started)];
   });
-  return numberTable(COPY.sessions.treeHeads, rows, TREE_NUMBERS);
+  const wrapper = numberTable(COPY.sessions.treeHeads, rows, TREE_NUMBERS);
+  wrapper.classList.add('tree-table');
+  return wrapper;
 }
 
 function sessionCells(group) {
@@ -81,10 +96,41 @@ function sessionRow({group, depth}) {
   return result;
 }
 
-function sessionsHead() {
+function sessionsHead(onSort) {
   const head = node('div', null, 'session-row session-head');
-  COPY.sessions.heads.forEach(text => head.append(node('span', text, 'session-cell')));
+  head.append(node('span', COPY.sessions.sortLabel, 'sort-label'));
+  const buttons = [];
+  const sync = () => buttons.forEach(({sort, button}) => button.setAttribute('aria-pressed', String(sessionView.sort === sort)));
+  COPY.sessions.heads.forEach((text, index) => {
+    const sort = SORT_HEADS[index];
+    if (!sort) { head.append(node('span', text, 'session-cell')); return; }
+    const cell = node('span', null, 'session-cell sort-cell');
+    const button = node('button', text, 'sort-head');
+    button.type = 'button';
+    button.dataset.key = `session-sort-${sort}`;
+    button.title = COPY.sessions.sortBy(text);
+    // The press updates itself and the rows: a focused control pauses the poll, so no re-render would.
+    button.addEventListener('click', () => { sessionView.sort = sort; sync(); onSort(); });
+    buttons.push({sort, button});
+    cell.append(button);
+    head.append(cell);
+  });
+  sync();
   return head;
+}
+
+function sessionList(sessions) {
+  const list = node('div', null, 'sessions');
+  const rows = () => orderSessions(sessions).map(sessionRow);
+  const draw = () => {
+    // Rebuilt rows would close every opened session, so reopen the ones that were.
+    const open = new Set([...(list.querySelectorAll?.('details[open]') ?? [])].map(item => item.dataset.key));
+    const fresh = rows();
+    fresh.forEach(item => { if (open.has(item.dataset.key)) item.open = true; });
+    list.replaceChildren(list.childNodes[0], ...fresh);
+  };
+  list.append(sessionsHead(draw), ...rows());
+  return list;
 }
 
 /** One line per kind: how many sessions and what they hold together. Memory is a sum, so an upper bound. */
@@ -114,9 +160,7 @@ export function sessionsCard(data) {
   const sessions = groupsOfKind(data, SESSION_KINDS);
   const body = node('div');
   if (sessions.length) {
-    const list = node('div', null, 'sessions');
-    list.append(sessionsHead(), ...orderSessions(sessions).map(sessionRow));
-    body.append(list);
+    body.append(sessionList(sessions));
   } else {
     body.append(emptyState(COPY.sessions.empty));
   }
