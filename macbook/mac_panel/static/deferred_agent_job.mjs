@@ -50,6 +50,18 @@ export function collectedLaterOnCard(job, task) {
 
 export const collectedLaterText = COPY.collectedLater;
 
+/** The card's status for its latest panel run, or undefined for the plain done/failed wording. Exit 4 is never shown
+ * as a failure: a Pi run still going is "collected later", a "not ready ..." line is shown as the CLI wrote it, and a
+ * run-now whose Pi run has since ended only says it started that run (the job's own state says how it ended). */
+export function cardOutcome(job, task) {
+  if (task.exit_status !== RUN_NOW_PENDING) return undefined;
+  if (collectedLaterOnCard(job, task)) return {level: Level.OK, text: COPY.collectedLater};
+  const message = task.message ?? '';
+  const notReady = message.match(NOT_READY)?.[0];
+  if (notReady) return {level: Level.IDLE, text: notReady};
+  return STILL_RUNNING.test(message) ? {level: Level.IDLE, text: COPY.startedRun} : undefined;
+}
+
 /** A vanpi job that has launched is moved on only by retry or run-now, so it has no Reschedule. */
 export const rescheduleLocked = job => job.host === 'vanpi' && job.remote_state !== 'unlaunched';
 

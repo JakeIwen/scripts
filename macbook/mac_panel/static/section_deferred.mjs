@@ -7,7 +7,7 @@ import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {addJobForm} from './section_deferred_add.mjs';
 import {addAgentForm} from './section_deferred_agent.mjs';
-import {LAUNCH_UNKNOWN, agentTags, attemptOf, collectedLaterOnCard, collectedLaterText, describeRunNow, relaunchConfirm,
+import {LAUNCH_UNKNOWN, agentTags, attemptOf, cardOutcome, describeRunNow, relaunchConfirm,
   relaunchFields, remoteRows, rescheduleLocked} from './deferred_agent_job.mjs';
 import {readyDetails, stateLabel} from './section_deferred_ready.mjs';
 import {Level, status, worst} from './status_cell.mjs';
@@ -102,7 +102,7 @@ function jobCard(job, tasks) {
   if (job.description) body.append(node('p', job.description));
   body.append(kv([['Due', timeWithAbsolute(job.due)]]));
   const task = latestTask(tasks, job.id);
-  if (task) body.append(taskLine(task, collectedLaterOnCard(job, task) ? {level: Level.OK, text: collectedLaterText} : undefined));
+  if (task) body.append(taskLine(task, cardOutcome(job, task)));
   body.append(readyDetails(job), jobDetails(job), jobActions(job));
   return card({title: job.name, level: failed ? Level.ERROR : Level.IDLE, body, anchor: jobAnchor(job)});
 }

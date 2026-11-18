@@ -389,7 +389,9 @@ warning` line and the check carries on. When a job is delivered and deleted whil
 it still owes warnings for an earlier attempt, they move to `outbox/JOB` under the
 queue root and later checks send them the same way (the folder goes once nothing
 is left to try); only the warning that this very report was not delivered is
-dropped, since the delivery answers it. A failure `run-now` reports at the terminal raises no warning. That last job stays `pending`
+dropped, since the delivery answers it. A warning sent from the outbox ends by saying
+the job was deleted, so only its Pi commands still apply. Cancelling a job (including
+`--abandon`) drops the warnings it still owes along with it. A failure `run-now` reports at the terminal raises no warning. That last job stays `pending`
 with its report saved, resends it at every check and never touches the Pi again:
 the report itself has the saved-report guarantee (at least once), while a
 failure warning is only retried until one send succeeds.

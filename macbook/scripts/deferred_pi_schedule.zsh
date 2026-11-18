@@ -228,13 +228,22 @@ pi_check() {  # DIR NOW: the checker's turn for a vanpi job whose record is trus
   [[ ! -d $1 ]] || pi_send_owed $1   # a delivered job left what it owed in the outbox (pi_send_outbox)
 }
 
+# Ends a warning that waited in the outbox: the job it names was deleted after a later attempt succeeded.
+pi_outbox_note='Sent late: a later attempt of this job succeeded and the job was deleted, so only the commands above still apply.'
+
 pi_keep_owed() {  # DIR: a delivered job is about to be deleted; what it still owes moves to the outbox
-  # Except the warning that this very report was not delivered: its delivery answers it.
+  # Except the warning that this very report was not delivered: its delivery answers it. A kept
+  # warning's "Job kept at ..." advice no longer holds, so it says the job is gone instead.
   local dir=$1 line box=$pi_outbox/${1:t}
-  local -a keep
+  local -a keep fields
   [[ -f $dir/$pi_alerts_owed ]] || return 0
   for line in "${(@f)$(<$dir/$pi_alerts_owed)}"; do
-    [[ ${line%%$'\t'*} == "delivery $pi[run]" ]] || keep+=("$line")
+    [[ ${line%%$'\t'*} == "delivery $pi[run]" ]] && continue
+    fields=("${(@ps:\t:)line}")
+    # A malformed line passes through as it is; pi_send_owed logs and drops it.
+    (( ${#fields} == 4 )) &&
+      line="$fields[1]"$'\t'"$fields[2]"$'\t'"$fields[3]"$'\t'"${fields[4]%% Job kept at *} $pi_outbox_note"
+    keep+=("$line")
   done
   (( ${#keep} )) || return 0
   /bin/mkdir -p -m 700 -- $box

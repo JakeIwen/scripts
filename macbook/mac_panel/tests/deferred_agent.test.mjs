@@ -9,6 +9,7 @@ const {agentBody, agentProblemsFromError, validateAgent} = await import('../stat
 const {agentTags, relaunchConfirm} = await import('../static/deferred_agent_job.mjs');
 const {addAgentForm, modelControl} = await import('../static/section_deferred_agent.mjs');
 const {render, searchItems} = await import('../static/section_deferred.mjs');
+const {Level} = await import('../static/status_cell.mjs');
 
 const mac = {host: 'mac', due: '2026-11-20T09:30', name: 'check-build', description: '', prompt: 'Check the build.\n',
   pi_prompt_path: '', model: '', effort: 'medium', cwd: '', ready: '', attempts: '', timeout: '', run_timeout: ''};
@@ -192,6 +193,22 @@ test('a still-running Pi run-now is not a failure, and the card shows it only wh
   assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'finished'}, pending), false);
   assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'failed'}, pending), false);
   assert.equal(collectedLaterOnCard({host: 'mac', remote_state: null}, pending), false);
+});
+
+test('the card never calls an exit-4 run-now a failure: not ready, still running, or since ended', async () => {
+  const {cardOutcome, collectedLaterText} = await import('../static/deferred_agent_job.mjs');
+  const notReady = 'not ready 1120-x; the checker retries from its due time 2026-11-20 09:00; output in /j/last.log';
+  const running = {exit_status: 4, message: 'running 1120-x: its Pi run is going'};
+  assert.deepEqual(cardOutcome({host: 'mac', remote_state: null}, {exit_status: 4, message: notReady}),
+    {level: Level.IDLE, text: notReady});
+  assert.deepEqual(cardOutcome({host: 'vanpi', remote_state: 'unlaunched'}, {exit_status: 4, message: notReady}),
+    {level: Level.IDLE, text: notReady});
+  assert.deepEqual(cardOutcome({host: 'vanpi', remote_state: 'running'}, running), {level: Level.OK, text: collectedLaterText});
+  const ended = cardOutcome({host: 'vanpi', remote_state: 'failed'}, running);
+  assert.equal(ended.level, Level.IDLE);
+  assert.notEqual(ended.text, collectedLaterText);
+  assert.equal(cardOutcome({host: 'vanpi', remote_state: 'failed'}, {exit_status: 1, message: 'boom'}), undefined);
+  assert.equal(cardOutcome({host: 'mac', remote_state: null}, {exit_status: 4, message: 'Tool exited 4'}), undefined);
 });
 
 const data = jobs => ({checker: {agent_loaded: true, stale: false, last_run: null}, jobs_dir: '/j', tasks: [], jobs});

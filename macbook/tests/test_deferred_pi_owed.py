@@ -190,7 +190,11 @@ class OwedWarningTests(PiHarness):
         self.deferred("run-due")
         title = f"Deferred job failed: {job.name}"
         self.assertEqual(self.alerts(), [title])
-        self.assertIn(old, next(body for got, _, body in WarningTopic.received if got == title))
+        body = next(body for got, _, body in WarningTopic.received if got == title)
+        self.assertIn(old, body)
+        # The job is gone by the time this is sent, so it must not say the job was kept.
+        self.assertNotIn("Job kept at", body)
+        self.assertIn("job was deleted", body)
         self.assertEqual(list(self.root.glob("outbox/*")), [])
 
     def test_a_not_delivered_warning_is_superseded_when_that_report_arrives(self):
