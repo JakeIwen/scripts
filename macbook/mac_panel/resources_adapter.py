@@ -162,8 +162,12 @@ class SnapshotBuilder:
         return top_union(records, TOP_APPS, lambda r: r['cpu'], lambda r: r['rss'])
 
     def processes(self) -> list[ProcessRecord]:
-        rows = top_union(list(self.table.rows.values()), TOP_PROCESSES,
-                         lambda row: row.cpu, lambda row: row.rss_bytes)
+        busiest = top_union(list(self.table.rows.values()), TOP_PROCESSES,
+                            lambda row: row.cpu, lambda row: row.rss_bytes)
+        # A paused process stops using CPU and is small, so it would drop out of the busiest lists and
+        # could no longer be resumed from the page.
+        listed = {row.pid for row in busiest}
+        rows = busiest + [row for row in self.table.rows.values() if row.stopped and row.pid not in listed]
         return [ProcessRecord(pid=row.pid, ppid=row.ppid, user=user_name(row.uid), name=row.name,
                               cpu=round(row.cpu, 1), rss=row.rss_bytes, nice=row.nice,
                               stopped=row.stopped, started=row.started,

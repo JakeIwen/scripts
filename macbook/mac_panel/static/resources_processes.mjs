@@ -60,14 +60,16 @@ function segmented({label, key, options, read, write, onChange}) {
   const group = node('div', null, 'range-toggle');
   group.setAttribute('role', 'group');
   group.setAttribute('aria-label', label);
-  const buttons = Object.entries(options).map(([value, text]) => {
+  const buttons = [];
+  // A click updates the pressed state itself: a focused filter pauses the poll, so no re-render would.
+  const sync = () => buttons.forEach(({value, choice}) => choice.setAttribute('aria-pressed', String(read() === value)));
+  Object.entries(options).forEach(([value, text]) => {
     const choice = node('button', text, 'range-choice');
     choice.type = 'button';
     choice.dataset.key = `${key}-${value}`;
-    choice.addEventListener('click', () => { write(value); onChange(); });
-    return {value, choice};
+    choice.addEventListener('click', () => { write(value); sync(); onChange(); });
+    buttons.push({value, choice});
   });
-  const sync = () => buttons.forEach(({value, choice}) => choice.setAttribute('aria-pressed', String(read() === value)));
   group.append(...buttons.map(entry => entry.choice));
   sync();
   return {group, sync};

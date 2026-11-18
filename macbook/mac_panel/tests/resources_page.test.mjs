@@ -279,3 +279,13 @@ test('history series drop nulls, keep real zeros and skip a chart with nothing t
   assert.deepEqual(cpu.points.map(point => point.value), [0, 12]);
   assert.equal(cpu.label, 'Claude');
 });
+
+test('choosing a view or sort updates the pressed state at once, without a re-render', () => {
+  reset();
+  const {node} = resources.render(payload());
+  const pressed = () => findAll(node, element => element.attributes?.['aria-pressed'] === 'true').map(element => element.textContent);
+  withKey(node, 'view-process')[0].click();
+  withKey(node, 'sort-rss')[0].click();
+  assert.ok(pressed().includes('By process') && pressed().includes('Memory'));
+  assert.ok(!pressed().includes('By app') && !pressed().includes('CPU'));
+});

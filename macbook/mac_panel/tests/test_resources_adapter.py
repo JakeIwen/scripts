@@ -209,6 +209,15 @@ class AdapterReadTests(AdapterFixture):
                          ('zsh', None, process['user']))
         self.assertIsNotNone(process['blocked'])
 
+    def test_a_paused_idle_process_stays_listed_so_it_can_be_resumed(self):
+        busy = [(1000 + n, 1, f'/usr/bin/busy{n}', {'cpu': 50.0 + n, 'rss_kb': 100000 + n}) for n in range(100)]
+        paused = (2000, 1, '/bin/sleep 900', {'state': 'T', 'cpu': 0.0, 'rss_kb': 100})
+        idle = (2001, 1, '/bin/sleep 901', {'cpu': 0.0, 'rss_kb': 100})
+        self.reader = FakeReader(make_table(*WORLD, *busy, paused, idle))
+        listed = {row['pid']: row for row in self.adapter().read()['processes']}
+        self.assertTrue(listed[2000]['stopped'])
+        self.assertNotIn(2001, listed)
+
     def test_a_registry_entry_for_a_reused_pid_is_ignored(self):
         self.write_registry(200, name='Old session', procStart='Mon Nov  2 01:00:00 2026')
         self.runner.answers[(LSOF, '-a', '-p', '200,300', '-Fpfn')] = CommandResult(
