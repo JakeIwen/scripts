@@ -24,14 +24,23 @@ def tail_log(path):
 
 
 def with_remote_state(record, pi_dir):
-    """Adds remote_state, remote_run and remote_token; null for jobs that do not run on vanpi."""
+    """Adds remote_state, remote_run, remote_token and relaunch_id; null for jobs that do not run on vanpi.
+
+    relaunch_id is the id `retry`/`run-now --relaunch` must name before another
+    run may start: set only while the job's attempt is unresolved and nothing
+    is left to collect (a held launch, or a run past its collection deadline)."""
     if not pi_dir:
-        return {**record, "remote_state": None, "remote_run": None, "remote_token": None}
+        return {**record, "remote_state": None, "remote_run": None, "remote_token": None, "relaunch_id": None}
+    job = PiJob(pi_dir)
     try:
-        state = snapshot(PiJob(pi_dir))
+        state = snapshot(job)
     except StateError as error:
-        return {"id": record["id"], "valid": False, "problem": f"vanpi run state unreadable: {error}"}
-    return {**record, "remote_state": state.state.value, "remote_run": state.run_id, "remote_token": state.token}
+        ids = ", ".join(job.recoverable_ids()) or "none recoverable"
+        return {"id": record["id"], "valid": False,
+                "problem": f"vanpi run state unreadable: {error} (ids found: {ids})"}
+    relaunch = state.attempt_id if state.unresolved and not state.owes else None
+    return {**record, "remote_state": state.state.value, "remote_run": state.run_id, "remote_token": state.token,
+            "relaunch_id": relaunch}
 
 
 def main():

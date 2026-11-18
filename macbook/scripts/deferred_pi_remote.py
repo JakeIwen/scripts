@@ -27,9 +27,10 @@ LAUNCHER_USAGE = 2  # pi_agent.py: usage or launch error, nothing was started
 # normally gives up first and reports why.
 SSH_TIMEOUT, STATUS_TIMEOUT, LAUNCH_TIMEOUT = 30, 90, 180
 MIN_CALL = 5  # a call with less time left than this is not started
-# Runs listed to find a launch token, widened once when the first listing is
-# full; the Pi prunes runs after 30 days, so the larger one normally holds all.
-LIST_LIMITS = (500, 2000)
+# Runs listed to find a launch token: each listing asks for more of the newest
+# runs until one comes back shorter than it asked for (so it holds every run on
+# the Pi) or the largest is full. The Pi prunes runs after 30 days.
+LIST_LIMITS = (500, 2000, 10000)
 SEARCH_FARTHER = 100000  # the printed command that searches past LIST_LIMITS
 # After a stop the run needs a few seconds to end (SIGTERM, then the launcher
 # records the exit), so its status is polled for this long before the stop
@@ -146,25 +147,35 @@ def run_status(run_id, budget, wanted=STATUS_TIMEOUT):
 @dataclass(frozen=True)
 class TokenSearch:
     matches: list
-    complete: bool  # the listing held every run on the Pi, so an absent token is really absent
+    covered: bool  # the listing held every run on the Pi
+
+    @property
+    def found(self):
+        """The one run carrying the token, only when a covered listing shows exactly one."""
+        return self.matches[0] if self.covered and len(self.matches) == 1 else None
+
+    @property
+    def absent(self):
+        return self.covered and not self.matches
 
 
 def runs_with_token(token, budget, wanted=STATUS_TIMEOUT):
     """Run ids on the Pi ending in -TOKEN; None when the Pi could not be listed.
 
-    A listing shorter than its limit holds every run; a full one is widened
-    once, and a still-full listing is reported incomplete rather than absent.
+    Coverage is counted in the rows the listing returned, whatever they hold
+    (a run name may carry characters RUN_ID does not accept): a listing with
+    fewer rows than it asked for holds every run. Matches in a listing that is
+    not covered prove nothing, since an older run may carry the same token.
     """
     for limit in LIST_LIMITS:
         result = launcher(['status', '-n', str(limit)], budget, wanted)
         if result is None or result.returncode != 0:
             return None
-        ids = [line.split()[0] for line in result.stdout.decode('utf-8', 'replace').splitlines() if line.split()]
-        ids = [run_id for run_id in ids if RUN_ID.match(run_id)]
-        matches = [run_id for run_id in ids if run_id.endswith('-' + token)]
-        if len(ids) < limit or matches:
-            return TokenSearch(matches, len(ids) < limit)
-    return TokenSearch([], False)
+        rows = [line.split() for line in result.stdout.decode('utf-8', 'replace').splitlines() if line.strip()]
+        matches = [row[0] for row in rows if RUN_ID.match(row[0]) and row[0].endswith('-' + token)]
+        if len(rows) < limit:
+            return TokenSearch(matches, True)
+    return TokenSearch(matches, False)
 
 
 def stop_confirmed(run_id, budget, wanted=STATUS_TIMEOUT):

@@ -6,6 +6,7 @@ import datetime
 import json
 from pathlib import Path
 
+import deferred_pi_remote
 import deferred_pi_run
 from macbook.tests.deferred_fixture import WarningTopic
 from macbook.tests.deferred_pi_fixture import PiHarness, YESTERDAY
@@ -42,10 +43,13 @@ class CollectionTests(PiHarness):
         self.assertFalse(job.exists())
         self.assertEqual(len(self.calls("run")), 1)
 
-    def test_rescheduling_a_running_job_into_the_future_still_collects_and_times_it_out(self):
+    def test_a_launched_job_cannot_be_rescheduled_and_is_still_collected_and_timed_out(self):
         job = self.add_pi("--run-timeout", "1")
         self.deferred("run-due")
-        job = self.tmp / "root" / "jobs" / self.deferred("reschedule", job.name, IN_THREE_DAYS).stdout.strip()
+        refused = self.deferred("reschedule", job.name, IN_THREE_DAYS, check=False)
+        self.assertEqual(refused.returncode, 8)
+        self.assertIn(f"use retry {job.name}", refused.stderr)
+        self.assertEqual(self.meta(job)["due"], YESTERDAY + "T00:00")
         self.age_launch(job, 120)
         self.deferred("run-due")
         self.assertEqual(len(self.calls("stop")), 1)
@@ -53,19 +57,28 @@ class CollectionTests(PiHarness):
         self.assertEqual((record["remote_state"], record["state"]), ("failed", "failed"))
         self.assertIn("timed out", self.last_log(job))
 
-    def test_a_run_launched_after_give_up_is_collected_not_failed(self):
+    def test_an_unlaunched_job_past_give_up_fails_without_launching(self):
         job = self.add_pi("--give-up", YESTERDAY)
         self.deferred("run-due")
         record = self.listed(job)
-        self.assertEqual((record["state"], record["remote_state"]), ("pending", "running"))
-        self.assertEqual(WarningTopic.received, [])
-        self.set_run(record["remote_run"], state="done")
+        self.assertEqual((record["state"], record["remote_state"]), ("failed", "unlaunched"))
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.alerts(), [f"Deferred job gave up: {job.name}"])
+        self.deferred("run-due")
+        self.assertEqual((self.calls(), len(self.alerts())), ([], 1))
+
+    def test_a_launched_run_is_collected_after_give_up_passes(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        self.set_meta(job, give_up=YESTERDAY + "T00:01")
+        self.set_run(self.listed(job)["remote_run"], state="done")
         self.deferred("run-due")
         self.assertFalse(job.exists())
+        self.assertEqual(self.alerts(), [])
 
     def test_a_lost_launch_response_always_prints_the_recovery_commands(self):
         self.control("launch-mode", "lost")
-        job = self.add_pi("--give-up", YESTERDAY)
+        job = self.add_pi()
         self.deferred("run-due")
         token = self.record(job, "launching.json")["token"]
         self.assertIn(f"grep -e -{token}", self.last_log(job))
@@ -85,13 +98,26 @@ class CollectionTests(PiHarness):
 
 
 class PassBudgetTests(PiHarness):
-    def test_add_agent_refuses_a_vanpi_timeout_below_the_floor(self):
+    def test_a_job_with_no_ready_launches_at_exactly_the_timeout_floor(self):
         floor = deferred_pi_run.MIN_PASS_TIMEOUT
         result = self.deferred("add-agent", "--host", "vanpi", "--timeout", str(floor - 1), YESTERDAY, "short",
                                str(self.prompt), check=False)
         self.assertEqual(result.returncode, 1)
         self.assertIn(f"at least {floor} seconds", result.stderr)
-        self.deferred("add-agent", "--host", "vanpi", "--timeout", str(floor), YESTERDAY, "enough", str(self.prompt))
+        job = Path(self.deferred("add-agent", "--host", "vanpi", "--timeout", str(floor), YESTERDAY, "enough",
+                                 str(self.prompt)).stdout.strip())
+        self.deferred("run-due")
+        self.assertEqual(len(self.calls("run")), 1)
+        self.assertEqual(self.listed(job)["remote_state"], "running")
+
+    def test_a_ready_command_needs_its_allowance_above_the_floor(self):
+        floor = deferred_pi_run.MIN_PASS_TIMEOUT + deferred_pi_run.READY_ALLOWANCE
+        result = self.add_pi("--ready", "true", "--timeout", str(floor - 1), name="short", check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"at least {floor} seconds", result.stderr)
+        job = self.add_pi("--ready", "true", "--timeout", str(floor), name="enough")
+        self.deferred("run-due")
+        self.assertEqual((len(self.calls("run")), self.listed(job)["remote_state"]), (1, "running"))
 
     def test_a_slow_ready_check_ends_the_pass_before_launching(self):
         job = self.add_pi("--ready", "sleep 30")
@@ -122,7 +148,7 @@ class AccountingTests(PiHarness):
     def test_a_blank_report_is_read_again_then_fails_without_relaunching(self):
         self.control("next-state", "done")
         self.control("next-final", "")
-        job = self.add_pi("--attempts", "3")
+        job = self.add_pi()
         for check in (1, 2):
             self.deferred("run-due")
             record = self.listed(job)
@@ -141,7 +167,7 @@ class AccountingTests(PiHarness):
         self.control("next-exit", "1")
         job = self.add_pi()
         self.deferred("run-due")
-        self.assertEqual(self.record(job, "remote-failed.json")["attempt"], 1)
+        self.assertEqual(self.record(job, "remote-failed.json")["kind"], "remote")
         self.set_meta(job, state="pending")  # the scheduler stopped before saving state=failed
         self.deferred("run-due")
         self.assertEqual(len(self.calls("run")), 1)
@@ -157,12 +183,12 @@ class AccountingTests(PiHarness):
         self.control("next-state", "running")
         self.control("launch-mode", "lost-nothing")
         self.deferred("retry", job.name)
+        self.assertIn(f"attempt {first} ended (remote); cleared by retry", self.scheduler_log())
         self.deferred("run-due")
-        self.assertIn(f"run {first} ended", self.scheduler_log())
         self.deferred("run-due")
         token = self.listed(job)["remote_token"]
         self.deferred("retry", job.name, "--relaunch", token)
-        self.assertIn(f"launch token {token} abandoned by retry", self.scheduler_log())
+        self.assertIn(f"attempt {token} abandoned by retry --relaunch", self.scheduler_log())
 
 
 class ReconcileCoverageTests(PiHarness):
@@ -170,7 +196,7 @@ class ReconcileCoverageTests(PiHarness):
         self.control("launch-mode", "lost")
         job = self.add_pi()
         self.deferred("run-due")
-        self.control("extra-runs", "5000")
+        self.control("extra-runs", str(deferred_pi_remote.LIST_LIMITS[-1] + 1))
         self.clear("launch-mode")
         self.deferred("run-due")
         record = self.listed(job)
@@ -260,21 +286,21 @@ class AddCheckTests(PiHarness):
                 result = self.add_pi("--cwd", cwd, check=False)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("~/", result.stderr)
-        for cwd in ("~/dev", "/home/pi/dev", f"{home}x/dev"):
+        for index, cwd in enumerate(("~/dev", "/home/pi/dev", f"{home}x/dev")):
             with self.subTest(cwd=cwd):
-                self.add_pi("--cwd", cwd, name="ok" + str(abs(hash(cwd)) % 1000))
+                self.add_pi("--cwd", cwd, name=f"ok{index}")
 
-    def test_names_whose_id_the_other_verbs_reject_are_refused(self):
-        long_name = "n" * 50
-        for verb in ("add", "add-agent"):
+    def test_names_of_up_to_60_characters_are_accepted_and_their_full_ids_resolve(self):
+        for verb, letter in (("add", "a"), ("add-agent", "g")):
             with self.subTest(verb=verb):
                 source = self.script("exit 0") if verb == "add" else self.prompt
-                result = self.deferred(verb, "2099-01-01", long_name, str(source), check=False)
-                self.assertEqual(result.returncode, 1)
-                self.assertIn("at most 60 characters", result.stderr)
-        job = self.add("2099-01-01", "n" * 49, "exit 0")
-        self.assertEqual(len(job.name), 60)
-        self.deferred("cancel", job.name)
+                job = Path(self.deferred(verb, "2099-01-01", letter * 60, str(source)).stdout.strip())
+                self.assertEqual(len(job.name), 71)
+                self.assertEqual(self.listed(job)["name"], letter * 60)
+                self.deferred("cancel", job.name)
+                self.assertFalse(job.exists())
+        result = self.deferred("add", "2099-01-01", "n" * 61, str(self.script("exit 0")), check=False)
+        self.assertEqual(result.returncode, 1)
 
     def test_an_existing_over_long_id_stays_manageable(self):
         job = self.add("2099-01-01", "short", "exit 0")

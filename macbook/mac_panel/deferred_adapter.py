@@ -13,13 +13,14 @@ from panel_contracts import AgentHost, ApiError, DeferredPayload, JobState, Remo
 from panel_paths import DATA, DEFERRED, HOME
 from wire_validation import confirm, field, object_fields
 
-# Ids of jobs already queued keep names of up to 60 characters; new names stop at
-# NAME_LIMIT so the dated id (YYYY-MM-DD-NAME) stays within the CLI's 60.
-JOB_ID = re.compile(r'^(\d{4}-\d{2}-\d{2}-)?[a-z0-9][a-z0-9-]{0,59}$')
-DUE = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$')
-NAME_LIMIT = 49
+# A job's name (deferred.zsh valid_name), and its id: the name, or the dated YYYY-MM-DD-NAME.
+NAME_LIMIT = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,%d}$' % (NAME_LIMIT - 1))
-TOKEN = re.compile(r'^d[0-9a-f]{16}$')  # a held Pi launch's token (deferred_pi_state.TOKEN)
+JOB_ID = re.compile(r'^(\d{4}-\d{2}-\d{2}-)?[a-z0-9][a-z0-9-]{0,%d}$' % (NAME_LIMIT - 1))
+DUE = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$')
+# What `--relaunch` names: a Pi launch's token or run id (deferred_pi_state.TOKEN and RUN_ID).
+TOKEN = re.compile(r'^d[0-9a-f]{16}$')
+RUN_ID = re.compile(r'^\d{4}-\d{6}-[0-9a-f]{4}(?:-[a-z0-9][a-z0-9-]*)?$')
 ACTIONS = frozenset(('cancel', 'retry', 'run-now', 'reschedule'))
 MAC_MODEL = re.compile(r'^[a-z0-9][a-z0-9.\[\]-]{0,63}$')
 PI_TIERS = ('astra', 'sol', 'luna')  # pi_agent.py --agent; a vanpi job's model
@@ -27,10 +28,14 @@ EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 PATH_LIMIT, READY_LIMIT = 1024, 500
 # deferred.zsh cancel: a vanpi run may still be active, so the job was kept (`--abandon` overrides).
 CANCEL_REFUSED = 6
-# retry/run-now: the job's Pi launch is unknown and the request did not name that launch's token.
+# retry/run-now: the job's Pi attempt may still be active and the request did not name it.
 RELAUNCH_REFUSED = 7
+# reschedule: a vanpi job that has launched is moved on only by retry or run-now.
+RESCHEDULE_REFUSED = 8
 CANCEL_TIMEOUT = 200  # the CLI bounds a vanpi cancel's Pi calls to 180 s
-PI_MIN_TIMEOUT = 390  # deferred.zsh refuses a shorter vanpi --timeout (deferred_pi_run.MIN_PASS_TIMEOUT)
+# deferred.zsh refuses a shorter vanpi --timeout (deferred_pi_run.MIN_PASS_TIMEOUT), and asks
+# PI_READY_ALLOWANCE more of one with a ready command (deferred_pi_run.READY_ALLOWANCE).
+PI_MIN_TIMEOUT, PI_READY_ALLOWANCE = 390, 30
 AGENT_FIELDS = ('host', 'prompt', 'pi_prompt_path', 'model', 'effort', 'cwd', 'ready', 'run_timeout')
 
 
@@ -100,7 +105,9 @@ def decode_jobs(value):
     return value
 
 
-AGENT_RECORD = ('host', 'model', 'effort', 'remote_run', 'remote_state', 'remote_token')
+AGENT_RECORD = ('host', 'model', 'effort', 'remote_run', 'remote_state', 'remote_token', 'relaunch_id')
+# The states whose attempt may still be active with nothing left to collect: only they name a relaunch_id.
+RELAUNCH_STATES = (RemoteState.LAUNCH_UNKNOWN, RemoteState.FAILED)
 # Which Pi run fields each remote state carries: (run id, token), True required, False absent, None either.
 REMOTE_FIELDS = {
     RemoteState.UNLAUNCHED: (False, False), RemoteState.LAUNCHING: (False, True),
@@ -127,6 +134,9 @@ def agent_fields_problem(job):
     for key, rule in (('remote_run', run), ('remote_token', token)):
         if rule is not None and bool(job[key]) != rule:
             return f'a {job["remote_state"]} Pi run {"without" if rule else "with"} {key}'
+    if job['relaunch_id'] is not None and (job['remote_state'] not in RELAUNCH_STATES
+                                           or job['relaunch_id'] not in (job['remote_run'], job['remote_token'])):
+        return f'a {job["remote_state"]} Pi run with a relaunch id that is not its own'
     return None
 
 
@@ -163,8 +173,8 @@ class DeferredAdapter:
             argv += (validate_due(body.get('due')),)
         if action == 'run-now':
             job = self.valid_job(job_id)
-            if job['remote_state'] == RemoteState.LAUNCH_UNKNOWN and relaunch != job['remote_token']:
-                raise relaunch_refused(job['remote_token'])
+            if relaunch != job['relaunch_id']:
+                raise relaunch_refused(job['relaunch_id'], relaunch)
             timeout = job['timeout'] + 30
             task = self.tasks.start(Section.DEFERRED, job_id, lambda: self.runner.run(argv, timeout=timeout))
             return Reply(task, 202)
@@ -175,6 +185,8 @@ class DeferredAdapter:
             raise ApiError(409, redact((result.stderr or result.stdout).strip()), code='remote-active')
         if action == 'retry' and result.returncode == RELAUNCH_REFUSED:
             raise ApiError(409, redact((result.stderr or result.stdout).strip()), code='relaunch-unconfirmed')
+        if action == 'reschedule' and result.returncode == RESCHEDULE_REFUSED:
+            raise ApiError(409, redact((result.stderr or result.stdout).strip()), code='reschedule-launched')
         checked(result)
         return Reply({'message': result.stdout.strip() or 'Updated'})
 
@@ -246,22 +258,25 @@ class DeferredAdapter:
 
 
 def relaunch_token(body, action):
-    """The held Pi launch the user confirmed starting another run over, or None.
+    """The unresolved Pi attempt (token or run id) the user confirmed starting another run over, or None.
 
-    The CLI checks it under the checker lock against the hold it finds; a
-    missing or different token is refused there (exit 7), whatever the page saw."""
+    The CLI checks it under the checker lock against the attempt it finds; a
+    missing, different or stale id is refused there (exit 7), whatever the page saw."""
     if 'relaunch' not in body:
         return None
-    token = field(body, 'relaunch', str, status=400)
-    if action not in ('retry', 'run-now') or not TOKEN.fullmatch(token):
-        raise ApiError(400, 'relaunch is a held launch token, only for retry and run-now')
+    value = field(body, 'relaunch', str, status=400)
+    if action not in ('retry', 'run-now') or not (TOKEN.fullmatch(value) or RUN_ID.fullmatch(value)):
+        raise ApiError(400, 'relaunch is a Pi launch token or run id, only for retry and run-now')
     confirm(body)
-    return token
+    return value
 
 
-def relaunch_refused(token):
-    return ApiError(409, f'The Pi launch with token {token} is unknown and may still be running; '
-                         'confirm starting another run', code='relaunch-unconfirmed')
+def relaunch_refused(expected, given):
+    if expected is None:
+        message = f'Nothing on vanpi is unresolved for this job, so relaunch {given} no longer applies; reload'
+    else:
+        message = (f'The Pi attempt {expected} may still be active; confirm starting another run over it')
+    return ApiError(409, message, code='relaunch-unconfirmed')
 
 
 def one_line(value, limit):
@@ -334,9 +349,20 @@ def agent_options(body):
             if field(body, key, int, status=400) < 1:
                 raise ApiError(400, f'{key} must be positive')
             options += [f'--{key.replace("_", "-")}', str(body[key])]
-    if host == AgentHost.VANPI and body.get('timeout', PI_MIN_TIMEOUT) < PI_MIN_TIMEOUT:
-        raise ApiError(400, f'timeout on vanpi must be at least {PI_MIN_TIMEOUT} seconds')
+    if host == AgentHost.VANPI:
+        vanpi_limits(body)
     return tuple(options), prompt, pi_path
+
+
+def vanpi_limits(body):
+    """A vanpi job starts one Pi run by itself, and each pass must have room to launch it."""
+    if body.get('attempts', 1) != 1:
+        raise ApiError(400, 'attempts does not apply to vanpi: such a job starts at most one Pi run by itself; '
+                            'Retry or Run now starts another')
+    floor = PI_MIN_TIMEOUT + (PI_READY_ALLOWANCE if 'ready' in body else 0)
+    if body.get('timeout', floor) < floor:
+        raise ApiError(400, f'timeout on vanpi must be at least {floor} seconds'
+                            f'{" with a ready condition" if "ready" in body else ""}')
 
 
 def under_mac_home(path):

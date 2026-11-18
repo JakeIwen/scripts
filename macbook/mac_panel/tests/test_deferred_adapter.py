@@ -19,7 +19,8 @@ def inventory():
                       'description': 'Example', 'created': 'today', 'origin': 'test', 'last_log': None,
                       'give_up': '2026-10-27T15:00', 'agent': False, 'ready': None,
                       'last_not_ready': None, 'not_ready_checks': 0, 'host': None, 'model': None,
-                      'effort': None, 'remote_run': None, 'remote_state': None, 'remote_token': None}]}
+                      'effort': None, 'remote_run': None, 'remote_state': None, 'remote_token': None,
+                      'relaunch_id': None}]}
 
 TOKEN = 'd0123456789abcdef'
 RUN_ID = '1117-034729-b1e4-' + TOKEN
@@ -226,7 +227,7 @@ class DeferredTests(unittest.TestCase):
             adapter.tasks.close()
 
     def test_run_now_of_a_held_launch_needs_its_token(self):
-        held = pi_job(remote_state='launch-unknown', remote_token=TOKEN, state='failed')
+        held = pi_job(remote_state='launch-unknown', remote_token=TOKEN, relaunch_id=TOKEN, state='failed')
         stale = 'd' + 'f' * 16
         runner = FakeRunner([json_command(held), json_command(held), json_command(held), CommandResult(0, 'done')])
         adapter = DeferredAdapter(runner)
