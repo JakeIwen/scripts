@@ -322,6 +322,14 @@ command that works:
   nothing and print every id they can recover with the `cancel --abandon JOB`
   command, the only way to remove such a job.
 
+A replacement run the person authorized that cannot start yet stays authorized.
+`retry` leaves the job `pending`; so does a `run-now` whose pass is not ready (its
+`--ready` condition is false, or vanpi does not answer: it exits 4 and prints
+`not ready JOB; the next check retries`). The checker then launches it once it is
+ready, inside the fresh window. That one launch is all the person authorized:
+once it has started, the job again starts nothing more by itself, and a run-now
+pass that fails outright (a launch the Pi refuses) leaves the job `failed`.
+
 `reschedule JOB DUE` of a vanpi job that has ever launched (any `remote_state`
 but `unlaunched`) is refused with exit 8, so moving a due time can never start a
 second run; use `retry` or `run-now`. An unlaunched job reschedules as usual.

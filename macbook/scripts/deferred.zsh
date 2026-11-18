@@ -609,7 +609,8 @@ cmd_run_now() {
     exit $run_now_not_ready
   fi
   if (( run_job_not_ready )); then
-    print -r -- "not ready $id; output in $dir/last.log"
+    # Only a pending job is retried by the checker; a failed Mac job stays failed.
+    print -r -- "not ready $id;${${job[state]:#failed}:+ the next check retries;} output in $dir/last.log"
     exit $run_now_not_ready
   fi
   if (( run_job_done )); then

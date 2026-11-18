@@ -112,6 +112,12 @@ pi_unlaunched() {  # DIR MODE RC [collect]: the pass left nothing on record
     pi_window_closed $dir   # the pass reached the launch (or its end) past the give-up time
   else
     account_pass $dir $mode $rc   # not ready, or a launch refused before the Pi
+    # A launch run-now authorized (it rearmed a failed job) that was not ready yet stays
+    # authorized: pending, so the checker starts it once it is ready, inside its fresh window.
+    if (( run_job_not_ready )) && [[ $job[state] != pending ]]; then
+      job[state]=pending
+      save_job $dir
+    fi
   fi
 }
 
