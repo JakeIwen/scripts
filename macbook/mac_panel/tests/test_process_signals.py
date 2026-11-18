@@ -185,12 +185,28 @@ class RealProcessTest(unittest.TestCase):
         result = CliRunner().run(('/bin/ps', '-o', 'state=,nice=', '-p', str(pid)))
         return result.stdout.split()
 
-    def test_own_sleep_is_paused_resumed_deprioritised_and_terminated(self):
+    def own_child(self):
         child = subprocess.Popen(['/bin/sleep', '600'])
-        self.addCleanup(lambda: child.poll() is None and child.kill())
-        self.addCleanup(child.wait)
+
+        def cleanup():
+            # One cleanup, kill before wait: a stopped child never exits on its own.
+            if child.poll() is None:
+                child.kill()
+            child.wait(5)
+        self.addCleanup(cleanup)
+        return child
+
+    def test_cleanup_reaps_a_stopped_child(self):
+        child = self.own_child()
+        child.send_signal(signal.SIGSTOP)
+        # What happens when an assertion fails while the child is paused.
+        self.doCleanups()
+        self.assertEqual(child.returncode, -signal.SIGKILL)
+
+    def test_own_sleep_is_paused_resumed_deprioritised_and_terminated(self):
+        child = self.own_child()
         reader = ProcessReader(CliRunner())
-        row = reader.row(child.pid)
+        row = reader.table().rows[child.pid]
         # The test runner stands in for no panel: a pid that cannot exist, so the sleep is
         # not the panel's descendant.
         adapter = ResourcesAdapter(reader=reader, policy=SignalPolicy(panel_pid=10 ** 7))
