@@ -17,6 +17,7 @@ class Section(str, Enum):
     NTFY = 'ntfy'
     USAGE = 'usage'
     LOGS = 'logs'
+    RESOURCES = 'resources'
 
 
 class TaskState(str, Enum):
@@ -348,6 +349,129 @@ class LogsPayload(TypedDict):
     problems: list[dict]
     # The log-rotate LaunchAgent: installed, loaded (None = launchd unreadable), pid, last exit.
     service: dict
+
+
+class ResourcesHealth(TypedDict):
+    level: str  # a Level value: ok, warn, error or unknown
+    reasons: list[str]
+    unavailable: list[str]  # system_metrics.Probe names
+
+
+class MemoryRecord(TypedDict):
+    """Bytes, estimated from vm_stat; None when a probe is unavailable."""
+    total: int | None
+    used: int | None
+    app: int | None
+    wired: int | None
+    compressed: int | None
+    cached: int | None
+    free: int | None
+    other: int | None
+    swap_used: int | None
+    swap_total: int | None
+    pressure: str | None
+
+
+class PowerRecord(TypedDict):
+    source: str | None
+    percent: int | None
+    charging: bool | None
+
+
+class DiskRecord(TypedDict):
+    total: int | None
+    free: int | None
+
+
+class SystemRecord(TypedDict):
+    cpu_percent: float | None
+    ncpu: int | None
+    load: list[float] | None
+    process_count: int
+    uptime_seconds: int | None
+    memory: MemoryRecord
+    thermal: str | None
+    power: PowerRecord
+    disk: DiskRecord
+
+
+class KindTotals(TypedDict):
+    cpu: float  # percent of one core
+    rss: int
+    count: int
+
+
+class GroupProcessRecord(TypedDict):
+    pid: int
+    ppid: int
+    depth: int
+    name: str  # process_table.display_name: never arguments
+    cpu: float
+    rss: int
+    nice: int
+    stopped: bool
+    started: str
+    blocked: str | None
+
+
+class ResourceGroupRecord(TypedDict):
+    id: str
+    kind: str
+    name: str
+    detail: str | None
+    status: str | None
+    cwd: str | None
+    parent: str | None
+    root_pid: int
+    started: str
+    cpu: float
+    rss: int
+    count: int
+    tree_blocked: str | None
+    processes: list[GroupProcessRecord]
+
+
+class AppRecord(TypedDict):
+    name: str
+    root_pid: int
+    started: str
+    cpu: float
+    rss: int
+    count: int
+
+
+class ProcessRecord(TypedDict):
+    pid: int
+    ppid: int
+    user: str
+    name: str
+    cpu: float
+    rss: int
+    nice: int
+    stopped: bool
+    started: str
+    group: str | None
+    blocked: str | None
+
+
+class ResourcesPayload(TypedDict):
+    sampled_at: float
+    health: ResourcesHealth
+    system: SystemRecord
+    totals: dict[str, KindTotals]
+    groups: list[ResourceGroupRecord]
+    apps: list[AppRecord]
+    processes: list[ProcessRecord]
+
+
+class SignalResult(TypedDict):
+    """Counts from one POST /api/resources; the authoritative outcome of a mutation."""
+    applied: int
+    gone: int
+    changed: int
+    skipped: int
+    refused: int
+    unchanged: int
 
 
 class Level(str, Enum):

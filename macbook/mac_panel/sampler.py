@@ -7,10 +7,12 @@ import time
 from crontab_adapter import program_name
 from logs_adapter import log_samples
 from panel_contracts import HistorySample, Level, Section
+from resources_adapter import resource_samples
 from usage_adapter import WINDOWS
 
 CADENCES = {Section.SERVICES: 60, Section.METERED: 60, Section.RESTORE: 60,
-            Section.CRONTAB: 300, Section.DEFERRED: 300, Section.USAGE: 900, Section.LOGS: 900}
+            Section.CRONTAB: 300, Section.DEFERRED: 300, Section.USAGE: 900, Section.LOGS: 900,
+            Section.RESOURCES: 60}
 PRUNE_INTERVAL = 3600
 LOG = logging.getLogger(__name__)
 
@@ -98,6 +100,8 @@ def samples(section, payload, ts):
                  job['log_modified'], f"{job['expression']} · {program_name(job['command'])}") for job in payload['jobs']]
     elif section == Section.LOGS:
         rows = log_samples(payload)
+    elif section == Section.RESOURCES:
+        rows = resource_samples(payload)
     elif section == Section.RESTORE:
         rows = [('sessions', Level.OK if payload['sessions_open'] is not None else Level.UNKNOWN,
                  payload['sessions_open'], None),

@@ -1,0 +1,1272 @@
+{
+ "sampled_at": 1794977149.634173,
+ "health": {
+  "level": "warn",
+  "reasons": [
+   "Memory pressure is elevated"
+  ],
+  "unavailable": []
+ },
+ "system": {
+  "cpu_percent": 11.3,
+  "ncpu": 14,
+  "load": [
+   23.85,
+   21.18,
+   16.29
+  ],
+  "process_count": 656,
+  "uptime_seconds": 2730774,
+  "memory": {
+   "total": 25769803776,
+   "used": 21234466816,
+   "app": 6766133248,
+   "wired": 4579115008,
+   "compressed": 9889218560,
+   "cached": 3510091776,
+   "free": 183599104,
+   "other": 841646080,
+   "swap_used": 3717600379,
+   "swap_total": 5368709120,
+   "pressure": "warn"
+  },
+  "thermal": "nominal",
+  "power": {
+   "source": "battery",
+   "percent": 40,
+   "charging": false
+  },
+  "disk": {
+   "total": 994662584320,
+   "free": 317027479552
+  }
+ },
+ "totals": {
+  "claude": {
+   "cpu": 36.4,
+   "rss": 2851930112,
+   "count": 29
+  },
+  "codex": {
+   "cpu": 0.2,
+   "rss": 211566592,
+   "count": 2
+  },
+  "infra": {
+   "cpu": 0.7,
+   "rss": 541261824,
+   "count": 16
+  },
+  "compute": {
+   "cpu": 0.0,
+   "rss": 25395200,
+   "count": 5
+  }
+ },
+ "groups": [
+  {
+   "id": "claude:38979",
+   "kind": "claude",
+   "name": "Session A",
+   "detail": "interactive",
+   "status": "busy",
+   "cwd": "/Users/me/dev/project",
+   "parent": null,
+   "root_pid": 38979,
+   "started": "Tue Nov 17 22:19:53 2026",
+   "cpu": 33.5,
+   "rss": 632455168,
+   "count": 10,
+   "tree_blocked": "Runs the panel; stopping it would stop the panel",
+   "processes": [
+    {
+     "pid": 38979,
+     "ppid": 38545,
+     "depth": 0,
+     "name": "claude",
+     "cpu": 6.5,
+     "rss": 507445248,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:19:53 2026",
+     "blocked": "Runs the panel; stopping it would stop the panel"
+    },
+    {
+     "pid": 20688,
+     "ppid": 38979,
+     "depth": 1,
+     "name": "caffeinate",
+     "cpu": 0.0,
+     "rss": 917504,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:42:23 2026",
+     "blocked": null
+    },
+    {
+     "pid": 39035,
+     "ppid": 38979,
+     "depth": 1,
+     "name": "npm",
+     "cpu": 0.0,
+     "rss": 21430272,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:19:54 2026",
+     "blocked": null
+    },
+    {
+     "pid": 39185,
+     "ppid": 39035,
+     "depth": 2,
+     "name": "node kapture-mcp",
+     "cpu": 0.0,
+     "rss": 10878976,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:19:56 2026",
+     "blocked": null
+    },
+    {
+     "pid": 39186,
+     "ppid": 39185,
+     "depth": 3,
+     "name": "Kapture",
+     "cpu": 0.0,
+     "rss": 25739264,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:19:56 2026",
+     "blocked": null
+    },
+    {
+     "pid": 97717,
+     "ppid": 38979,
+     "depth": 1,
+     "name": "zsh -c",
+     "cpu": 0.0,
+     "rss": 3227648,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:36 2026",
+     "blocked": "Runs the panel; stopping it would stop the panel"
+    },
+    {
+     "pid": 97722,
+     "ppid": 97717,
+     "depth": 2,
+     "name": "Python server.py",
+     "cpu": 0.0,
+     "rss": 37371904,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:36 2026",
+     "blocked": "The panel itself"
+    },
+    {
+     "pid": 99166,
+     "ppid": 97722,
+     "depth": 3,
+     "name": "ps",
+     "cpu": 0.0,
+     "rss": 1654784,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:49 2026",
+     "blocked": "Another user's process; the panel runs without sudo"
+    },
+    {
+     "pid": 99162,
+     "ppid": 38979,
+     "depth": 1,
+     "name": "zsh -c",
+     "cpu": 1.2,
+     "rss": 3162112,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:49 2026",
+     "blocked": "A shell may be hosting a live terminal session; end its session instead"
+    },
+    {
+     "pid": 99164,
+     "ppid": 99162,
+     "depth": 2,
+     "name": "Python live_check.py",
+     "cpu": 25.8,
+     "rss": 20627456,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:49 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "claude:99903",
+   "kind": "claude",
+   "name": "Session B",
+   "detail": "interactive",
+   "status": "busy",
+   "cwd": "/Users/me/dev/project",
+   "parent": null,
+   "root_pid": 99903,
+   "started": "Wed Nov 18 04:33:33 2026",
+   "cpu": 1.7,
+   "rss": 696254464,
+   "count": 7,
+   "tree_blocked": "Contains nested sessions (codex · project); end those first",
+   "processes": [
+    {
+     "pid": 99903,
+     "ppid": 95454,
+     "depth": 0,
+     "name": "claude",
+     "cpu": 1.7,
+     "rss": 564576256,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:33:33 2026",
+     "blocked": null
+    },
+    {
+     "pid": 2923,
+     "ppid": 99903,
+     "depth": 1,
+     "name": "npm",
+     "cpu": 0.0,
+     "rss": 48627712,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:33:37 2026",
+     "blocked": null
+    },
+    {
+     "pid": 4322,
+     "ppid": 2923,
+     "depth": 2,
+     "name": "node kapture-mcp",
+     "cpu": 0.0,
+     "rss": 30818304,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:33:39 2026",
+     "blocked": null
+    },
+    {
+     "pid": 4370,
+     "ppid": 4322,
+     "depth": 3,
+     "name": "Kapture",
+     "cpu": 0.0,
+     "rss": 47382528,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:33:39 2026",
+     "blocked": null
+    },
+    {
+     "pid": 22544,
+     "ppid": 99903,
+     "depth": 1,
+     "name": "caffeinate",
+     "cpu": 0.0,
+     "rss": 491520,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:42:36 2026",
+     "blocked": null
+    },
+    {
+     "pid": 98113,
+     "ppid": 99903,
+     "depth": 1,
+     "name": "zsh -c",
+     "cpu": 0.0,
+     "rss": 3162112,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:37 2026",
+     "blocked": "A shell may be hosting a live terminal session; end its session instead"
+    },
+    {
+     "pid": 98116,
+     "ppid": 98113,
+     "depth": 2,
+     "name": "tail",
+     "cpu": 0.0,
+     "rss": 1196032,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:37 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "claude:82925",
+   "kind": "claude",
+   "name": "Session C",
+   "detail": "interactive",
+   "status": "idle",
+   "cwd": "/Users/me/dev/project",
+   "parent": null,
+   "root_pid": 82925,
+   "started": "Wed Nov 18 04:11:36 2026",
+   "cpu": 0.9,
+   "rss": 589594624,
+   "count": 4,
+   "tree_blocked": null,
+   "processes": [
+    {
+     "pid": 82925,
+     "ppid": 75875,
+     "depth": 0,
+     "name": "claude",
+     "cpu": 0.9,
+     "rss": 466419712,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:11:36 2026",
+     "blocked": null
+    },
+    {
+     "pid": 86866,
+     "ppid": 82925,
+     "depth": 1,
+     "name": "npm",
+     "cpu": 0.0,
+     "rss": 47038464,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:11:43 2026",
+     "blocked": null
+    },
+    {
+     "pid": 89144,
+     "ppid": 86866,
+     "depth": 2,
+     "name": "node kapture-mcp",
+     "cpu": 0.0,
+     "rss": 29425664,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:11:46 2026",
+     "blocked": null
+    },
+    {
+     "pid": 89173,
+     "ppid": 89144,
+     "depth": 3,
+     "name": "Kapture",
+     "cpu": 0.0,
+     "rss": 46710784,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:11:46 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "claude:70922",
+   "kind": "claude",
+   "name": "Session D",
+   "detail": "interactive",
+   "status": "idle",
+   "cwd": "/Users/me/dev/project",
+   "parent": null,
+   "root_pid": 70922,
+   "started": "Wed Nov 18 04:18:25 2026",
+   "cpu": 0.3,
+   "rss": 478330880,
+   "count": 4,
+   "tree_blocked": null,
+   "processes": [
+    {
+     "pid": 70922,
+     "ppid": 23205,
+     "depth": 0,
+     "name": "claude",
+     "cpu": 0.3,
+     "rss": 351551488,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:18:25 2026",
+     "blocked": null
+    },
+    {
+     "pid": 73842,
+     "ppid": 70922,
+     "depth": 1,
+     "name": "npm",
+     "cpu": 0.0,
+     "rss": 48513024,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:18:30 2026",
+     "blocked": null
+    },
+    {
+     "pid": 76015,
+     "ppid": 73842,
+     "depth": 2,
+     "name": "node kapture-mcp",
+     "cpu": 0.0,
+     "rss": 30818304,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:18:33 2026",
+     "blocked": null
+    },
+    {
+     "pid": 76051,
+     "ppid": 76015,
+     "depth": 3,
+     "name": "Kapture",
+     "cpu": 0.0,
+     "rss": 47448064,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:18:33 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "claude:88240",
+   "kind": "claude",
+   "name": "Session E",
+   "detail": "interactive",
+   "status": "idle",
+   "cwd": "/Users/me/dev/project",
+   "parent": null,
+   "root_pid": 88240,
+   "started": "Wed Nov 18 00:15:37 2026",
+   "cpu": 0.0,
+   "rss": 455294976,
+   "count": 4,
+   "tree_blocked": null,
+   "processes": [
+    {
+     "pid": 88240,
+     "ppid": 33429,
+     "depth": 0,
+     "name": "claude",
+     "cpu": 0.0,
+     "rss": 335560704,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 00:15:37 2026",
+     "blocked": null
+    },
+    {
+     "pid": 88303,
+     "ppid": 88240,
+     "depth": 1,
+     "name": "npm",
+     "cpu": 0.0,
+     "rss": 45400064,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 00:15:38 2026",
+     "blocked": null
+    },
+    {
+     "pid": 88409,
+     "ppid": 88303,
+     "depth": 2,
+     "name": "node kapture-mcp",
+     "cpu": 0.0,
+     "rss": 28901376,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 00:15:39 2026",
+     "blocked": null
+    },
+    {
+     "pid": 88434,
+     "ppid": 88409,
+     "depth": 3,
+     "name": "Kapture",
+     "cpu": 0.0,
+     "rss": 45432832,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 00:15:39 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "codex:98115",
+   "kind": "codex",
+   "name": "codex · project",
+   "detail": "exec",
+   "status": null,
+   "cwd": "/Users/me/dev/project",
+   "parent": "claude:99903",
+   "root_pid": 98115,
+   "started": "Wed Nov 18 04:45:37 2026",
+   "cpu": 0.2,
+   "rss": 185876480,
+   "count": 1,
+   "tree_blocked": null,
+   "processes": [
+    {
+     "pid": 98115,
+     "ppid": 98113,
+     "depth": 0,
+     "name": "codex",
+     "cpu": 0.2,
+     "rss": 185876480,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:45:37 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "codex:64088",
+   "kind": "codex",
+   "name": "Session F",
+   "detail": "interactive",
+   "status": null,
+   "cwd": "/Users/me/dev/project",
+   "parent": null,
+   "root_pid": 64088,
+   "started": "Tue Nov 17 05:08:24 2026",
+   "cpu": 0.0,
+   "rss": 25690112,
+   "count": 1,
+   "tree_blocked": null,
+   "processes": [
+    {
+     "pid": 64088,
+     "ppid": 64031,
+     "depth": 0,
+     "name": "codex",
+     "cpu": 0.0,
+     "rss": 25690112,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 05:08:24 2026",
+     "blocked": null
+    }
+   ]
+  },
+  {
+   "id": "infra:92821",
+   "kind": "infra",
+   "name": "model gateway",
+   "detail": "node model-gateway.js",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 92821,
+   "started": "Mon Oct 26 08:25:47 2026",
+   "cpu": 0.4,
+   "rss": 156565504,
+   "count": 3,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 92821,
+     "ppid": 1,
+     "depth": 0,
+     "name": "node model-gateway.js",
+     "cpu": 0.0,
+     "rss": 42303488,
+     "nice": 0,
+     "stopped": false,
+     "started": "Mon Oct 26 08:25:47 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 13841,
+     "ppid": 92821,
+     "depth": 1,
+     "name": "claude-code-proxy",
+     "cpu": 0.0,
+     "rss": 31703040,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 3 23:58:57 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 34507,
+     "ppid": 92821,
+     "depth": 1,
+     "name": "node model-gateway.js",
+     "cpu": 0.4,
+     "rss": 82558976,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 4 10:18:57 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:47982",
+   "kind": "infra",
+   "name": "Codex app server",
+   "detail": "codex",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 47982,
+   "started": "Sat Oct 17 22:28:22 2026",
+   "cpu": 0.3,
+   "rss": 155582464,
+   "count": 6,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 47982,
+     "ppid": 1,
+     "depth": 0,
+     "name": "codex",
+     "cpu": 0.0,
+     "rss": 23543808,
+     "nice": 0,
+     "stopped": false,
+     "started": "Sat Oct 17 22:28:22 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 90253,
+     "ppid": 47982,
+     "depth": 1,
+     "name": "codex",
+     "cpu": 0.3,
+     "rss": 84557824,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:59:28 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 90435,
+     "ppid": 90253,
+     "depth": 2,
+     "name": "node cli.js",
+     "cpu": 0.0,
+     "rss": 10878976,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:59:31 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 90471,
+     "ppid": 90435,
+     "depth": 3,
+     "name": "Kapture",
+     "cpu": 0.0,
+     "rss": 25706496,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:59:31 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 90463,
+     "ppid": 90253,
+     "depth": 2,
+     "name": "node server.mjs",
+     "cpu": 0.0,
+     "rss": 10895360,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 22:59:31 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 95423,
+     "ppid": 47982,
+     "depth": 1,
+     "name": "<defunct>",
+     "cpu": 0.0,
+     "rss": 0,
+     "nice": 0,
+     "stopped": false,
+     "started": "Thu Oct 29 22:05:46 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:1842",
+   "kind": "infra",
+   "name": "Codex app server",
+   "detail": "codex",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 1842,
+   "started": "Sun Nov 15 11:10:13 2026",
+   "cpu": 0.0,
+   "rss": 34717696,
+   "count": 2,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 1842,
+     "ppid": 1,
+     "depth": 0,
+     "name": "codex",
+     "cpu": 0.0,
+     "rss": 9486336,
+     "nice": 0,
+     "stopped": false,
+     "started": "Sun Nov 15 11:10:13 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    },
+    {
+     "pid": 96022,
+     "ppid": 1842,
+     "depth": 1,
+     "name": "codex",
+     "cpu": 0.0,
+     "rss": 25231360,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 23:03:14 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:3364",
+   "kind": "infra",
+   "name": "usage server",
+   "detail": "node usage-server.mjs",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 3364,
+   "started": "Sun Nov 8 05:15:07 2026",
+   "cpu": 0.0,
+   "rss": 75202560,
+   "count": 1,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 3364,
+     "ppid": 1,
+     "depth": 0,
+     "name": "node usage-server.mjs",
+     "cpu": 0.0,
+     "rss": 75202560,
+     "nice": 0,
+     "stopped": false,
+     "started": "Sun Nov 8 05:15:07 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:7671",
+   "kind": "infra",
+   "name": "Playwright MCP",
+   "detail": "node cli.js",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 7671,
+   "started": "Sat Nov 14 09:36:33 2026",
+   "cpu": 0.0,
+   "rss": 59097088,
+   "count": 1,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 7671,
+     "ppid": 1,
+     "depth": 0,
+     "name": "node cli.js",
+     "cpu": 0.0,
+     "rss": 59097088,
+     "nice": 0,
+     "stopped": false,
+     "started": "Sat Nov 14 09:36:33 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:24095",
+   "kind": "infra",
+   "name": "Codex app server",
+   "detail": "codex",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 24095,
+   "started": "Wed Nov 18 04:13:06 2026",
+   "cpu": 0.0,
+   "rss": 29999104,
+   "count": 1,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 24095,
+     "ppid": 23916,
+     "depth": 0,
+     "name": "codex",
+     "cpu": 0.0,
+     "rss": 29999104,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 04:13:06 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:67337",
+   "kind": "infra",
+   "name": "LLM switchboard",
+   "detail": "Python -m llm_switchboard",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 67337,
+   "started": "Tue Oct 27 03:06:46 2026",
+   "cpu": 0.0,
+   "rss": 28606464,
+   "count": 1,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 67337,
+     "ppid": 1,
+     "depth": 0,
+     "name": "Python -m llm_switchboard",
+     "cpu": 0.0,
+     "rss": 28606464,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Oct 27 03:06:46 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "infra:67343",
+   "kind": "infra",
+   "name": "LLM switchboard",
+   "detail": "Python -m llm_switchboard",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 67343,
+   "started": "Tue Oct 27 03:06:46 2026",
+   "cpu": 0.0,
+   "rss": 1490944,
+   "count": 1,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 67343,
+     "ppid": 1,
+     "depth": 0,
+     "name": "Python -m llm_switchboard",
+     "cpu": 0.0,
+     "rss": 1490944,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Oct 27 03:06:46 2026",
+     "blocked": "Shared by every session; restart it from Services"
+    }
+   ]
+  },
+  {
+   "id": "compute:43108",
+   "kind": "compute",
+   "name": "worker",
+   "detail": "Python -m van_compute.worker",
+   "status": null,
+   "cwd": null,
+   "parent": null,
+   "root_pid": 43108,
+   "started": "Mon Nov 16 04:49:09 2026",
+   "cpu": 0.0,
+   "rss": 25395200,
+   "count": 5,
+   "tree_blocked": "Whole-tree actions exist only for Claude and Codex sessions",
+   "processes": [
+    {
+     "pid": 43108,
+     "ppid": 1,
+     "depth": 0,
+     "name": "Python -m van_compute.worker",
+     "cpu": 0.0,
+     "rss": 15302656,
+     "nice": 0,
+     "stopped": false,
+     "started": "Mon Nov 16 04:49:09 2026",
+     "blocked": "Owned by van-compute; killing a job here would skip its cleanup"
+    },
+    {
+     "pid": 37798,
+     "ppid": 43108,
+     "depth": 1,
+     "name": "ssh",
+     "cpu": 0.0,
+     "rss": 2572288,
+     "nice": 0,
+     "stopped": false,
+     "started": "Wed Nov 18 01:09:25 2026",
+     "blocked": "Owned by van-compute; killing a job here would skip its cleanup"
+    },
+    {
+     "pid": 47199,
+     "ppid": 43108,
+     "depth": 1,
+     "name": "ssh",
+     "cpu": 0.0,
+     "rss": 2523136,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 23:43:25 2026",
+     "blocked": "Owned by van-compute; killing a job here would skip its cleanup"
+    },
+    {
+     "pid": 47298,
+     "ppid": 43108,
+     "depth": 1,
+     "name": "ssh",
+     "cpu": 0.0,
+     "rss": 2539520,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 23:43:27 2026",
+     "blocked": "Owned by van-compute; killing a job here would skip its cleanup"
+    },
+    {
+     "pid": 47898,
+     "ppid": 43108,
+     "depth": 1,
+     "name": "ssh",
+     "cpu": 0.0,
+     "rss": 2457600,
+     "nice": 0,
+     "stopped": false,
+     "started": "Tue Nov 17 23:43:59 2026",
+     "blocked": "Owned by van-compute; killing a job here would skip its cleanup"
+    }
+   ]
+  }
+ ],
+ "apps": [
+  {
+   "name": "WindowServer",
+   "root_pid": 600,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "cpu": 46.3,
+   "rss": 115507200,
+   "count": 1
+  },
+  {
+   "name": "iTerm2",
+   "root_pid": 66917,
+   "started": "Sun Nov 15 08:31:48 2026",
+   "cpu": 11.0,
+   "rss": 299057152,
+   "count": 29
+  },
+  {
+   "name": "firefox",
+   "root_pid": 18573,
+   "started": "Fri Nov 6 10:42:22 2026",
+   "cpu": 10.9,
+   "rss": 3486777344,
+   "count": 24
+  },
+  {
+   "name": "MenuBarAgent",
+   "root_pid": 1052,
+   "started": "Sat Oct 17 14:14:22 2026",
+   "cpu": 10.3,
+   "rss": 36487168,
+   "count": 1
+  },
+  {
+   "name": "loginwindow",
+   "root_pid": 604,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "cpu": 5.2,
+   "rss": 37797888,
+   "count": 1
+  },
+  {
+   "name": "tccd",
+   "root_pid": 90219,
+   "started": "Sun Nov 15 02:44:11 2026",
+   "cpu": 4.5,
+   "rss": 16334848,
+   "count": 1
+  },
+  {
+   "name": "launchservicesd",
+   "root_pid": 571,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "cpu": 3.8,
+   "rss": 34291712,
+   "count": 1
+  },
+  {
+   "name": "trustd",
+   "root_pid": 90170,
+   "started": "Sun Nov 15 02:44:11 2026",
+   "cpu": 3.8,
+   "rss": 11206656,
+   "count": 1
+  },
+  {
+   "name": "coreaudiod",
+   "root_pid": 713,
+   "started": "Sat Oct 17 14:13:59 2026",
+   "cpu": 3.4,
+   "rss": 24297472,
+   "count": 1
+  },
+  {
+   "name": "syspolicyd",
+   "root_pid": 684,
+   "started": "Sat Oct 17 14:13:59 2026",
+   "cpu": 3.1,
+   "rss": 26361856,
+   "count": 1
+  },
+  {
+   "name": "runningboardd",
+   "root_pid": 605,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "cpu": 2.0,
+   "rss": 21086208,
+   "count": 1
+  },
+  {
+   "name": "opendirectoryd",
+   "root_pid": 569,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "cpu": 1.7,
+   "rss": 11943936,
+   "count": 1
+  }
+ ],
+ "processes": [
+  {
+   "pid": 600,
+   "ppid": 1,
+   "user": "_windowserver",
+   "name": "WindowServer",
+   "cpu": 46.3,
+   "rss": 115507200,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 99164,
+   "ppid": 99162,
+   "user": "me",
+   "name": "Python live_check.py",
+   "cpu": 25.8,
+   "rss": 20627456,
+   "nice": 0,
+   "stopped": false,
+   "started": "Wed Nov 18 04:45:49 2026",
+   "group": "claude:38979",
+   "blocked": null
+  },
+  {
+   "pid": 66917,
+   "ppid": 1,
+   "user": "me",
+   "name": "iTerm2",
+   "cpu": 10.9,
+   "rss": 192610304,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sun Nov 15 08:31:48 2026",
+   "group": null,
+   "blocked": "Runs the panel; stopping it would stop the panel"
+  },
+  {
+   "pid": 1052,
+   "ppid": 1,
+   "user": "me",
+   "name": "MenuBarAgent",
+   "cpu": 10.3,
+   "rss": 36487168,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:14:22 2026",
+   "group": null,
+   "blocked": null
+  },
+  {
+   "pid": 38979,
+   "ppid": 38545,
+   "user": "me",
+   "name": "claude",
+   "cpu": 6.5,
+   "rss": 507445248,
+   "nice": 0,
+   "stopped": false,
+   "started": "Tue Nov 17 22:19:53 2026",
+   "group": "claude:38979",
+   "blocked": "Runs the panel; stopping it would stop the panel"
+  },
+  {
+   "pid": 604,
+   "ppid": 1,
+   "user": "me",
+   "name": "loginwindow",
+   "cpu": 5.2,
+   "rss": 37797888,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "group": null,
+   "blocked": "A system or terminal process the panel never signals"
+  },
+  {
+   "pid": 90219,
+   "ppid": 1,
+   "user": "root",
+   "name": "tccd",
+   "cpu": 4.5,
+   "rss": 16334848,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sun Nov 15 02:44:11 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 571,
+   "ppid": 1,
+   "user": "root",
+   "name": "launchservicesd",
+   "cpu": 3.8,
+   "rss": 34291712,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 90170,
+   "ppid": 1,
+   "user": "_trustd",
+   "name": "trustd",
+   "cpu": 3.8,
+   "rss": 11206656,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sun Nov 15 02:44:11 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 18573,
+   "ppid": 1,
+   "user": "me",
+   "name": "firefox",
+   "cpu": 3.7,
+   "rss": 510099456,
+   "nice": 0,
+   "stopped": false,
+   "started": "Fri Nov 6 10:42:22 2026",
+   "group": null,
+   "blocked": null
+  },
+  {
+   "pid": 713,
+   "ppid": 1,
+   "user": "_coreaudiod",
+   "name": "coreaudiod",
+   "cpu": 3.4,
+   "rss": 24297472,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:59 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 684,
+   "ppid": 1,
+   "user": "root",
+   "name": "syspolicyd",
+   "cpu": 3.1,
+   "rss": 26361856,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:59 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 605,
+   "ppid": 1,
+   "user": "root",
+   "name": "runningboardd",
+   "cpu": 2.0,
+   "rss": 21086208,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 569,
+   "ppid": 1,
+   "user": "root",
+   "name": "opendirectoryd",
+   "cpu": 1.7,
+   "rss": 11943936,
+   "nice": 0,
+   "stopped": false,
+   "started": "Sat Oct 17 14:13:58 2026",
+   "group": null,
+   "blocked": "Another user's process; the panel runs without sudo"
+  },
+  {
+   "pid": 99903,
+   "ppid": 95454,
+   "user": "me",
+   "name": "claude",
+   "cpu": 1.7,
+   "rss": 564576256,
+   "nice": 0,
+   "stopped": false,
+   "started": "Wed Nov 18 04:33:33 2026",
+   "group": "claude:99903",
+   "blocked": null
+  },
+  {
+   "pid": 32518,
+   "ppid": 18573,
+   "user": "me",
+   "name": "plugin-container",
+   "cpu": 1.6,
+   "rss": 743555072,
+   "nice": 0,
+   "stopped": false,
+   "started": "Tue Nov 17 10:46:09 2026",
+   "group": null,
+   "blocked": null
+  }
+ ]
+}
