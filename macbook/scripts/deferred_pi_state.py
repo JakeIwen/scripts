@@ -169,6 +169,7 @@ class Snapshot:
     token: str | None
     since: int | None                  # when the attempt was launched (or its launch attempted)
     failure_kind: FailureKind | None
+    delivered: bool = False            # a finished run's report reached the phone: the job is done
 
     @property
     def owes(self):
@@ -189,7 +190,7 @@ class Snapshot:
     def lines(self):
         """key=value lines for deferred.zsh."""
         values = {'state': self.state.value, 'run': self.run_id or '', 'token': self.token or '',
-                  'owes': int(self.owes), 'unresolved': int(self.unresolved),
+                  'owes': int(self.owes), 'unresolved': int(self.unresolved), 'delivered': int(self.delivered),
                   'failure_kind': self.failure_kind.value if self.failure_kind else ''}
         return ''.join(f'{key}={value}\n' for key, value in values.items())
 
@@ -284,7 +285,7 @@ def snapshot(job: PiJob) -> Snapshot:
     run, launching, hold, failure, checks = _records(job)
     finished = _consistent(job, run, launching, hold, failure, checks)
     if finished:
-        return Snapshot(RemoteState.FINISHED, run['run_id'], run['token'], run['launched'], None)
+        return Snapshot(RemoteState.FINISHED, run['run_id'], run['token'], run['launched'], None, job.exists(DELIVERED))
     if failure is not None:
         token = failure.get('token') or (run and run['token'])
         since = run['launched'] if run else launching and launching['at']

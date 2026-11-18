@@ -60,7 +60,7 @@ reschedule_refused_status=8 # reschedule: a vanpi job that has launched moves on
 # and READY_ALLOWANCE more when it first runs a --ready command.
 pi_min_timeout=390 pi_ready_allowance=30
 typeset -A job          # the record load_job last read
-typeset run_job_status=0 run_job_not_ready=0 run_job_collecting=0
+typeset run_job_status=0 run_job_not_ready=0 run_job_collecting=0 run_job_done=0  # what the last pass left
 typeset add_kind=script add_host=   # what cmd_add records; stage_agent_job sets them for agent jobs
 source $repo/macbook/scripts/deferred_pi_schedule.zsh
 
@@ -514,7 +514,7 @@ execute_job() {  # DIR TIMEOUT [ARG]: one pass of the job's run (ARG: collect); 
 
 run_job() {  # DIR MODE: one scheduled/manual attempt; purge success, warn only scheduled
   local dir=$1 mode=${2:-scheduled} rc=0
-  run_job_status=0 run_job_not_ready=0 run_job_collecting=0
+  run_job_status=0 run_job_not_ready=0 run_job_collecting=0 run_job_done=0
   job[attempts]=$(( job[attempts] + 1 ))
   save_job $dir  # recorded first, so a crash mid-run still counts
   execute_job $dir $job[timeout] || rc=$?
@@ -539,6 +539,7 @@ account_pass() {  # DIR MODE RC: not ready (until give-up), done, or a failed at
   if (( rc == 0 )); then
     [[ ${dir:h} == $jobs_dir && -n ${dir:t} ]] || die "refusing to delete $dir"
     /bin/rm -rf -- $dir
+    run_job_done=1
     log_line "${prefix}done ${dir:t} ($tries)"
     return 0
   fi
@@ -602,7 +603,7 @@ cmd_run_now() {
     print -r -- "not ready $id; output in $dir/last.log"
     exit $run_now_not_ready
   fi
-  if (( run_job_status == 0 )); then
+  if (( run_job_done )); then
     print -r -- "done $id"
     return 0
   fi

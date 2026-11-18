@@ -16,7 +16,7 @@
 # by the repository's deferred_pi_control.py, never by running anything from
 # the job directory.
 
-typeset -A pi   # the last pi_snapshot: state run token owes unresolved failure_kind
+typeset -A pi   # the last pi_snapshot: state run token owes unresolved delivered failure_kind
 pi_alerts=alerts.sent   # in the job directory: one "KIND ATTEMPT" line per alert already sent
 # deferred_pi_state.STATE_RECORDS: a record without kind/host beside any of them is an untrusted vanpi job.
 pi_state_records=(remote-run.json launching.json launch-unknown.json remote-failed.json report-checks.json)
@@ -64,33 +64,52 @@ pi_alert_once() {  # DIR KIND TITLE MESSAGE: one alert per kind and attempt, wha
 
 pi_collect() {  # DIR MODE: one collect-only pass
   local rc=0
-  run_job_status=0 run_job_not_ready=0 run_job_collecting=0
+  run_job_status=0 run_job_not_ready=0 run_job_collecting=0 run_job_done=0
   execute_job $1 $job[timeout] collect || rc=$?
   run_job_status=$rc
   pi_settle $1 $2 $rc collect
 }
 
 pi_settle() {  # DIR MODE RC [collect]: after a pass, end the job, keep collecting, or fail it
+  # The durable state decides, never the exit status: a truncated or replaced `run`
+  # can exit 0 while the Pi run is still going.
   local dir=$1 mode=$2 rc=$3 prefix=
   [[ $mode == manual ]] && prefix="manual "
-  if (( rc == 0 )); then
-    [[ ${dir:h} == $jobs_dir && -n ${dir:t} ]] || die "refusing to delete $dir"
-    /bin/rm -rf -- $dir
-    log_line "${prefix}done ${dir:t} (vanpi)"
-    return 0
-  fi
   if ! pi_snapshot $dir; then
     log_line "${prefix}kept ${dir:t}: exit $rc and its vanpi run state cannot be read"
     [[ $mode != scheduled ]] || flag_invalid $dir "Its vanpi run state cannot be read (cancel --abandon removes it)"
+    return 0
+  fi
+  if [[ $pi[state] == finished ]] && (( pi[delivered] )); then
+    [[ ${dir:h} == $jobs_dir && -n ${dir:t} ]] || die "refusing to delete $dir"
+    /bin/rm -rf -- $dir
+    run_job_done=1
+    log_line "${prefix}done ${dir:t} (vanpi)"
     return 0
   fi
   case $pi[state] in
     running|launching) pi_owned $dir $mode $rc ;;
     finished) pi_undelivered $dir $mode $rc ;;
     failed|launch-unknown) pi_ended $dir $mode ;;
-    *) if [[ -n ${4-} ]]; then log_line "${prefix}nothing to collect for ${dir:t}"
-       else account_pass $dir $mode $rc; fi ;;   # unlaunched: not ready, or a launch refused before the Pi
+    *) pi_unlaunched $dir $mode $rc ${4-} ;;
   esac
+}
+
+pi_unlaunched() {  # DIR MODE RC [collect]: the pass left nothing on record
+  local dir=$1 mode=$2 rc=$3
+  if (( rc == 0 )); then
+    # Success with nothing launched and nothing delivered: the job's `run` is broken.
+    job[state]=failed
+    clear_not_ready
+    save_job $dir
+    log_line "${${mode:#scheduled}:+manual }collector failed ${dir:t}: exit 0 with nothing on record for vanpi; output in $dir/last.log"
+    [[ $mode != scheduled ]] || alert "Deferred job collector failed: ${dir:t}" \
+      "Its vanpi pass exited 0 but recorded no launch and delivered no report (see $dir/last.log). Nothing starts a run until you retry or run-now it in Mac Panel (macpanel)."
+  elif [[ -n ${4-} ]]; then
+    log_line "${${mode:#scheduled}:+manual }nothing to collect for ${dir:t}"
+  else
+    account_pass $dir $mode $rc   # not ready, or a launch refused before the Pi
+  fi
 }
 
 pi_owned() {  # DIR MODE RC: the job still owns a Pi run after this pass
@@ -114,11 +133,11 @@ pi_expire() {  # DIR: records the collection deadline's failure once it has pass
   pi_snapshot $1 || true
 }
 
-pi_undelivered() {  # DIR MODE RC: the run finished and its report is saved, but the notification failed
+pi_undelivered() {  # DIR MODE RC: the run finished and its report is saved, but no delivery is recorded
   local dir=$1 mode=$2 rc=$3
-  log_line "${${mode:#scheduled}:+manual }undelivered ${dir:t}: the report of Pi run $pi[run] is saved; the notification failed (exit $rc) and is sent again at every check"
+  log_line "${${mode:#scheduled}:+manual }undelivered ${dir:t}: the report of Pi run $pi[run] is saved; the pass exited $rc without recording its delivery, and every check sends it again"
   [[ $mode != scheduled ]] || pi_alert_once $dir delivery "Deferred job result not delivered: ${dir:t}" \
-    "Its vanpi run $pi[run] finished and the report is saved in $dir, but the notification failed (exit $rc). Every check sends the saved report again; nothing runs on the Pi again."
+    "Its vanpi run $pi[run] finished and the report is saved in $dir, but the pass exited $rc without recording its delivery. Every check sends the saved report again; nothing runs on the Pi again."
 }
 
 pi_ended() {  # DIR MODE: the attempt ended badly, or its launch is unknown; the job waits for a person

@@ -29,6 +29,35 @@ def minute_end(seconds_left):
     return time.strftime(STAMP, time.localtime(time.time() + seconds_left + 1))
 
 
+class DurableSuccessTests(PiHarness):
+    def test_a_run_that_exits_zero_while_its_pi_run_is_running_keeps_the_job(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        run_id = self.listed(job)["remote_run"]
+        (job / "run").write_text(NO_OP_RUN)
+        self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertTrue(job.exists())
+        record = self.listed(job)
+        self.assertEqual((record["remote_state"], record["remote_run"]), ("running", run_id))
+        self.assertEqual(self.alerts(), [f"Deferred job collector failed: {job.name}"])
+        self.assertIn(f"stop {run_id}", WarningTopic.received[0][2])
+        self.assertNotIn(f"done {job.name}", self.scheduler_log())
+        result = self.deferred("run-now", job.name, check=False)
+        self.assertEqual(result.returncode, 3)
+        self.assertTrue(job.exists())
+
+    def test_a_launch_pass_that_exits_zero_with_nothing_on_record_fails_the_job(self):
+        job = self.add_pi()
+        (job / "run").write_text(NO_OP_RUN)
+        self.deferred("run-due")
+        self.assertTrue(job.exists())
+        self.assertEqual((self.meta(job)["state"], self.listed(job)["remote_state"]), ("failed", "unlaunched"))
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [f"Deferred job collector failed: {job.name}"])
+        self.assertEqual(self.calls("run"), [])
+
+
 class IdentityTests(PiHarness):
     def test_a_token_only_remote_failure_beside_a_launch_marker_is_not_confirmed_over(self):
         self.control("launch-mode", "lost-nothing")
