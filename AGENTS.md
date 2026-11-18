@@ -957,7 +957,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 - Pi `codexp`/`codexpr` accept `-x` to disable approvals and the sandbox;
   `codexpm` accepts it before or after the model/effort pair. The `codexpm` and
   `claudepm` model shortcuts resolve the newest locally listed version by family
-  initial (`g` means plain GPT). Shared implementation is owned by the private
+  initial (plain GPT and its `g` letter were removed 2026-11-17). Shared implementation is owned by the private
   config checkout at `~/config/shared/model-selection/`, loaded on invocation;
   install that folder before deploying `pi/.bashrc`. Missing files fail only
   these launchers, not shell startup; this repo's tests need no private checkout.
