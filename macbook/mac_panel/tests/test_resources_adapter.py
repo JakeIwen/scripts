@@ -383,12 +383,36 @@ class AdapterReadTests(AdapterFixture):
         self.reader.rows.update(make_table((301, 1, 'codex', {'started': 'Tue Nov 17 23:19:53 2026'})).rows)
         self.codex_world({proven: 1, other: 3601})
         self.runner.answers[(LSOF, '-a', '-p', '300,301', '-Fpfn')] = CommandResult(
-            0, f'p301\nf20w\nn/x/rollout-2026-11-17T00-00-00-{proven}.jsonl\n')
+            0, f'p301\nf20w\nn{self.rollout_path(proven)}\n')
         groups = {group['id']: group for group in self.adapter().read()['groups']}
         self.assertEqual((groups['codex:301']['name'], groups['codex:301']['name_source']),
                          ('title 2222', 'rollout-open'))
         # 300's window holds only the rollout 301 has open, so it gets no name.
         self.assertEqual(groups['codex:300']['name_source'], 'fallback')
+
+    def rollout_path(self, uuid, name='rollout-2026-11-17T00-00-00-{}.jsonl'):
+        return f'{self.home}/.codex/sessions/2026/11/17/{name.format(uuid)}'
+
+    def test_only_one_exact_rollout_in_the_sessions_tree_proves_a_name(self):
+        current, older = '44444444-0000-0000-0000-000000000000', '55555555-0000-0000-0000-000000000000'
+        # Neither rollout is near 300's start, so nothing can be guessed either.
+        self.codex_world({current: 7200, older: 9000})
+        key = (LSOF, '-a', '-p', '300', '-Fpfn')
+        cases = {
+            # The current rollout plus a backup copy of another open for reading.
+            'backup': f'{self.rollout_path(current)}\nf21r\nn{self.rollout_path(older, "backup-rollout-2026-11-17T00-00-00-{}.jsonl.bak")}',
+            'two rollouts': f'{self.rollout_path(current)}\nf21r\nn{self.rollout_path(older)}',
+            'outside the tree': f'/tmp/rollout-2026-11-17T00-00-00-{current}.jsonl',
+            'a dotted path': f'{self.home}/.codex/sessions/../elsewhere/rollout-2026-11-17T00-00-00-{current}.jsonl',
+        }
+        for case, files in cases.items():
+            self.runner.answers[key] = CommandResult(0, f'p300\nfcwd\nn/Users/me/dev/taxes\nf20w\nn{files}\n')
+            self.clock.now += SNAPSHOT_TTL
+            group = next(g for g in self.adapter().read()['groups'] if g['id'] == 'codex:300')
+            self.assertEqual((group['name'], group['name_source']), ('codex · taxes', 'fallback'), case)
+        self.runner.answers[key] = CommandResult(0, f'p300\nf20w\nn{self.rollout_path(current)}\n')
+        group = next(g for g in self.adapter().read()['groups'] if g['id'] == 'codex:300')
+        self.assertEqual((group['name'], group['name_source']), ('title 4444', 'rollout-open'))
 
     def test_stalled_naming_returns_fallback_names_within_its_bound(self):
         release = threading.Event()

@@ -4,7 +4,9 @@ Claude Code keeps `~/.claude/sessions/<pid>.json` per interactive session (name,
 cwd); only those `.json` files are opened, by name, for pids that are `claude` processes in
 the current table, never the `.key` files beside them. Codex keeps no per-pid record: its
 thread title is found by locating the session's rollout file and looking the rollout id up
-in `~/.codex/session_index.jsonl`. A rollout the process holds open (lsof) proves the match;
+in `~/.codex/session_index.jsonl`. A rollout the process holds open (lsof) proves the match
+only when it is the one rollout-like file it has open, named exactly as Codex names them and
+inside `~/.codex/sessions`; any other or conflicting evidence proves nothing;
 a rollout whose timestamp matches the process start is only a guess, used when exactly one
 unclaimed process and one unclaimed rollout fall in the window, never cached, and marked as
 such (`NameSource`) so a destructive confirmation can say the name is unproven. Naming runs
@@ -62,8 +64,14 @@ class SessionInfo:
 
 @dataclass(frozen=True)
 class CodexFacts:
+    # The rollout id proven by the open-file evidence, or None.
     rollout: str | None
     cwd: str | None
+    # Rollout ids in any rollout-like file it holds open, proven or not: reserved from every
+    # start-time guess.
+    held: frozenset = frozenset()
+    # Its open files do not settle which rollout is its own, so no name is guessed for it.
+    conflicting: bool = False
 
 
 def bounded_read(path, limit, tail=False) -> bytes | None:
@@ -132,24 +140,38 @@ def short_path(value) -> str | None:
     return value if isinstance(value, str) and value.startswith('/') and len(value) < 1024 else None
 
 
-def parse_lsof(text) -> dict[int, CodexFacts]:
-    """`lsof -Fpfn` records: cwd and any open rollout file per pid."""
-    facts, pid, fd = {}, None, None
+def parse_lsof(text, rollouts_root) -> dict[int, CodexFacts]:
+    """`lsof -Fpfn` records: cwd and the open-rollout evidence per pid."""
+    cwds, files, pid, fd = {}, {}, None, None
     for line in text.splitlines():
         tag, value = line[:1], line[1:]
         if tag == 'p':
             pid = int(value) if value.isdecimal() else None
             if pid is not None:
-                facts[pid] = CodexFacts(None, None)
+                cwds[pid], files[pid] = None, set()
         elif tag == 'f':
             fd = value
         elif tag == 'n' and pid is not None:
-            current = facts[pid]
             if fd == 'cwd':
-                facts[pid] = CodexFacts(current.rollout, short_path(value))
-            elif (match := ROLLOUT_NAME.search(os.path.basename(value))):
-                facts[pid] = CodexFacts(match.group(2), current.cwd)
-    return facts
+                cwds[pid] = short_path(value)
+            elif ROLLOUT_NAME.search(os.path.basename(value)):
+                files[pid].add(value)
+    return {pid: rollout_facts(files[pid], cwds[pid], str(rollouts_root)) for pid in cwds}
+
+
+def exact_rollout(path, rollouts_root) -> str | None:
+    """The rollout id of a path that is exactly a rollout file inside the sessions tree."""
+    match = ROLLOUT_NAME.fullmatch(os.path.basename(path))
+    inside = os.path.normpath(path) == path and path.startswith(rollouts_root.rstrip('/') + '/')
+    return match.group(2) if match and inside else None
+
+
+def rollout_facts(paths, cwd, rollouts_root) -> CodexFacts:
+    """Proof needs exactly one rollout-like open file, and that one an exact rollout in the
+    tree; a backup copy, a file elsewhere or a second rollout leaves the name unproven."""
+    held = frozenset(ROLLOUT_NAME.search(os.path.basename(path)).group(2) for path in paths)
+    proven = exact_rollout(next(iter(paths)), rollouts_root) if len(paths) == 1 else None
+    return CodexFacts(proven, cwd, held, conflicting=bool(paths) and proven is None)
 
 
 def rollout_stamp_epoch(stamp) -> float | None:
@@ -189,7 +211,7 @@ class CodexNamer:
         except ApiError:
             return {}
         # lsof exits 1 when any pid has gone; the rest of its output still stands.
-        return parse_lsof(result.stdout)
+        return parse_lsof(result.stdout, self.home / CODEX_ROLLOUTS)
 
     def rollout_stamps(self, starts, deadline) -> dict[str, float]:
         """rollout id -> creation stamp, from the dated folders near the given starts."""
@@ -255,9 +277,9 @@ class CodexNamer:
         if not rows:
             return {}
         facts = {row.pid: found.get(row.pid, CodexFacts(None, None)) for row in rows}
-        # Rollouts proven open by any process are reserved before any start-time guess.
-        claimed = {item.rollout for item in facts.values() if item.rollout}
-        unproven = [row for row in rows if not facts[row.pid].rollout]
+        # Rollouts any process holds open are reserved before any start-time guess.
+        claimed = set().union(*(item.held for item in facts.values()))
+        unproven = [row for row in rows if not facts[row.pid].rollout and not facts[row.pid].conflicting]
         guessed = self.guesses(unproven, claimed, deadline)
         names = self.thread_names() if self.clock() < deadline else self.index
         return {row.pid: codex_info(row, facts[row.pid], guessed.get(row.pid), names)
