@@ -154,9 +154,10 @@ def build_grouping(table: ProcessTable) -> Grouping:
             owner[pid] = (Kind.INFRA, root)
     # Only a worker that roots its own group splits into jobs: a process that merely matches
     # the worker's text beneath another worker's job is an ordinary member of that job.
-    for root in computes:
-        if owner.get(root) != (Kind.COMPUTE, root):
-            continue
+    # The roots are frozen first: splitting makes a job that names the worker own its group,
+    # and reading the map mid-loop would then split it too, depending on visit order.
+    worker_roots = {pid for pid in computes if owner.get(pid) == (Kind.COMPUTE, pid)}
+    for root in worker_roots:
         owned = {pid for pid, (kind, top) in owner.items() if kind is Kind.COMPUTE and top == root}
         for pid, target in compute_assignment(table, root, owned).items():
             owner[pid] = (Kind.COMPUTE, target)
@@ -165,7 +166,7 @@ def build_grouping(table: ProcessTable) -> Grouping:
     for pid, (kind, root) in owner.items():
         gid = membership[pid]
         if gid not in groups:
-            label = group_label(kind, root, services, infras, computes, table)
+            label = group_label(kind, root, services, infras, worker_roots, table)
             groups[gid] = Group(gid, kind, table.rows[root], label,
                                 role_unknown=services.get(root) is CodexRole.UNCERTAIN)
     for group in groups.values():
@@ -188,11 +189,11 @@ def inner_roots(table, sessions, services, computes, infras) -> dict[int, Kind]:
             if nearest(table.ancestors(pid), stops) in sessions}
 
 
-def group_label(kind, root, services, infras, computes, table) -> str | None:
+def group_label(kind, root, services, infras, worker_roots, table) -> str | None:
     if kind is Kind.INFRA:
         return CODEX_LABELS[services[root]] if root in services else infras.get(root)
     if kind is Kind.COMPUTE:
-        return COMPUTE_WORKER_LABEL if root in computes else job_label(table.rows[root])
+        return COMPUTE_WORKER_LABEL if root in worker_roots else job_label(table.rows[root])
     return None
 
 

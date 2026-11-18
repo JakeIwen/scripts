@@ -19,6 +19,12 @@ FIXTURES = {
         LAUNCHD, (210, 1, 'python3 -m van_compute.worker'), (211, 210, SHELL_JOB),
         (212, 211, 'python3 check.py van_compute.worker'), (213, 212, 'sleep 1'),
         (214, 211, 'python3 -m van_compute.worker'), (215, 214, 'sleep 2')),
+    'worker launching a direct job that names the worker, pids ascending': (
+        LAUNCHD, (200, 1, 'claude'), (210, 200, 'python3 -m van_compute.worker'),
+        (211, 210, 'python3 check.py van_compute.worker'), (213, 211, 'sleep 1')),
+    'worker launching a direct job that names the worker, pids swapped': (
+        LAUNCHD, (200, 1, 'claude'), (211, 200, 'python3 -m van_compute.worker'),
+        (210, 211, 'python3 check.py van_compute.worker'), (213, 210, 'sleep 1')),
     'nested sessions': (
         LAUNCHD, (200, 1, 'claude'), (201, 200, '/bin/zsh -c x'), (210, 201, 'claude -p y'),
         (211, 210, 'sleep 1'), (220, 211, 'codex exec z'), (221, 220, 'node a.js')),
@@ -87,6 +93,19 @@ class GroupInvariantTests(unittest.TestCase):
         self.assertEqual([m.row.pid for m in grouping.groups['compute:211'].members],
                          [211, 212, 213])
         self.assertNotIn('compute:212', grouping.groups)
+
+    def test_grouping_a_job_that_names_the_worker_does_not_depend_on_pid_order(self):
+        shapes = []
+        for name in ('worker launching a direct job that names the worker, pids ascending',
+                     'worker launching a direct job that names the worker, pids swapped'):
+            grouping = build_grouping(make_table(*FIXTURES[name]))
+            worker_roots = [g.root.pid for g in grouping.groups.values() if g.label == 'worker']
+            self.assertEqual(len(worker_roots), 1, name)
+            job = 211 if worker_roots[0] == 210 else 210
+            self.assertEqual(grouping.membership[213], grouping.membership[job], name)
+            self.assertEqual(sum(g.kind.value == 'compute' for g in grouping.groups.values()), 2)
+            shapes.append(sorted(len(g.members) for g in grouping.groups.values()))
+        self.assertEqual(shapes[0], shapes[1])
 
 
 if __name__ == '__main__':
