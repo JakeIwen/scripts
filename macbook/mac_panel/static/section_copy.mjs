@@ -416,6 +416,7 @@ export const RESOURCES_COPY = {
     skipped: 'skipped as protected',
     refused: 'refused by the system',
     unchanged: 'already at low priority',
+    not_reached: 'not reached before the action stopped',
     none: 'Nothing was signalled',
     stopped: 'Stopped early',
   },

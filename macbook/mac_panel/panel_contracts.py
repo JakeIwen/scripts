@@ -482,17 +482,26 @@ class ResourcesPayload(TypedDict):
     processes: list[ProcessRecord]
 
 
+class StopRecord(TypedDict):
+    """Why a mutation ended before every target was handled."""
+    # One of signal_recheck.StopCode.
+    code: str
+    text: str
+
+
 class SignalResult(TypedDict):
     """Counts from one POST /api/resources; the authoritative outcome of a mutation."""
     applied: int
     gone: int
     changed: int
+    # Members the policy blocked when the action was planned.
     skipped: int
     refused: int
     unchanged: int
-    # Why the action stopped before every target was handled (a session nested inside it,
-    # its root changed, the time bound); None when it ran to the end.
-    stopped: str | None
+    # Targets left alone because the action stopped first (`stopped` says why).
+    not_reached: int
+    # None when the action ran to the end.
+    stopped: StopRecord | None
 
 
 class Level(str, Enum):

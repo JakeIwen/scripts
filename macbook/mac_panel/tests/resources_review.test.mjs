@@ -276,15 +276,27 @@ test('a lower-priority reply that is all unchanged is a success; a refused one i
 test('a reply that stopped early says so after the counts, as an error', async () => {
   reset();
   const target = {pid: 6000, started: 'Tue Nov 17 07:30:00 2026'};
-  reply = {applied: 2, gone: 0, changed: 3, skipped: 0, refused: 0, unchanged: 0, stopped: 'A session started inside this one; nothing more was signalled'};
+  reply = {applied: 2, gone: 0, changed: 0, skipped: 0, refused: 0, unchanged: 0, not_reached: 3,
+    stopped: {code: 'nested-session', text: 'A session started inside this one; nothing more was signalled'}};
   await runAction('terminate', target, 'tree');
   await tick();
   const shown = noticeRoot.parts['.notice'];
   assert.equal(shown.className, 'notice error');
-  assert.match(shown.textContent, /^Sent terminate to 2 processes, 3 processes changed since the snapshot and left alone\. Stopped early: A session started inside this one; nothing more was signalled/);
-  reply = {applied: 1, gone: 0, changed: 0, skipped: 0, refused: 0, unchanged: 0, stopped: null};
+  assert.match(shown.textContent, /^Sent terminate to 2 processes, 3 processes not reached before the action stopped\. Stopped early: A session started inside this one; nothing more was signalled( ·|$)/);
+  reply = {applied: 1, gone: 0, changed: 0, skipped: 0, refused: 0, unchanged: 0, not_reached: 0, stopped: null};
   await runAction('terminate', target);
   await tick();
   assert.equal(noticeRoot.parts['.notice'].className, 'notice ok');
   assert.doesNotMatch(noticeRoot.parts['.notice'].textContent, /Stopped/);
+});
+
+test('targets a time limit left alone read as not reached, never as protected', async () => {
+  reset();
+  reply = {applied: 1, gone: 0, changed: 0, skipped: 0, refused: 0, unchanged: 0, not_reached: 3,
+    stopped: {code: 'time-limit', text: 'Stopped at the time limit before every process was handled; refresh and retry'}};
+  await runAction('terminate', {pid: 6000, started: 'Tue Nov 17 07:30:00 2026'}, 'tree');
+  await tick();
+  const shown = noticeRoot.parts['.notice'].textContent;
+  assert.match(shown, /3 processes not reached before the action stopped/);
+  assert.doesNotMatch(shown, /protected|\[object Object\]/);
 });

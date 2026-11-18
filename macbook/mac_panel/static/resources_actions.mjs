@@ -12,8 +12,9 @@ const LOWERED_NICE = 10;
 
 export const ActionId = Object.freeze({TERMINATE: 'terminate', KILL: 'kill', PAUSE: 'pause', RESUME: 'resume', LOWER: 'lower-priority'});
 export const Scope = Object.freeze({PROCESS: 'process', TREE: 'tree'});
-// The reply counts, in the order the result line lists them after "applied".
-const REPLY_COUNTS = ['gone', 'changed', 'skipped', 'refused', 'unchanged'];
+// The reply counts, in the order the result line lists them after "applied". `not_reached` counts the targets an
+// action that stopped early never got to; `skipped` is only for members the policy protects.
+const REPLY_COUNTS = ['gone', 'changed', 'skipped', 'refused', 'unchanged', 'not_reached'];
 // Lowering a process that is already low is the goal reached, so it is the one action whose `unchanged` is no problem.
 const NO_OP_IS_SUCCESS = new Set([ActionId.LOWER]);
 const identityKey = (prefix, target) => `${prefix}-${target.pid}-${target.started}`;
@@ -30,7 +31,7 @@ export function processActions(row) {
   return ids;
 }
 
-/** One sentence from a mutate reply (six flat counts); zero counts are left out. */
+/** One sentence from a mutate reply (seven flat counts and `stopped`, {code, text} or null); zero counts are left out. */
 export function resultText(actionId, counts) {
   const applied = Number(counts.applied) || 0;
   const onlyNoOp = !applied && NO_OP_IS_SUCCESS.has(actionId) && REPLY_COUNTS.every(key => key === 'unchanged' || !Number(counts[key]));
@@ -41,7 +42,7 @@ export function resultText(actionId, counts) {
   });
   const line = parts.join(', ');
   // The backend words the reason itself; the page only puts it after the counts.
-  return counts.stopped ? `${line}. ${COPY.results.stopped}: ${counts.stopped}` : line;
+  return counts.stopped ? `${line}. ${COPY.results.stopped}: ${counts.stopped.text}` : line;
 }
 
 // A result that stopped early, or signalled nothing while something was refused or changed is shown as a problem, not a success.

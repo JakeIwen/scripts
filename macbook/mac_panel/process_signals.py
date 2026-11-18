@@ -15,8 +15,8 @@ import time
 from panel_contracts import ApiError, SignalResult
 from resource_groups import SESSION_KINDS, build_grouping
 from signal_policy import Scope, SignalPolicy, tree_blocked
-from signal_recheck import (MUTATION_BUDGET, Action, Halt, Outcome, Plan,
-                            SignalRequest, Target, ordered, verify)
+from signal_recheck import (MUTATION_BUDGET, Action, Halt, Outcome, Plan, SignalRequest,
+                            StopCode, Target, ordered, verify)
 from wire_validation import confirm, field, object_fields
 
 STARTED_LIMIT = 64
@@ -69,7 +69,7 @@ class ProcessSignaller:
             reason = self.policy.blocked(row, grouping.kind(row.pid), Scope.PROCESS, context)
             if reason:
                 raise ApiError(403, reason)
-            return Plan(request, row, None, [Target(row, 0)], 0)
+            return Plan(request, row, None, [Target(row, 0)], 0, frozenset({(row.pid, row.started)}))
         group = grouping.group_of(row.pid)
         if group is None or group.root.pid != row.pid or group.kind not in SESSION_KINDS:
             raise ApiError(403, NOT_A_SESSION_ROOT)
@@ -82,17 +82,21 @@ class ProcessSignaller:
                 skipped += 1
             else:
                 targets.append(Target(member.row, member.depth))
-        return Plan(request, row, group.id, targets, skipped)
+        members = frozenset((member.row.pid, member.row.started) for member in group.members)
+        return Plan(request, row, group.id, targets, skipped, members)
 
     def carry_out(self, plan: Plan, deadline) -> SignalResult:
         counts, stopped = Counter({Outcome.SKIPPED: plan.skipped}), None
         pending = ordered(plan.targets, plan.request.action)
         for index, target in enumerate(pending):
             verdict = verify(self.reader, self.policy, plan, target, deadline, self.clock)
+            if verdict is None and self.clock() >= deadline:
+                # Last, immediately before acting: nothing is signalled past the budget.
+                verdict = Halt(StopCode.TIME_LIMIT)
             if isinstance(verdict, Halt):
-                # Nothing more is signalled; every target not yet reached is counted.
-                counts[verdict.outcome] += len(pending) - index
-                stopped = verdict.reason
+                # Nothing more is signalled; this target and every later one is counted here.
+                counts[Outcome.NOT_REACHED] += len(pending) - index
+                stopped = verdict.record()
                 break
             counts[verdict or self.apply(plan.request.action, target.row.pid)] += 1
         return SignalResult(**{outcome.value: counts[outcome] for outcome in Outcome},

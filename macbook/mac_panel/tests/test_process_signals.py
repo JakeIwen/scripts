@@ -16,14 +16,14 @@ from process_table import ProcessReader
 from resources_adapter import ResourcesAdapter
 from resources_fixtures import LATER, PANEL_PID, PANEL_ROW, STARTED, FakeReader, make_table
 from signal_policy import SHELL, TREE_TOO_LARGE, SignalPolicy
-from signal_recheck import (MUTATION_BUDGET, STOPPED_NESTED, STOPPED_ROOT, STOPPED_TIME,
-                            STOPPED_UNREADABLE)
+from signal_recheck import MUTATION_BUDGET, STOP_TEXTS, StopCode
 
-COUNTS = ('applied', 'gone', 'changed', 'skipped', 'refused', 'unchanged')
+COUNTS = ('applied', 'gone', 'changed', 'skipped', 'refused', 'unchanged', 'not_reached')
 
 
 def counts(stopped=None, **values):
-    return {**{key: values.get(key, 0) for key in COUNTS}, 'stopped': stopped}
+    record = stopped and {'code': stopped.value, 'text': STOP_TEXTS[stopped]}
+    return {**{key: values.get(key, 0) for key in COUNTS}, 'stopped': record}
 
 
 def row_with(row, command, **overrides):
@@ -159,13 +159,29 @@ class SignalTests(unittest.TestCase):
     def test_each_target_is_rechecked_just_before_its_signal(self):
         def change_world(reader):
             rows = reader.rows
-            rows[203] = replace(rows[203], started=LATER)
             rows[202] = replace(rows[202], uid=502)
             rows[201] = row_with(rows[201], '/usr/bin/tmux')
         self.reader.after_table = change_world
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, counts(applied=1, changed=3))
-        self.assertEqual(self.recorder.calls, [(200, signal.SIGTERM)])
+        self.assertEqual(result, counts(applied=2, changed=2))
+        self.assertEqual(self.recorder.calls, [(203, signal.SIGTERM), (200, signal.SIGTERM)])
+
+    def test_a_member_the_plan_never_saw_stops_the_action_before_its_ancestors(self):
+        # A one-process session gains a child between the plan and the final verification:
+        # ending the root now would orphan the child, still running, outside every session.
+        self.reader.rows.update(make_table((220, 101, 'claude -p solo')).rows)
+        self.reader.after_table = lambda reader: reader.rows.update(
+            make_table((221, 220, 'sleep 5')).rows)
+        result = self.signaller.mutate(body(220, scope='tree'))
+        self.assertEqual(result, counts(not_reached=1, stopped=StopCode.SESSION_CHANGED))
+        self.assertEqual(self.recorder.calls, [])
+
+    def test_a_reused_member_pid_is_a_new_member(self):
+        self.reader.after_table = lambda reader: reader.rows.update(
+            {203: replace(reader.rows[203], started=LATER)})
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(not_reached=4, stopped=StopCode.SESSION_CHANGED))
+        self.assertEqual(self.recorder.calls, [])
 
     def test_a_member_reparented_out_of_the_tree_is_not_signalled(self):
         self.reader.after_table = lambda reader: reader.reparent_children(202)
@@ -192,7 +208,7 @@ class SignalTests(unittest.TestCase):
         self.reader.after_table = lambda reader: reader.rows.update(
             {202: row_with(reader.rows[202], 'claude -p nested')})
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, counts(changed=4, stopped=STOPPED_NESTED))
+        self.assertEqual(result, counts(not_reached=4, stopped=StopCode.NESTED_SESSION))
         self.assertEqual(self.recorder.calls, [])
 
     def test_a_session_appearing_midway_stops_the_rest(self):
@@ -203,13 +219,13 @@ class SignalTests(unittest.TestCase):
         self.signaller.kill = kill
         result = self.signaller.mutate(body(200, scope='tree'))
         self.assertEqual(self.recorder.calls, [(203, signal.SIGTERM)])
-        self.assertEqual(result, counts(applied=1, changed=3, stopped=STOPPED_NESTED))
+        self.assertEqual(result, counts(applied=1, not_reached=3, stopped=StopCode.NESTED_SESSION))
 
     def test_a_root_that_execs_into_an_app_server_stops_the_whole_action(self):
         self.reader.after_table = lambda reader: reader.rows.update(
             {200: row_with(reader.rows[200], '/x/codex app-server --listen x')})
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, counts(changed=4, stopped=STOPPED_ROOT))
+        self.assertEqual(result, counts(not_reached=4, stopped=StopCode.ROOT_CHANGED))
         self.assertEqual(self.recorder.calls, [])
 
     def test_a_process_that_execs_into_something_protected_is_refused(self):
@@ -228,7 +244,7 @@ class SignalTests(unittest.TestCase):
             reader.fail_table = True
         self.reader.after_table = fail
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, counts(changed=4, stopped=STOPPED_UNREADABLE))
+        self.assertEqual(result, counts(not_reached=4, stopped=StopCode.UNREADABLE))
         self.reader.fail_table = False
         now = [0.0]
         self.signaller.clock = lambda: now[0]
@@ -238,7 +254,32 @@ class SignalTests(unittest.TestCase):
             now[0] += MUTATION_BUDGET
         self.signaller.kill = kill
         result = self.signaller.mutate(body(200, scope='tree'))
-        self.assertEqual(result, counts(applied=1, skipped=3, stopped=STOPPED_TIME))
+        self.assertEqual(result, counts(applied=1, not_reached=3, stopped=StopCode.TIME_LIMIT))
+
+    def test_the_deadline_passing_during_the_fresh_read_signals_nothing(self):
+        # The re-read succeeds but finishes past the budget: nothing may be signalled after it.
+        now = [0.0]
+        self.signaller.clock = lambda: now[0]
+
+        def slow_read(reader):
+            now[0] += MUTATION_BUDGET
+        self.reader.after_table = lambda reader: setattr(reader, 'after_table', slow_read)
+        result = self.signaller.mutate(body(300))
+        self.assertEqual(result, counts(not_reached=1, stopped=StopCode.TIME_LIMIT))
+        self.assertEqual(self.recorder.calls, [])
+
+    def test_a_read_that_fails_because_the_budget_ran_out_is_the_time_limit(self):
+        now = [0.0]
+        self.signaller.clock = lambda: now[0]
+
+        def timed_out_read(timeout=5):
+            # The per-target re-read runs out of budget under ps and fails.
+            now[0] += MUTATION_BUDGET
+            raise ApiError(502, 'Process table timed out')
+        self.reader.after_table = lambda reader: setattr(reader, 'table', timed_out_read)
+        result = self.signaller.mutate(body(200, scope='tree'))
+        self.assertEqual(result, counts(not_reached=4, stopped=StopCode.TIME_LIMIT))
+        self.assertEqual(self.recorder.calls, [])
 
     def test_a_tree_above_the_size_cap_is_refused(self):
         with mock.patch('signal_policy.TREE_TARGET_LIMIT', 3):
