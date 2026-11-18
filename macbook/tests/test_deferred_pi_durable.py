@@ -18,15 +18,6 @@ STAMP = "%Y-%m-%dT%H:%M"
 NO_OP_RUN = "#!/bin/zsh\nexit 0\n"
 
 
-def minute_end(seconds_left):
-    """Waits until SECONDS_LEFT seconds remain in the current minute; returns the next minute's stamp."""
-    remaining = 60 - time.time() % 60
-    if remaining < seconds_left + 0.5:
-        time.sleep(remaining + 0.1)
-        remaining = 60 - time.time() % 60
-    time.sleep(remaining - seconds_left)
-    return time.strftime(STAMP, time.localtime(time.time() + seconds_left + 1))
-
 
 class DurableSuccessTests(PiHarness):
     def test_a_run_that_exits_zero_while_its_pi_run_is_running_keeps_the_job(self):
@@ -147,10 +138,13 @@ class DeadlineWithoutRunTests(PiHarness):
 
 class LaunchWindowTests(PiHarness):
     def test_the_launch_window_is_checked_at_the_launch_not_at_the_scan(self):
-        # Sorted first, so its ready probe holds the checker across the cutoff for the second.
-        first = self.add_pi("--ready", "/bin/sleep 6", name="a-ready")
+        # The first job's ready probe moves the clock both the scheduler and the run judge the
+        # window by two hours ahead, past both give-up times, while the checker is on its turn.
+        shift = self.tmp / "clock-shift"
+        self.env["DEFERRED_CLOCK_SHIFT_FILE"] = str(shift)
+        first = self.add_pi("--ready", f"print 7200 > {shift}", name="a-ready")
         second = self.add_pi(name="b-late")
-        cutoff = minute_end(3)
+        cutoff = time.strftime(STAMP, time.localtime(time.time() + 3600))
         for job in (first, second):
             self.set_meta(job, give_up=cutoff)
         self.deferred("run-due")

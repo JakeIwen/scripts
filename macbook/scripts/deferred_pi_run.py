@@ -58,6 +58,8 @@ READY_ALLOWANCE = 30
 # Set by the scheduler for a pass it started (not for run-now): the job's give-up
 # time as epoch seconds, past which the pass must not launch.
 LAUNCH_BY = 'DEFERRED_LAUNCH_BY'
+# Tests only (deferred.zsh clock_shift_file): a file holding seconds added to the clock LAUNCH_BY is judged by.
+CLOCK_SHIFT = 'DEFERRED_CLOCK_SHIFT_FILE'
 REPORT_CHECK_LIMIT = 3  # passes that may find a finished run's report blank before it fails
 
 SETTINGS = ('agent_name', 'agent_model', 'agent_effort', 'agent_cwd', 'agent_ready',
@@ -249,10 +251,19 @@ def launch(job, settings, clock):
 def refuse_past_give_up():
     """Read at the launch itself: --ready and the Pi calls before it can cross the give-up time."""
     value = os.environ.get(LAUNCH_BY, '')
-    if value.isdigit() and time.time() >= int(value):
+    if value.isdigit() and window_clock() >= int(value):
         cutoff = time.strftime('%Y-%m-%d %H:%M', time.localtime(int(value)))
         raise Failure(f'Not launched: the job is past its give-up time ({cutoff}); nothing was started on '
                       'vanpi. retry or run-now starts it.')
+
+
+def window_clock():
+    """The time the give-up time is judged by: real, unless a test shifts it through CLOCK_SHIFT."""
+    try:
+        shift = int(Path(os.environ[CLOCK_SHIFT]).read_text())
+    except (KeyError, OSError, ValueError):
+        shift = 0
+    return time.time() + shift
 
 
 def acquire_prompt(job, settings, budget):

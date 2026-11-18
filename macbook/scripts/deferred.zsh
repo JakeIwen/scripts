@@ -33,6 +33,9 @@ stamp_format=%Y-%m-%dT%H:%M
 default_attempts=3
 default_timeout=900
 lock_wait=${DEFERRED_LOCK_WAIT:-10}
+# Tests only: a file holding seconds added to the clock the give-up time is judged by, here
+# and (through the pass environment) by a vanpi run at its launch. Unset, the clock is real.
+clock_shift_file=${DEFERRED_CLOCK_SHIFT_FILE-}
 # Every job record defines these keys; `state` is pending or failed. `give_up`
 # is optional (records written before it existed lack it): empty means due + 7d.
 # `last_not_ready` (stamp of the latest check that exited not-ready) and
@@ -101,6 +104,13 @@ give_up_stamp() {  # prints the time after which a not-ready exit counts as a fa
 }
 
 clear_not_ready() { job[last_not_ready]=; job[not_ready_checks]= }
+
+window_now() {  # prints the time, as a stamp, that the give-up time is compared with
+  local shift=0
+  [[ -z $clock_shift_file || ! -f $clock_shift_file ]] || shift=$(<$clock_shift_file)
+  [[ $shift == <-> ]] || shift=0
+  strftime $stamp_format $(( EPOCHSECONDS + shift ))
+}
 
 record_not_ready() {  # the check just made exited not-ready: remember when and how often
   job[last_not_ready]=$(strftime $stamp_format $EPOCHSECONDS)
@@ -528,7 +538,7 @@ run_job() {  # DIR MODE: one scheduled/manual attempt; purge success, warn only 
 
 account_pass() {  # DIR MODE RC: not ready (until give-up), done, or a failed attempt with its alert
   local dir=$1 mode=$2 rc=$3
-  if (( rc == not_ready_status )) && [[ $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
+  if (( rc == not_ready_status )) && [[ $(window_now) < $(give_up_stamp) ]]; then
     run_job_not_ready=1
     job[attempts]=$(( job[attempts] - 1 ))
     record_not_ready
@@ -635,7 +645,7 @@ cmd_run_due() {
   strftime '%F %T' $EPOCHSECONDS > $heartbeat
   for dir in $jobs_dir/*(N/); do
     # Read per job: an earlier job's pass may have held the checker past a due or give-up time.
-    now=$(strftime $stamp_format $EPOCHSECONDS)
+    now=$(window_now)
     if ! job_trusted $dir; then flag_invalid $dir; continue; fi
     if pi_job; then pi_check $dir $now; continue; fi   # its deadline does not need the run file
     if ! run_executable $dir; then flag_invalid $dir; continue; fi

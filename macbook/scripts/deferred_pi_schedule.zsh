@@ -140,7 +140,7 @@ pi_unlaunched() {  # DIR MODE RC [collect]: the pass left nothing on record
     log_line "${${mode:#scheduled}:+manual }collector failed ${dir:t}: exit 0 with nothing on record for vanpi; output in $dir/last.log"
   elif [[ -n ${4-} ]]; then
     log_line "${${mode:#scheduled}:+manual }nothing to collect for ${dir:t}"
-  elif [[ $mode == scheduled && ! $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
+  elif [[ $mode == scheduled && ! $(window_now) < $(give_up_stamp) ]]; then
     pi_window_closed $dir   # the pass reached the launch (or its end) past the give-up time
   else
     account_pass $dir $mode $rc   # not ready, or a launch refused before the Pi
@@ -240,6 +240,7 @@ pi_launch_pass() {  # DIR: the checker's launch pass; the run refuses to launch 
   local epoch
   strftime -r -s epoch $stamp_format $(give_up_stamp)
   local -a pass_env=(DEFERRED_LAUNCH_BY=$epoch)   # deferred_pi_run.LAUNCH_BY; run-now passes none
+  [[ -z $clock_shift_file ]] || pass_env+=(DEFERRED_CLOCK_SHIFT_FILE=$clock_shift_file)   # deferred_pi_run.CLOCK_SHIFT
   run_job $1
 }
 
