@@ -10,10 +10,10 @@ pi_agent.py, so a damaged or missing job `run` cannot change what these say.
                                   exit 0 when the job may be deleted, 6 while a run may be active;
                                   --untrusted (a job record that cannot be trusted) refuses
                                   unless --abandon is given instead
-  rearm DIR VERB [ID]             retry/run-now: exit 0 when VERB may go ahead (an ended attempt is
-                                  cleared); 7 when the previous attempt is unresolved and ID does
-                                  not name it, ID names nothing unresolved, or the records cannot
-                                  be trusted (then no ID is accepted)
+  rearm [--check] DIR VERB [ID]   retry/run-now: exit 0 when VERB may go ahead (an ended attempt is
+                                  cleared, unless --check); 7 when the previous attempt is
+                                  unresolved and ID does not name it, ID names nothing unresolved,
+                                  or the records cannot be trusted (then no ID is accepted)
   expire DIR [MINUTES]            exit 0 after recording a collection-deadline failure for a run
                                   owed past launch + MINUTES (the job's --run-timeout, default
                                   DEFAULT_RUN_TIMEOUT) + the grace; 1 otherwise
@@ -116,13 +116,15 @@ def clear_attempt(job, line):
     job.remove(*CLEARED)
 
 
-def rearm(job, verb, given):
+def rearm(job, verb, given, check=False):
     """retry/run-now: whether VERB may go ahead, and the ended attempt cleared so it can.
 
     A confirmed-terminal attempt needs no consent. An unresolved one (it may
     still be active on vanpi) needs GIVEN naming exactly that attempt of a
     valid snapshot, as `list --json` shows it; run-now without one collects a
     run the job still owes. Records that cannot be trusted refuse every id.
+    CHECK clears nothing: deferred.zsh checks first, sets the new attempt's
+    launch window, then clears.
     """
     name = job.path.name
     try:
@@ -135,7 +137,7 @@ def rearm(job, verb, given):
             print(f'{name}: nothing on vanpi is unresolved, so --relaunch {given} names no current attempt '
                   f'(it was already replaced or is over); plain `{verb} {name}` is enough.', file=sys.stderr)
             return RELAUNCH_REFUSED
-        if snap.state == RemoteState.FAILED:
+        if snap.state == RemoteState.FAILED and not check:
             clear_attempt(job, f'attempt {snap.attempt_id} ended ({snap.failure_kind.value}); cleared by {verb}')
         return DONE
     if given is None and verb == 'run-now' and snap.owes:
@@ -147,6 +149,8 @@ def rearm(job, verb, given):
               f'To start another run anyway: deferred.zsh {verb} {name} --relaunch {" or ".join(ids)}',
               file=sys.stderr)
         return RELAUNCH_REFUSED
+    if check:
+        return DONE
     clear_attempt(job, f'attempt {given} abandoned by {verb} --relaunch; it may still be active on vanpi')
     print(f'Cleared the unresolved attempt {given}; the next launch starts a new run.')
     return DONE
@@ -189,8 +193,11 @@ def main(argv):
         return describe(PiJob(argv[1]))
     if len(argv) in (2, 3) and argv[0] == 'cancel' and argv[1:-1] in ([], ['--abandon'], ['--untrusted']):
         return cancel(PiJob(argv[-1]), abandon=argv[1] == '--abandon', untrusted=argv[1] == '--untrusted')
+    check = argv[:2] == ['rearm', '--check']
+    if check:
+        argv = argv[:1] + argv[2:]
     if len(argv) in (3, 4) and argv[0] == 'rearm' and argv[2] in ('retry', 'run-now'):
-        return rearm(PiJob(argv[1]), argv[2], argv[3] if len(argv) == 4 else None)
+        return rearm(PiJob(argv[1]), argv[2], argv[3] if len(argv) == 4 else None, check)
     if len(argv) in (2, 3) and argv[0] == 'expire' and argv[2:] in ([], [m for m in argv[2:] if m.isdigit()]):
         return expire(PiJob(argv[1]), int(argv[2]) if len(argv) == 3 else DEFAULT_RUN_TIMEOUT)
     print(__doc__.split('\n\n')[-1], file=sys.stderr)

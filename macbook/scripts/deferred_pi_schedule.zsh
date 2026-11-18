@@ -211,12 +211,27 @@ pi_passable() {  # DIR: its run file can make a pass; otherwise warns once and f
   return 1
 }
 
-pi_rearm() {  # DIR VERB ID: retry/run-now may go ahead; relays the control script's refusal (exit 7)
-  local rc=0
-  pi_control_run rearm $1 $2 ${3:+"$3"} || rc=$?
-  (( rc == 0 )) && return 0
-  (( rc == relaunch_refused_status )) && exit $relaunch_refused_status
-  die "could not check the Pi attempt of ${1:t}"
+pi_rearm() {  # DIR VERB ID: retry/run-now may go ahead; relays a refusal (exit 7), which changes nothing
+  # Every precondition first, then the new attempt's launch window, and only then the old records.
+  local dir=$1 verb=$2 id=${3-} rc=0
+  pi_control_run rearm --check $dir $verb ${id:+"$id"} || rc=$?
+  if (( rc != 0 )); then
+    (( rc != relaunch_refused_status )) || exit $relaunch_refused_status
+    die "could not check the Pi attempt of ${dir:t}"
+  fi
+  pi_snapshot $dir || die "cannot read the Pi run state of ${dir:t}"
+  # run-now of a run the job still owes only collects it: nothing is replaced, no launch window needed.
+  [[ $verb == run-now && -z $id ]] && (( pi[owes] )) && return 0
+  pi_fresh_window
+  save_job $dir
+  pi_control_run rearm $dir $verb ${id:+"$id"} || die "could not clear the previous Pi attempt of ${dir:t}; try again"
+}
+
+pi_fresh_window() {  # the new attempt may launch until 7 days after now, or after its due time when later
+  local from=$EPOCHSECONDS due
+  strftime -r -s due $stamp_format $job[due]
+  (( due <= from )) || from=$due
+  job[give_up]=$(strftime $stamp_format $(( from + default_give_up_seconds )))
 }
 
 pi_cancel() {  # DIR ABANDON [UNTRUSTED]: stop or find finished any Pi run first; --abandon always proceeds

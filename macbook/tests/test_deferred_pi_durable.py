@@ -58,6 +58,41 @@ class DurableSuccessTests(PiHarness):
         self.assertEqual(self.calls("run"), [])
 
 
+class RetryWindowTests(PiHarness):
+    def test_a_retry_after_a_genuine_collection_deadline_launches_the_replacement(self):
+        due = datetime.date.today() - datetime.timedelta(days=15)
+        job = self.add_pi(due=due.isoformat())
+        give_up = time.mktime(due.timetuple()) + 7 * 86400  # the default window: due + 7 days
+        self.assertEqual(self.deferred("run-now", job.name, check=False).returncode, 4)
+        run_id = self.listed(job)["remote_run"]
+        # As if launched an hour before the original give-up time, and never collected since.
+        self.set_meta(job, give_up="")
+        self.age_launch(job, int(self.record(job, "remote-run.json")["launched"] - (give_up - 3600)))
+        self.offline()
+        self.deferred("run-due")
+        record = self.listed(job)
+        self.assertEqual((record["state"], record["relaunch_id"]), ("failed", run_id))
+        self.assertEqual(self.record(job, "remote-failed.json")["kind"], "collection-deadline")
+        self.offline(False)
+        self.deferred("retry", job.name, "--relaunch", run_id)
+        self.assertGreater(self.meta(job).get("give_up", ""), time.strftime(STAMP))
+        self.deferred("run-due")
+        self.assertEqual(len(self.calls("run")), 2)
+        self.assertEqual(self.listed(job)["remote_state"], "running")
+
+    def test_a_refused_relaunch_clears_nothing_and_keeps_the_window(self):
+        self.control("launch-mode", "lost-nothing")
+        job = self.add_pi()
+        self.deferred("run-due")
+        self.deferred("run-due")
+        token = self.listed(job)["relaunch_id"]
+        before = {path.name: path.read_bytes() for path in job.iterdir() if path.name != "last.log"}
+        result = self.deferred("retry", job.name, "--relaunch", "d" + "f" * 16, check=False)
+        self.assertEqual(result.returncode, 7)
+        self.assertIn(f"retry {job.name} --relaunch {token}", result.stderr)
+        self.assertEqual({path.name: path.read_bytes() for path in job.iterdir() if path.name != "last.log"}, before)
+
+
 class IdentityTests(PiHarness):
     def test_a_token_only_remote_failure_beside_a_launch_marker_is_not_confirmed_over(self):
         self.control("launch-mode", "lost-nothing")
