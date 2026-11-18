@@ -140,7 +140,7 @@ Escape, blur or 8 seconds disarm it, and the second click sends the request with
 start, stop and restart, crontab pause, resume, install and run-now, deferred run-now,
 cancel (and Abandon job after a refused cancel), add, add-agent and Retry on a job whose Pi launch
 is unknown (a second Pi run may start), metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
-test, settings reset, log rotation, llm-restore restore, delete and overwrite and confirmed automation actions. Resources adds six more, all sent as `{action, pid, started, scope, confirmed: true}`: Terminate (`terminate`), Force kill (`kill`), Pause (`pause`), Resume (`resume`), Lower priority (`lower-priority`, which the panel cannot undo) and Terminate session (`terminate` with `scope: tree` on the session's root process). Their confirmations name the process or session, with snapshot counts ("12 processes seen"); the result line reports the reply's applied, gone, changed, skipped, refused and unchanged counts, leaving out zeros. A search result only navigates to the button and arms it. Reschedule opens an inline editor
+test, settings reset, log rotation, llm-restore restore, delete and overwrite and confirmed automation actions. Resources adds six more, all sent as `{action, pid, started, scope, confirmed: true}`: Terminate (`terminate`), Force kill (`kill`), Pause (`pause`), Resume (`resume`), Lower priority (`lower-priority`, which the panel cannot undo) and Terminate session (`terminate` with `scope: tree` on the session's root process). Their confirmations name the process or session, with snapshot counts ("12 processes seen"); the result line reports the reply's applied, gone, changed, skipped, refused and unchanged counts, leaving out zeros, and, when the reply's `stopped` is set, an error notice saying the action stopped early and why. A search result only navigates to the button and arms it. Reschedule opens an inline editor
 whose Apply is enabled only once the time differs.
 
 Navigation: the sidebar groups Overview; Jobs & services (Services, Deferred jobs,
@@ -251,7 +251,7 @@ properties set from JS.
 - `section_resources.mjs`: the Resources page (`render`, `searchItems`, `attentionItems`), built from `resources_system.mjs`
   (System card, health-to-`Level` table), `resources_groups.mjs` (sessions with trees, infrastructure, m4-compute),
   `resources_processes.mjs` (By app / By process, sort, filter; its view state lives in module state),
-  `resources_history.mjs` (the `historyPanel` charts), `resources_actions.mjs` (request bodies, armed buttons, result
+  `resources_history.mjs` (the `historyPanel` charts), `resources_names.mjs` (which `name_source` values count as unproven), `resources_actions.mjs` (request bodies, armed buttons, result
   line), `resources_table.mjs` (right-aligned number columns) and `resources_format.mjs` (bytes, percent, durations; pure).
 - `section_<name>.mjs`: one renderer per section returning `{node, summary, level}`.
 
@@ -295,15 +295,29 @@ other processes in the same account.
 
 Resources signals only the panel user's own processes, with `os.kill` and `os.setpriority`
 and no sudo. It never signals pid ≤ 1, the panel or any process above or below it, or the
-protected programs (`launchd`, `loginwindow`, `WindowServer`, `Dock`, `Finder`,
-`SystemUIServer`, `ControlCenter`, `NotificationCenter`, `coreaudiod`, `cfprefsd`,
-`runningboardd`, `tccd`, `iTerm2`, `Terminal`, `tmux`, `login`, `sshd`). Shells can be
+protected programs: the system set (`launchd`, `loginwindow`, `WindowServer`, `Dock`,
+`Finder`, `SystemUIServer`, `ControlCenter`, `NotificationCenter`, `coreaudiod`, `cfprefsd`,
+`runningboardd`, `tccd`) and the terminal hosts (`iTerm2`, `Terminal`, `tmux`, `screen`,
+`zellij`, `Ghostty`, `kitty`, `Alacritty`, `WezTerm`, `Warp`, `Hyper`, `mosh-server`, `sshd`,
+`login` and their variants), matched by argv[0] and by the kernel's own (truncated) process
+name. A process outside a session that has a terminal, or an LLM session, gateway or compute
+root, beneath it is blocked too (`process_hosting.py`), whatever its name. Shells can be
 signalled only as members of a session tree. Shared LLM infrastructure and van-compute rows
-are read-only. Each request re-reads the process table, requires the start time the page
-saw, and re-reads and re-checks every target just before its signal (same start time and
-uid, policy re-run, still inside the session tree). This narrows the window in which a pid
-could be reused to milliseconds; it does not close it. Command lines never leave the
-backend: the page sees only the program name and an interpreter's script or module.
+are read-only.
+
+Before each signal the panel re-reads the whole process table and decides again from it:
+same pid, start time and uid; for a session tree, still a member of that session with every
+process up to the root present, the session not holding a nested session, and the policy
+still allowing the process. This narrows the window in which a pid could be reused to
+milliseconds; it does not close it. A tree over `TREE_TARGET_LIMIT` (48) processes is
+refused, and a mutation has a total time budget (`MUTATION_BUDGET`, 8 s); when an action
+ends before every target was handled, the reply's `stopped` says why and the page shows it
+after the counts. Command lines never leave the backend: a display name is the program's
+base name plus a script name or `-m module`, only when the arguments parse with confidence
+(`process_invocation.py`), never an option or an argument value. A session's `name_source`
+(`registry`, `rollout-open`, `rollout-time` or `fallback`) says how its name was
+established; a Codex name matched only by start time is a guess, and the page shows it as an
+unconfirmed name, also in the Terminate session confirmation.
 
 ## Tests
 
