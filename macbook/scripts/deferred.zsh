@@ -37,20 +37,31 @@ lock_wait=${DEFERRED_LOCK_WAIT:-10}
 # is optional (records written before it existed lack it): empty means due + 7d.
 # `last_not_ready` (stamp of the latest check that exited not-ready) and
 # `not_ready_checks` (how many such checks) are optional too, empty when none.
+# `kind` (script or agent) and, for agent jobs, `host` (mac or vanpi) say what
+# the job is; records written before they existed lack them and are script
+# jobs, or Mac agent jobs when they hold an agent.env, exactly as before.
 job_keys=(name due description created origin attempts max_attempts timeout state)
-optional_job_keys=(give_up last_not_ready not_ready_checks)
+optional_job_keys=(give_up last_not_ready not_ready_checks kind host)
 not_ready_status=75     # a job's own "condition not met yet" exit status
 run_now_not_ready=4     # run-now's exit status for it (75 there means the lock is busy)
 default_give_up_seconds=$(( 7 * 86400 ))
 agent_template=$repo/macbook/scripts/deferred_agent_run.zsh
 agent_notify=$repo/macbook/scripts/deferred_agent_notify.zsh
 pi_template=$repo/macbook/scripts/deferred_pi_run.py
+pi_modules=($repo/macbook/scripts/deferred_pi_state.py $repo/macbook/scripts/deferred_pi_remote.py)  # copied beside it
+pi_control=$repo/macbook/scripts/deferred_pi_control.py   # reads and acts on a vanpi job's state
 list_json=$repo/macbook/scripts/deferred_list_json.py   # turns the list stream into JSON
 agent_hosts=(mac vanpi)   # where an add-agent job runs its prompt
 pi_tiers=(astra sol luna) # pi_agent.py --agent values; a vanpi job's --model
 refused_status=6          # cancel: a vanpi run may still be active (--abandon overrides)
+relaunch_refused_status=7 # retry/run-now: a vanpi launch is unknown and --relaunch did not name its token
+# deferred_pi_run.py's MIN_PASS_TIMEOUT: a vanpi pass needs this long to launch and read the run once.
+pi_min_timeout=390
+id_limit=60               # a job id (YYYY-MM-DD-NAME) the other verbs accept, so names of new jobs stop at 49
 typeset -A job          # the record load_job last read
-typeset run_job_status=0 run_job_not_ready=0
+typeset run_job_status=0 run_job_not_ready=0 run_job_collecting=0
+typeset add_kind=script add_host=   # what cmd_add records; stage_agent_job sets them for agent jobs
+source $repo/macbook/scripts/deferred_pi_schedule.zsh
 
 usage() {
   print -u2 -- "usage: ${script:t} add [--attempts N] [--timeout SECONDS] [--give-up DUE] [--file PATH]... DUE NAME SCRIPT [DESCRIPTION]
@@ -58,7 +69,8 @@ usage() {
                   [--cwd DIR] [--run-timeout MINUTES] [--attempts N] [--timeout SECONDS] [--give-up DUE]
                   DUE NAME PROMPT_FILE|vanpi:/PATH [DESCRIPTION]
        ${script:t} list [--json]
-       ${script:t} cancel [--abandon] JOB | retry JOB | run-now JOB | reschedule JOB DUE
+       ${script:t} cancel [--abandon] JOB | retry JOB [--relaunch TOKEN] | run-now JOB [--relaunch TOKEN]
+       ${script:t} reschedule JOB DUE
        ${script:t} status | run-due | watchdog | install | uninstall
 DUE is YYYY-MM-DD, 'YYYY-MM-DD HH:MM' (local time), +Nd or +Nh.
 A job exiting $not_ready_status means not ready yet (no attempt spent, no alert) until --give-up (default DUE+7d)."
@@ -159,6 +171,8 @@ alert() {  # TITLE MESSAGE: high priority; the sender's reason, never the URL, g
 
 agent_loaded() { /bin/launchctl print gui/$UID/$label >/dev/null 2>&1 }
 valid_name() { [[ $1 == [a-z0-9][a-z0-9-]# && ${#1} -le 60 ]] }
+# A dated id; its name part may be up to 60 characters, as names were before id_limit.
+valid_dated_id() { [[ $1 == [0-9](#c4)-[0-9](#c2)-[0-9](#c2)-* ]] && valid_name ${1#*-*-*-} }
 
 checker_summary() {
   if [[ -f $heartbeat ]]; then print -r -- "checker last ran $(<$heartbeat)"; else print -r -- "checker has never run"; fi
@@ -193,12 +207,14 @@ cmd_add() {
   done
   ensure_root
   local dir=$jobs_dir/${due%%T*}-$name
+  (( ${#dir:t} <= id_limit )) || die "name too long: the job id ${dir:t} must be at most $id_limit characters (a name of at most $(( id_limit - 11 )))"
   [[ ! -e $dir ]] || die "job ${dir:t} already exists"
   /bin/mkdir -m 700 -- $dir
   /usr/bin/install -m 700 -- $src $dir/run
   for file in $files; do /usr/bin/install -m 600 -- $file $dir/${file:t}; done
   job=(name "$name" due "$due" description "$description" created "$(strftime $stamp_format $EPOCHSECONDS)"
-    origin "$PWD" attempts 0 max_attempts "$attempts" timeout "$timeout" state pending give_up "$give_up")
+    origin "$PWD" attempts 0 max_attempts "$attempts" timeout "$timeout" state pending give_up "$give_up"
+    kind "$add_kind" host "$add_host")
   save_job $dir
   log_line "added ${dir:t} due $due"
   print -r -- $dir
@@ -210,7 +226,7 @@ one_line_path() {  # VALUE: non-empty, one line, at most 1024 characters
 }
 
 cmd_add_agent() {
-  local host= model= effort=medium topic_var=NTFY_MACBOOK_URL ready= cwd= run_timeout= prompt pi_prompt=
+  local host= model= effort=medium topic_var=NTFY_MACBOOK_URL ready= cwd= run_timeout= prompt pi_prompt= timeout=
   local -a add_opts
   while [[ ${1-} == --* ]]; do
     case $1 in
@@ -221,7 +237,8 @@ cmd_add_agent() {
       --topic-var) [[ ${2-} == [A-Z_][A-Z0-9_]# ]] || die "--topic-var needs a variable name"; topic_var=$2; shift 2 ;;
       --cwd) [[ -n ${2-} ]] || die "--cwd needs a directory"; cwd=$2; shift 2 ;;
       --run-timeout) [[ ${2-} == <1-> ]] || die "--run-timeout needs minutes"; run_timeout=$2; shift 2 ;;
-      --attempts|--timeout|--give-up) add_opts+=($1 ${2-}); shift 2 ;;
+      --attempts|--give-up) add_opts+=($1 ${2-}); shift 2 ;;
+      --timeout) add_opts+=($1 ${2-}); timeout=${2-}; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -239,6 +256,11 @@ cmd_add_agent() {
     model=${model:-sol} cwd=${cwd:-'~'}   # the Pi's home; stored as typed, never resolved here
     (( ${pi_tiers[(Ie)$model]} )) || die "--model for --host vanpi is the pi-agent tier: ${(j:, :)pi_tiers}"
     one_line_path $cwd || die "--cwd for --host vanpi must be one line, at most 1024 characters"
+    # pi_agent.py rewrites a path under this Mac's home to the Pi's home, so such a path is ambiguous.
+    [[ $cwd != $HOME && $cwd != $HOME/* ]] ||
+      die "--cwd $cwd is under this Mac's home folder; for --host vanpi write ~/... or a real path on the Pi"
+    [[ $timeout != <-> ]] || (( timeout >= pi_min_timeout )) ||
+      die "--timeout for --host vanpi must be at least $pi_min_timeout seconds (to launch and read the run once)"
     add_opts=(--attempts 1 $add_opts)   # one Pi run per attempt unless asked; a later --attempts wins
     run_timeout=${run_timeout:-120}
   else
@@ -252,9 +274,12 @@ cmd_add_agent() {
 }
 
 stage_agent_job() {  # DUE NAME PROMPT [DESCRIPTION], with cmd_add_agent's settings in scope
-  local stage rc=0 template=$agent_template
+  local stage rc=0 template=$agent_template module add_kind=agent add_host=$host
   local -a files
-  [[ $host == vanpi ]] && template=$pi_template
+  if [[ $host == vanpi ]]; then
+    template=$pi_template
+    for module in $pi_modules; do files+=(--file $module); done
+  fi
   stage=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/deferred-agent.XXXXXX")
   /usr/bin/install -m 700 -- $template $stage/run
   if [[ -z $pi_prompt ]]; then
@@ -303,8 +328,9 @@ emit_list_json_records() {
     emit_json_field "$job[origin]"
     emit_json_field "$dir/last.log"
     emit_json_field "$(give_up_stamp)"
-    emit_json_field "$([[ -f $dir/agent.env ]] && print 1 || print 0)"
-    agent_setting $dir agent_ready   # not in $(...), which would strip trailing newlines
+    job_host $dir
+    emit_json_field "$([[ -n $REPLY ]] && print 1 || print 0)"
+    [[ -z $REPLY ]] || agent_setting $dir agent_ready   # not in $(...), which would strip trailing newlines
     emit_json_field "$REPLY"
     emit_json_field "$job[last_not_ready]"
     emit_json_field "${job[not_ready_checks]:-0}"
@@ -312,24 +338,26 @@ emit_list_json_records() {
   done
 }
 
-emit_agent_fields() {  # DIR: host, model, effort, remote state and run id; empty for script jobs
-  local key host= state= run=
-  local -a remote
-  if [[ -f $1/agent.env ]]; then
-    agent_setting $1 agent_host; host=${REPLY:-mac}   # jobs queued before --host ran on the Mac
+job_host() {  # DIR: REPLY is the agent job's host (mac or vanpi), empty for a script job
+  if [[ -n $job[kind] ]]; then
+    REPLY=${${job[kind]:#script}:+$job[host]}
+  else
+    REPLY=   # old records: an agent.env made a Mac agent job
+    [[ ! -f $1/agent.env ]] || REPLY=mac
   fi
+  return 0
+}
+
+emit_agent_fields() {  # DIR: host, model, effort, and the folder whose Pi state the assembler reads
+  local key host
+  job_host $1; host=$REPLY
   emit_json_field "$host"
   for key in agent_model agent_effort; do
     REPLY=
     [[ -z $host ]] || agent_setting $1 $key
     emit_json_field "$REPLY"
   done
-  if [[ $host == vanpi ]]; then
-    remote=("${(@f)$(/usr/bin/python3 -I -B $1/run describe 2>/dev/null)}")
-    state=${remote[1]-} run=${remote[2]-}
-  fi
-  emit_json_field "$state"
-  emit_json_field "$run"
+  emit_json_field "${${host:#mac}:+$1}"
 }
 
 print_list_json() {
@@ -353,15 +381,10 @@ cmd_list() {
 }
 
 resolve_job() {  # JOB: set REPLY to the one exact id or exact name match
-  valid_name $1 || die "no job named $1"
+  valid_name $1 || valid_dated_id $1 || die "no job named $1"
   local -a matches=($jobs_dir/$1(N/) $jobs_dir/<->-<->-<->-$1(N/))
   (( ${#matches} == 1 )) || die "no single job matches $1"
   REPLY=$matches[1]
-}
-
-vanpi_job() {  # DIR: an add-agent --host vanpi job whose own run script answers for its Pi run
-  agent_setting $1 agent_host
-  [[ $REPLY == vanpi ]] && private_path $1/run
 }
 
 cmd_cancel() {
@@ -371,21 +394,28 @@ cmd_cancel() {
   acquire_mutation_lock
   resolve_job $1
   local dir=$REPLY
-  if vanpi_job $dir; then
-    # A Pi run outlives the job directory, so it is stopped (or found finished) first.
-    /usr/bin/python3 -I -B $dir/run cancel $abandon || {
-      print -u2 -- "${script:t}: kept ${dir:t}"
-      exit $refused_status
-    }
+  # A Pi run outlives the job directory, so it is stopped (or found finished) first.
+  # A record that cannot be read could belong to a vanpi job, so it is checked the same way.
+  if ! { load_job $dir && job_record_valid $dir } || pi_job; then
+    pi_cancel $dir $abandon
   fi
   /bin/rm -rf -- $dir
   log_line "cancelled ${dir:t}"
   print -r -- "cancelled ${dir:t}"
 }
 
-clear_launch_hold() {  # DIR: an explicit retry or run-now is the user saying "launch it again"
-  vanpi_job $1 || return 0
-  /usr/bin/python3 -I -B $1/run clear-hold || die "could not clear the unknown launch of ${1:t}"
+relaunch_args() {  # ARGS: sets relaunch (a held launch's token, or empty) and REPLY (the one JOB)
+  relaunch= REPLY=
+  local -a rest
+  while (( $# )); do
+    case $1 in
+      --relaunch) [[ ${2-} == d[0-9a-f](#c16) ]] || die "--relaunch needs the held launch's token"
+        relaunch=$2; shift 2 ;;
+      *) rest+=($1); shift ;;
+    esac
+  done
+  (( ${#rest} == 1 )) || usage
+  REPLY=$rest[1]
 }
 
 require_runnable_job() {  # DIR: load it or fail with a user-facing error
@@ -393,14 +423,15 @@ require_runnable_job() {  # DIR: load it or fail with a user-facing error
 }
 
 cmd_retry() {
-  (( $# == 1 )) || usage
+  local relaunch
+  relaunch_args "$@"
   acquire_mutation_lock
-  resolve_job $1
+  resolve_job $REPLY
   local dir=$REPLY
   require_runnable_job $dir
   [[ $job[state] != pending ]] || die "job ${dir:t} is already pending"
   [[ $job[state] == failed ]] || die "job ${dir:t} has invalid state: $job[state]"
-  clear_launch_hold $dir
+  ! pi_job || pi_relaunch_consent $dir retry "$relaunch"
   job[state]=pending
   job[attempts]=0
   clear_not_ready
@@ -432,8 +463,9 @@ cmd_reschedule() {
   print -r -- "${new_dir:t}"
 }
 
-execute_job() {  # DIR TIMEOUT: one attempt; returns the job's exit status
+execute_job() {  # DIR TIMEOUT [ARG]: one pass of the job's run (ARG: collect); returns its exit status
   local dir=$1 timeout=$2 pid watcher rc=0 flag
+  local -a run_args=(${3-})
   flag=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/deferred-timeout.XXXXXX")
   /bin/rm -f -- $flag
   # The job gets its own session so a timeout can stop everything it started
@@ -442,7 +474,7 @@ execute_job() {  # DIR TIMEOUT: one attempt; returns the job's exit status
     cd -- $dir
     exec /usr/bin/perl -e 'use POSIX (); POSIX::setsid(); exec @ARGV or exit 127' -- \
       /usr/bin/env -i HOME=$HOME USER=$USERNAME LOGNAME=$USERNAME LANG=en_US.UTF-8 \
-      PATH=$job_path TMPDIR=${TMPDIR:-/tmp} DEFERRED_JOB_DIR=$dir ./run
+      PATH=$job_path TMPDIR=${TMPDIR:-/tmp} DEFERRED_JOB_DIR=$dir DEFERRED_LOG=$log ./run $run_args
   ) > $dir/last.log 2>&1 &
   pid=$!
   { sleep $timeout; : > $flag; kill -TERM -- -$pid; sleep 2; kill -KILL -- -$pid } >/dev/null 2>&1 &
@@ -460,11 +492,14 @@ execute_job() {  # DIR TIMEOUT: one attempt; returns the job's exit status
 
 run_job() {  # DIR MODE: one scheduled/manual attempt; purge success, warn only scheduled
   local dir=$1 mode=${2:-scheduled} rc=0
-  run_job_status=0 run_job_not_ready=0
+  run_job_status=0 run_job_not_ready=0 run_job_collecting=0
   job[attempts]=$(( job[attempts] + 1 ))
   save_job $dir  # recorded first, so a crash mid-run still counts
   execute_job $dir $job[timeout] || rc=$?
   run_job_status=$rc
+  # A vanpi pass that leaves a run on the Pi keeps its attempt and is collected
+  # later, whatever its exit status and give-up time.
+  if pi_job && pi_still_collecting $dir $rc; then pi_note_collecting $dir $mode; return 0; fi
   if (( rc == not_ready_status )) && [[ $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
     run_job_not_ready=1
     job[attempts]=$(( job[attempts] - 1 ))
@@ -508,6 +543,7 @@ job_record_valid() {  # DIR: validate fields that later become paths, numbers or
   [[ -z $job[not_ready_checks] || $job[not_ready_checks] == <-> ]] || return 1
   normalize_due "$job[due]" >/dev/null || return 1
   [[ $job[created] == <->-<->-<->T<->:<-> ]] || return 1
+  [[ "$job[kind]/$job[host]" == (/|script/|agent/mac|agent/vanpi) ]] || return 1
   normalize_due "$job[created]" >/dev/null || return 1
   [[ ${dir:t} == ${job[due]%%T*}-$job[name] ]]
 }
@@ -518,14 +554,22 @@ job_runnable() {  # DIR: private folder, executable run, valid complete record (
 }
 
 cmd_run_now() {
-  (( $# == 1 )) || usage
+  local relaunch
+  relaunch_args "$@"
   acquire_mutation_lock
-  resolve_job $1
+  resolve_job $REPLY
   local dir=$REPLY id=${REPLY:t}
   require_runnable_job $dir
   [[ $job[state] == (pending|failed) ]] || die "job $id has invalid state: $job[state]"
-  clear_launch_hold $dir
-  run_job $dir manual
+  if pi_job; then
+    pi_relaunch_consent $dir run-now "$relaunch"
+    pi_snapshot $dir || die "cannot read the Pi run state of $id"
+  fi
+  if pi_job && (( pi[owes] )); then pi_collect $dir manual; else run_job $dir manual; fi
+  if (( run_job_collecting )); then
+    print -r -- "running $id: its Pi run is still going and a later check collects it; output in $dir/last.log"
+    exit $run_now_not_ready
+  fi
   if (( run_job_not_ready )); then
     print -r -- "not ready $id; output in $dir/last.log"
     exit $run_now_not_ready
@@ -538,12 +582,11 @@ cmd_run_now() {
   exit 3
 }
 
-flag_invalid() {  # DIR: warn once per invalid folder; the marker clears once it is valid or gone
-  local marker=$flagged_dir/${1:t}
-  log_line "skipped ${1:t}: not a valid private job directory"
+flag_invalid() {  # DIR [WHAT]: warn once per invalid folder; the marker clears once it is valid or gone
+  local marker=$flagged_dir/${1:t} what=${2:-Its directory, job record or run file is invalid}
+  log_line "skipped ${1:t}: ${what:l}"
   [[ ! -e $marker ]] || return 0
-  alert "Deferred job not run: ${1:t}" \
-    "Its directory, job record or run file is invalid. Fix or remove it in Mac Panel (macpanel): $1"
+  alert "Deferred job not run: ${1:t}" "$what. Fix or remove it in Mac Panel (macpanel): $1"
   : > $marker
 }
 
@@ -554,7 +597,12 @@ cmd_run_due() {
   strftime '%F %T' $EPOCHSECONDS > $heartbeat
   for dir in $jobs_dir/*(N/); do
     if ! job_runnable $dir; then flag_invalid $dir; continue; fi
+    if pi_job && ! pi_snapshot $dir; then
+      flag_invalid $dir "Its vanpi run state cannot be read (cancel --abandon removes it)"
+      continue
+    fi
     /bin/rm -f -- $flagged_dir/${dir:t}
+    if pi_job; then pi_run_due $dir $now; continue; fi
     [[ $job[state] == pending && ! $job[due] > $now ]] || continue
     run_job $dir
   done

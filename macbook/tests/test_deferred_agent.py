@@ -120,7 +120,7 @@ class NotReadyTests(DeferredHarness):
                     record.write(bad + "\n")
                 healthy = self.add(YESTERDAY, "zzz-healthy", f"touch {marker}")
                 records = {r["id"]: r for r in json.loads(self.deferred("list", "--json").stdout)["jobs"]}
-                self.assertEqual(records[broken.name], {"id": broken.name, "valid": False})
+                self.assertEqual(records[broken.name], {"id": broken.name, "valid": False, "problem": "invalid job directory, record or run file"})
                 self.assertTrue(records[healthy.name]["valid"])
                 self.assertEqual(self.deferred("run-due").returncode, 0)
                 self.assertTrue(marker.exists())

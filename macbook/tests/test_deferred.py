@@ -135,7 +135,7 @@ class DeferredJobTests(DeferredHarness):
         for key in ("attempts", "max_attempts", "timeout"):
             self.assertIsInstance(encoded[key], int)
         self.assertEqual(jobs[failed.name]["last_log"], "failure output\n")
-        self.assertEqual(jobs[invalid.name], {"id": invalid.name, "valid": False})
+        self.assertEqual(jobs[invalid.name], {"id": invalid.name, "valid": False, "problem": "invalid job directory, record or run file"})
 
     def test_retry_resets_failed_job_and_refuses_pending_job(self):
         job = self.add("2020-01-01", "retryable", "exit 9", "--attempts", "1")

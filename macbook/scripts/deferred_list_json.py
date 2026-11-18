@@ -1,9 +1,17 @@
 #!/usr/bin/python3 -IB
 """`deferred.zsh list --json`: turns the NUL-separated record stream that
-deferred.zsh writes on stdin into the JSON inventory the Mac Panel reads."""
+deferred.zsh writes on stdin into the JSON inventory the Mac Panel reads.
+
+A vanpi job's Pi run state is read here from its state files as data
+(deferred_pi_state); a job whose state cannot be read becomes an invalid row
+with the reason, and the other rows are unaffected."""
 import json
 import pathlib
 import sys
+
+# -I keeps the script's own folder off sys.path; the module it needs sits beside it.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from deferred_pi_state import PiJob, StateError, snapshot  # noqa: E402
 
 
 def tail_log(path):
@@ -13,6 +21,17 @@ def tail_log(path):
         return None
     lines = data.splitlines(keepends=True)[-64:]
     return b"".join(lines)[-8192:].decode("utf-8", errors="replace")
+
+
+def with_remote_state(record, pi_dir):
+    """Adds remote_state, remote_run and remote_token; null for jobs that do not run on vanpi."""
+    if not pi_dir:
+        return {**record, "remote_state": None, "remote_run": None, "remote_token": None}
+    try:
+        state = snapshot(PiJob(pi_dir))
+    except StateError as error:
+        return {"id": record["id"], "valid": False, "problem": f"vanpi run state unreadable: {error}"}
+    return {**record, "remote_state": state.state.value, "remote_run": state.run_id, "remote_token": state.token}
 
 
 def main():
@@ -36,11 +55,12 @@ def main():
     for kind in fields:
         job_id = next(fields)
         if kind == "I":
-            result["jobs"].append({"id": job_id, "valid": False})
+            result["jobs"].append({"id": job_id, "valid": False,
+                                   "problem": "invalid job directory, record or run file"})
             continue
         if kind != "V":
             raise SystemExit("invalid deferred job stream")
-        result["jobs"].append({
+        record = {
             "id": job_id,
             "valid": True,
             "name": next(fields),
@@ -61,9 +81,8 @@ def main():
             "host": next(fields) or None,
             "model": next(fields) or None,
             "effort": next(fields) or None,
-            "remote_state": next(fields) or None,
-            "remote_run": next(fields) or None,
-        })
+        }
+        result["jobs"].append(with_remote_state(record, next(fields)))
     json.dump(result, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
 

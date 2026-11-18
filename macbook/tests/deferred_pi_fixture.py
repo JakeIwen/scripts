@@ -18,7 +18,9 @@ YESTERDAY = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 # refuse), next-state (running | done | died), next-exit, next-final,
 # next-error, stop-mode (ok | ignore), status-mode (normal | empty), stop-lag
 # (status reads that still say running after a stop, then the run ends; 143),
-# empty-reads (status reads after a stop that print nothing, like a dropped link).
+# empty-reads (status reads after a stop that print nothing, like a dropped link),
+# status-delay (seconds every status call sleeps first), extra-runs (that many
+# newer runs listed before the real ones, as on a busy Pi).
 FAKE_LAUNCHER = r'''
 import json, secrets, sys, time
 from pathlib import Path
@@ -70,10 +72,15 @@ if args[0] == "run":
     print("waiting is up to you: pi_agent.py wait %s" % run_id)
     sys.exit(0)
 
+if args[0] == "status":
+    time.sleep(float(control("status-delay", "0")))
+
 if args[0] == "status" and (len(args) == 1 or args[1] == "-n"):
     limit = int(args[2]) if len(args) > 2 else 15
-    for path in sorted(RUNS.glob("*.json"), reverse=True)[:limit]:
-        print("%-28s %-8s claude sol   medium first line" % (path.stem, json.loads(path.read_text())["state"]))
+    lines = ["0101-000000-%04x-newer d" % i for i in range(int(control("extra-runs", "0")))]
+    lines += ["%-28s %-8s claude sol   medium first line" % (path.stem, json.loads(path.read_text())["state"])
+              for path in sorted(RUNS.glob("*.json"), reverse=True)]
+    print("\n".join(lines[:limit]))
     sys.exit(0)
 
 if args[0] == "status":
@@ -166,20 +173,35 @@ class PiHarness(DeferredHarness):
         (self.fake / name).unlink(missing_ok=True)
 
     def quick_stop_polling(self, job, window="0.5"):
-        """Shrinks the job's copy of the stop-confirmation timings so tests do not wait."""
-        run = job / "run"
-        source = run.read_text()
+        """Shrinks the stop-confirmation timings so tests do not wait: in the job's own
+        copy (its passes) and, through the environment, for the scheduler's cancel."""
+        remote = job / "deferred_pi_remote.py"
+        source = remote.read_text()
         patched = re.sub(r"^STOP_CONFIRM_WINDOW, STOP_CONFIRM_INTERVAL, STOP_MIN_READ = .*$",
                          f"STOP_CONFIRM_WINDOW, STOP_CONFIRM_INTERVAL, STOP_MIN_READ = {window}, 0.02, 10",
                          source, flags=re.M)
-        assert patched != source, "stop-confirmation constants not found in the job's run script"
-        run.write_text(patched)
+        assert patched != source, "stop-confirmation constants not found in the job's remote module"
+        remote.write_text(patched)
+        self.env.update(DEFERRED_PI_STOP_WINDOW=window, DEFERRED_PI_STOP_INTERVAL="0.02")
+
+    def age_launch(self, job, seconds):
+        """Moves the saved launch time of the job's run back by SECONDS."""
+        run = self.record(job, "remote-run.json")
+        (job / "remote-run.json").write_text(json.dumps({**run, "launched": run["launched"] - seconds}))
+
+    def set_meta(self, job, **changes):
+        """Rewrites fields of the scheduler's job record, as a crash or an old version might leave it."""
+        meta = {**self.meta(job), **{key: str(value) for key, value in changes.items()}}
+        (job / "job").write_text("".join(f"{key}={value}\n" for key, value in meta.items()))
+
+    def scheduler_log(self):
+        return (self.root / "deferred.log").read_text()
 
     def offline(self, on=True):
         self.control("unreachable") if on else self.clear("unreachable")
 
     def add_pi(self, *args, prompt=None, name="pijob", due=YESTERDAY, check=True):
-        result = self.deferred("add-agent", "--host", "vanpi", "--timeout", "300", *args, due, name,
+        result = self.deferred("add-agent", "--host", "vanpi", "--timeout", "600", *args, due, name,
                                str(prompt or self.prompt), check=check)
         return Path(result.stdout.strip()) if check else result
 
