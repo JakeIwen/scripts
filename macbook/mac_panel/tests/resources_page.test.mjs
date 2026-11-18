@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {section} from './dom_fixture.mjs';
-import {buttonsIn, findAll, hasClass, labelsIn, payload, withKey} from './resources_fixture.mjs';
+import {buttonsIn, findAll, hasClass, labelsIn, payload, withIdentity, withKey} from './resources_fixture.mjs';
 
 const calls = [];
 let reply = {applied: 1};
@@ -115,7 +115,7 @@ test('unavailable probes read as unavailable and every null is tolerated', () =>
   assert.ok(content.includes('No LLM infrastructure processes found.'));
   assert.ok(content.includes('The van-compute worker is not running.'));
   assert.ok(content.includes('No processes were listed.'));
-  assert.deepEqual(resources.searchItems(data).map(item => item.title), ['System']);
+  assert.deepEqual(resources.searchItems(data).map(item => item.title), ['System', 'LLM sessions', 'm4-compute', 'Apps and processes', 'History']);
 });
 
 test('a render with no system object at all still draws', () => {
@@ -176,9 +176,9 @@ test('blocked rows show no buttons, only their reason behind an info popover', (
   reset();
   view.mode = ViewMode.PROCESS;
   const {node} = resources.render(payload());
-  assert.equal(withKey(node, 'terminate-1200').length, 0);
-  assert.equal(withKey(node, 'terminate-700').length, 0);
-  assert.equal(withKey(node, 'terminate-901').length, 1);
+  assert.equal(withIdentity(node, 'terminate', 1200).length, 0);
+  assert.equal(withIdentity(node, 'terminate', 700).length, 0);
+  assert.equal(withIdentity(node, 'terminate', 901).length, 1);
   const infoTips = findAll(node, element => element.dataset?.tip).map(element => element.dataset.tip);
   assert.ok(infoTips.includes('Not owned by you.'));
   assert.ok(infoTips.includes('Shared by every session; restart it from Services.'));
@@ -195,11 +195,11 @@ test('Pause follows stopped and Lower priority hides at nice 10 or more', () => 
 test('the Terminate session button names the session and its snapshot count; a nested group is blocked with its reason', () => {
   reset();
   const {node} = resources.render(payload());
-  assert.equal(withKey(node, 'session-4100').length, 0, 'tree_blocked group has no button');
+  assert.equal(withIdentity(node, 'session', 4100).length, 0, 'tree_blocked group has no button');
   assert.ok(text(node).includes('Terminate session is unavailable'));
-  const [terminate] = withKey(node, 'session-4200');
+  const [terminate] = withIdentity(node, 'session', 4200);
   terminate.click();
-  assert.equal(text(terminate), 'Confirm: terminate session inner (2 processes seen)');
+  assert.equal(text(terminate), 'Confirm: send terminate to Claude session "inner" (pid 4200, ~/dev/scripts/pi, 2 processes seen)');
   assert.equal(calls.length, 0, 'the first click only arms');
 });
 
@@ -207,7 +207,7 @@ test('confirming posts the exact process body and reports the reply counts', asy
   reset();
   view.mode = ViewMode.PROCESS;
   const {node} = resources.render(payload());
-  const [lower] = withKey(node, 'lower-priority-901');
+  const [lower] = withIdentity(node, 'lower-priority', 901);
   lower.click();
   assert.equal(text(lower), 'Confirm: lower the priority of Safari (pid 901)');
   assert.equal(calls.length, 0);
@@ -220,7 +220,7 @@ test('confirming posts the exact process body and reports the reply counts', asy
 test('a session terminate posts tree scope with the group root and its start token', async () => {
   reset();
   const {node} = resources.render(payload());
-  const [terminate] = withKey(node, 'session-6000');
+  const [terminate] = withIdentity(node, 'session', 6000);
   terminate.click();
   terminate.click();
   await tick();
@@ -237,8 +237,8 @@ test('request bodies carry confirmed, pid, started, scope and action for every a
 
 test('result text lists the reply counts in plain words and leaves zeros out', () => {
   assert.equal(resultText('terminate', {applied: 12, gone: 1, changed: 0, skipped: 2, refused: 0, unchanged: 0}),
-    'Terminated 12 processes, 1 process already gone, 2 processes skipped as protected');
-  assert.equal(resultText('lower-priority', {applied: 0, unchanged: 1}), 'Nothing was signalled, 1 process already at that priority');
+    'Sent terminate to 12 processes, 1 process already gone, 2 processes skipped as protected');
+  assert.equal(resultText('lower-priority', {applied: 0, unchanged: 1}), '1 process already at low priority');
   assert.equal(resultText('kill', {applied: 0, changed: 2, refused: 1}), 'Nothing was signalled, 2 processes changed since the snapshot and left alone, 1 process refused by the system');
 });
 
@@ -247,7 +247,7 @@ test('the result notice is shown after a confirmed action', async () => {
   reply = {applied: 3, gone: 1, changed: 0, skipped: 0, refused: 0, unchanged: 0};
   view.mode = ViewMode.PROCESS;
   const {node} = resources.render(payload());
-  const [pause] = withKey(node, 'pause-901');
+  const [pause] = withIdentity(node, 'pause', 901);
   pause.click();
   pause.click();
   await tick();
@@ -342,17 +342,15 @@ test('the paused tag stays on a stopped row', () => {
   assert.ok(text(resources.render(payload()).node).includes('paused'));
 });
 
-test('search items stage armed actions for sessions and processes, and never run one', () => {
+test('search indexes sections, cards and sessions, never individual processes, and only stages', () => {
   reset();
   const items = resources.searchItems(payload());
+  assert.ok(!items.some(item => /^pid \d+/.test(item.subtitle)), 'the list filter finds processes, not search');
+  for (const card of ['System', 'LLM sessions', 'm4-compute', 'Apps and processes', 'History']) assert.ok(items.some(item => item.title === card), card);
   const inner = items.find(item => item.title === 'inner');
   assert.deepEqual(inner.actions.map(action => action.label), ['Open', 'Terminate session']);
   const panelWork = items.find(item => item.title === 'panel work');
   assert.deepEqual(panelWork.actions.map(action => action.label), ['Open'], 'tree_blocked offers no terminate');
-  const safari = items.find(item => item.subtitle.startsWith('pid 901'));
-  assert.deepEqual(safari.actions.map(action => action.label), ['Open', 'Terminate', 'Force kill', 'Pause', 'Lower priority']);
-  const windowServer = items.find(item => item.title === 'WindowServer');
-  assert.deepEqual(windowServer.actions.map(action => action.label), ['Open']);
   assert.equal(calls.length, 0);
 });
 

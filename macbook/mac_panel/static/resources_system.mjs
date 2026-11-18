@@ -23,14 +23,22 @@ export const GAUGE_THRESHOLDS = Object.freeze({
   swap: {warn: 0.5, error: 0.8},
   disk: {warn: 0.9, error: 0.95},
 });
+// A pressure the backend could not read is drawn as unknown, never as the healthy colour.
 const PRESSURE_GAUGE_LEVEL = {normal: 'ok', warn: 'warn', critical: 'error'};
+const UNKNOWN_GAUGE_LEVEL = 'unknown';
+
+function memoryReading({used, total, pressure}) {
+  const level = PRESSURE_GAUGE_LEVEL[pressure];
+  if (level) return {value: used, max: total, level};
+  return {value: used, max: total, level: UNKNOWN_GAUGE_LEVEL, valueText: COPY_SYSTEM.memoryNoPressure(formatBytes(used), formatBytes(total))};
+}
 
 /** Gauge inputs as the amount used of a maximum, or null when either side is unreadable. */
 const GAUGES = [
   {key: 'cpu', format: formatPercent, read: system => (known(system.cpu_percent)
     ? {value: system.cpu_percent, max: WHOLE, worse: GAUGE_THRESHOLDS.cpu, valueText: COPY_SYSTEM.cpuUsed(formatPercent(system.cpu_percent))} : null)},
   {key: 'memory', format: formatBytes, read: ({memory}) => (memory && known(memory.total) && known(memory.used)
-    ? {value: memory.used, max: memory.total, level: PRESSURE_GAUGE_LEVEL[memory.pressure] ?? 'ok'} : null)},
+    ? memoryReading(memory) : null)},
   {key: 'swap', format: formatBytes, read: ({memory}) => {
     if (!memory || !known(memory.swap_total) || !known(memory.swap_used)) return null;
     return memory.swap_total > 0 ? {value: memory.swap_used, max: memory.swap_total, worse: GAUGE_THRESHOLDS.swap} : {note: COPY_SYSTEM.noSwap};

@@ -78,3 +78,6 @@ export const buttonsIn = root => findAll(root, element => element.tagName === 'B
   && !hasClass(element, 'range-choice') && !hasClass(element, 'refresh-one'));
 export const labelsIn = root => buttonsIn(root).map(button => button.textContent);
 export const withKey = (root, key) => findAll(root, element => element.dataset?.key === key);
+
+// Armed buttons are keyed by `<prefix>-<pid>-<start token>`; a test names the row by its pid.
+export const withIdentity = (root, prefix, pid) => findAll(root, element => String(element.dataset?.key ?? '').startsWith(`${prefix}-${pid}-`));
