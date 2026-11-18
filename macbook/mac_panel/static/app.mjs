@@ -13,6 +13,7 @@ import * as logs from './section_logs.mjs';
 import * as metered from './section_metered.mjs';
 import * as ntfy from './section_ntfy.mjs';
 import * as overview from './section_overview.mjs';
+import * as resources from './section_resources.mjs';
 import * as restore from './section_restore.mjs';
 import * as services from './section_services.mjs';
 import * as settings from './section_settings.mjs';
@@ -30,6 +31,7 @@ const MODULES = [
   ['automations', automations, {auto: true}],
   ['llm-restore', restore, {auto: false}],
   ['metered', metered, {auto: true}],
+  ['resources', resources, {auto: true}],
   ['amphetamine', amphetamine, {auto: false}],
   ['guard', guard, {auto: false}],
   ['ntfy', ntfy, {auto: false}],

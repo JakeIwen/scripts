@@ -6,7 +6,7 @@ export const GROUPS = [
   {id: 'home', title: 'Overview', sections: ['overview']},
   {id: 'jobs', title: 'Jobs & services', sections: ['services', 'deferred', 'crontab', 'automations']},
   {id: 'network', title: 'Network', sections: ['metered']},
-  {id: 'mac', title: 'Mac', sections: ['amphetamine', 'guard', 'ntfy', 'logs']},
+  {id: 'mac', title: 'Mac', sections: ['resources', 'amphetamine', 'guard', 'ntfy', 'logs']},
   {id: 'usage', title: 'LLM', sections: ['usage']},
   {id: 'settings', title: 'Settings', sections: ['settings']},
 ];
@@ -39,6 +39,10 @@ export const SECTION_COPY = {
   metered: {
     title: 'Metered',
     info: 'Whether the current Wi-Fi counts as metered, decided by exact SSID. Metered networks hold back big downloads and uploads for the consumers listed here. Pi consumers are approved on the Pi; this page only shows them.',
+  },
+  resources: {
+    title: 'Resources',
+    info: 'What the Mac is spending, by LLM session, LLM infrastructure, m4-compute job and app. Numbers are one snapshot, reused for 5 seconds. Sessions and ordinary processes of your own can be terminated, paused or slowed here; everything the panel does not own is listed read-only.',
   },
   amphetamine: {
     title: 'Amphetamine',
@@ -277,5 +281,121 @@ export const JOBS_COPY = {
     quickTitle: 'Quick controls',
     restoreInfo: 'The every-minute snapshot of open Claude Code and Codex sessions that llmrestore reopens after a reboot.',
     allSettings: 'All settings',
+  },
+};
+
+// ---- Resources ----
+
+export const RESOURCES_COPY = {
+  summaryUnavailable: 'resources unavailable',
+  // Kinds are the backend's resource_groups vocabulary; the label is what the tag shows.
+  kinds: {claude: 'Claude', codex: 'Codex', infra: 'Infrastructure', compute: 'm4-compute', app: 'App'},
+  system: {
+    title: 'System',
+    healthy: 'Healthy',
+    unavailableProbes: 'Not available right now',
+    unavailable: 'unavailable',
+    gauges: {cpu: 'CPU idle', memory: 'Memory available', swap: 'Swap free', disk: 'Disk free'},
+    noSwap: 'none in use',
+    terms: {load: 'Load (1, 5, 15 min)', pressure: 'Memory pressure', thermal: 'Thermal', power: 'Power', processes: 'Processes',
+      uptime: 'Uptime', breakdown: 'Memory breakdown'},
+    memoryParts: {app: 'App', wired: 'Wired', compressed: 'Compressed', cached: 'Cached files', free: 'Free', other: 'Other'},
+    power: {ac: 'AC power', battery: 'Battery', charging: 'charging', notCharging: 'not charging'},
+    info: {
+      gauges: 'Each bar shows what is left, so a short bar is the thing to watch. CPU is the share of the whole machine, estimated from the processes\' recent averages.',
+      memory: 'Used is app, wired and compressed memory. Cached files and free memory are given back on demand. All parts are estimates from vm_stat and can differ a little from Activity Monitor.',
+      health: 'Health comes from the panel\'s own checks: memory pressure, a recorded thermal warning and free disk space. A probe that cannot be read is listed as unavailable, never shown as zero.',
+    },
+  },
+  sessions: {
+    title: 'LLM sessions',
+    empty: 'No Claude or Codex sessions are running.',
+    heads: ['Session', 'Status', 'CPU', 'Memory', 'Processes', 'Age'],
+    treeHeads: ['Process', 'PID', 'CPU', 'Memory', 'Age'],
+    status: {busy: 'busy', idle: 'idle'},
+    headless: 'headless',
+    nested: 'Started inside',
+    totals: (kind, sessions, count, cpu, rss) => `${kind}: ${sessions}, ${count}, ${cpu} CPU, ${rss}`,
+    terminate: 'Terminate session',
+    terminateConfirm: (name, seen) => `terminate session ${name} (${seen})`,
+    treeBlocked: 'Terminate session is unavailable',
+    treeProcesses: 'Process tree',
+    paused: 'paused',
+    cwd: 'Working folder',
+    info: {
+      table: 'CPU is a percentage of one core, so a busy session can pass 100 %; it is an estimate from the process table. Memory is resident memory: it differs from Activity Monitor and double-counts pages that processes share, so totals are an upper bound.',
+      terminate: 'Sends SIGTERM to every process of the session, its own command shells included, deepest first and the session process last. Counts are from the latest snapshot; the result line reports what was actually signalled.',
+    },
+  },
+  infra: {
+    title: 'LLM infrastructure',
+    empty: 'No LLM infrastructure processes found.',
+    heads: ['Service', 'CPU', 'Memory', 'Processes', 'Age', ''],
+    readOnly: 'Shared by every session; restart it from Services.',
+    info: 'These processes serve every session at once, so they cannot be signalled from here.',
+  },
+  compute: {
+    title: 'm4-compute',
+    heads: ['Name', 'CPU', 'Memory', 'Processes', 'Age', ''],
+    notRunning: 'The van-compute worker is not running.',
+    idle: 'idle: no job is running',
+    readOnly: 'Owned by van-compute; killing a job here would skip its cleanup.',
+    info: 'The van-compute worker and the jobs it started on this Mac. Read-only: van-compute owns their cleanup.',
+  },
+  processes: {
+    title: 'Apps and processes',
+    modes: {app: 'By app', process: 'By process'},
+    modeLabel: 'View',
+    sorts: {cpu: 'CPU', rss: 'Memory'},
+    sortLabel: 'Sort by',
+    filterLabel: 'Filter processes',
+    filterPlaceholder: 'Filter by name or PID',
+    appHeads: ['App', 'PID', 'CPU', 'Memory', 'Processes', 'Age'],
+    processHeads: ['Process', 'PID', 'CPU', 'Memory', 'Age', 'Actions'],
+    noMatch: 'Nothing matches the filter.',
+    none: 'No processes were listed.',
+    shown: (shown, total) => `Showing ${shown} of ${total} listed`,
+    pausedTag: 'paused',
+    niceTag: nice => `nice ${nice}`,
+    notSignalled: 'not signalled',
+    info: {
+      table: 'The busiest processes by CPU or memory at the last snapshot, not every process. CPU is percent of one core; memory is resident memory, which double-counts shared pages when summed and differs from Activity Monitor. By app groups each process tree under its top application and has no actions.',
+      lower: 'Lower priority sets nice to at least 10. The panel cannot raise it again; quit and restart the process to undo it.',
+      pause: 'Pause stops a process until you resume it. A paused process holds its memory.',
+    },
+  },
+  actions: {
+    terminate: {label: 'Terminate', verb: 'terminate', done: 'Terminated'},
+    kill: {label: 'Force kill', verb: 'force kill', done: 'Force killed'},
+    pause: {label: 'Pause', verb: 'pause', done: 'Paused'},
+    resume: {label: 'Resume', verb: 'resume', done: 'Resumed'},
+    'lower-priority': {label: 'Lower priority', verb: 'lower the priority of', done: 'Lowered the priority of'},
+  },
+  results: {
+    gone: 'already gone',
+    changed: 'changed since the snapshot and left alone',
+    skipped: 'skipped as protected',
+    refused: 'refused by the system',
+    unchanged: 'already at that priority',
+    none: 'Nothing was signalled',
+  },
+  history: {
+    title: 'History',
+    noHistory: 'No history recorded for this range yet.',
+    info: 'One sample a minute, kept for 30 days. CPU by kind is a percent of one core, so a kind with several busy processes can pass 100 %.',
+    charts: {
+      cpu: {title: 'CPU by kind', unit: '% of one core'},
+      memory: {title: 'Memory by kind', unit: 'resident memory'},
+      machine: {title: 'Machine memory', unit: 'used and swap'},
+      load: {title: 'Machine CPU', unit: '% of all cores'},
+    },
+    series: {
+      claude: 'Claude', codex: 'Codex', infra: 'Infrastructure', compute: 'm4-compute',
+      'system.memory_used': 'Memory used', 'system.swap_used': 'Swap used', 'system.cpu': 'CPU',
+    },
+  },
+  attention: {
+    probes: names => `Resource probes unavailable: ${names}`,
+    paused: 'paused',
   },
 };

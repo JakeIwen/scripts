@@ -217,3 +217,34 @@ span.log-source { display: inline-block; max-width: 20ch; overflow-wrap: anywher
 .mode-option input { grid-row: 1 / span 2; }
 .mode-option small { grid-column: 2; }
 .mode-name { display: flex; gap: var(--space-2); align-items: baseline; }
+
+/* ---- Resources ---- */
+.gauge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0; }
+.gauge-missing { display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--text-small); }
+.sub-heading { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-base); font-weight: 600; }
+.sessions { margin: var(--space-2) 0; }
+.session { margin: 0; border-top: 1px solid var(--line); }
+.session > summary .session-cell:first-child { padding-left: calc(var(--depth, 0) * var(--space-5)); }
+.session > summary { color: var(--text); padding: 6px 0; display: flex; align-items: baseline; gap: var(--space-2); }
+.session-row { display: grid; flex: 1; min-width: 0; grid-template-columns: minmax(0, 3fr) repeat(5, minmax(0, 1fr)); gap: var(--space-2); align-items: baseline; }
+.session-head { color: var(--muted); font-size: var(--text-small); font-weight: 600; padding: 0 0 var(--space-1) 1.5em; }
+.session-cell:nth-child(n+3) { text-align: right; }
+.session-body { padding: var(--space-1) 0 var(--space-3) 1.5em; }
+.tree-name { display: inline-block; padding-left: calc(var(--depth, 0) * var(--space-4)); }
+.process-controls { margin-bottom: var(--space-3); }
+.process-controls input { flex: 1 1 200px; min-width: 0; max-width: 320px; }
+.num { text-align: right; white-space: nowrap; }
+@media (max-width: 650px) {
+  .session-row { display: block; }
+  .session-row.session-head { display: none; }
+  .session-cell { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: 0 var(--space-2); text-align: left !important; }
+  .session-cell::before { content: attr(data-label); color: var(--muted); font-size: var(--text-small); }
+  .session-cell:first-child { display: block; font-weight: 600; }
+  .session-cell:first-child::before { content: none; }
+  td.num { text-align: left; }
+  .process-controls input { max-width: none; flex-basis: 100%; }
+}
+.session > summary { list-style: none; }
+.session > summary::-webkit-details-marker { display: none; }
+.session > summary::before { content: "\25B8"; color: var(--accent); width: 1em; flex: none; }
+.session[open] > summary::before { content: "\25BE"; }
