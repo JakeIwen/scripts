@@ -14,10 +14,11 @@ function load(section, range) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < FRESH_MS) return hit;
   const window = rangeWindow(range, Date.now() / 1000);
-  const entry = {at: Date.now(), window, series: null, promise: null};
+  const entry = {at: Date.now(), window, series: null, spacing: null, promise: null};
   const query = `section=${encodeURIComponent(section)}&since=${window.from}&until=${window.to}`;
   entry.promise = api(`/api/history?${query}`).then(result => {
     entry.series = result.series;
+    entry.spacing = result.spacing ?? {};
     return entry;
   }, error => {
     cache.delete(key);
@@ -28,7 +29,7 @@ function load(section, range) {
 }
 
 /**
- * id remembers the chosen range between renders; draw(series, {from, to}) returns an array of nodes,
+ * id remembers the chosen range between renders; draw(series, {from, to}, spacing) returns an array of nodes,
  * empty when the range holds nothing to draw.
  */
 export function historyPanel({id, section, draw, emptyText}) {
@@ -36,7 +37,7 @@ export function historyPanel({id, section, draw, emptyText}) {
   const body = node('div');
   let range = chosen.get(id) ?? DEFAULT_RANGE;
   const paint = entry => {
-    const content = draw(entry.series, entry.window);
+    const content = draw(entry.series, entry.window, entry.spacing);
     body.replaceChildren(...(content.length ? content : [emptyState(emptyText)]));
   };
   const show = () => {

@@ -7,8 +7,12 @@ import {SECTION} from './resources_actions.mjs';
 import {formatBytes, formatPercent} from './resources_format.mjs';
 
 const COPY_HISTORY = COPY.history;
-// A gap longer than a few missed one-minute samples breaks the line instead of bridging it.
-const MAX_GAP_SECONDS = 600;
+// The sampler's cadence. A gap of ten missed samples breaks the line instead of bridging it, unless the store has
+// thinned the series: a seven-day range comes back about 24 minutes apart, so a gap counts as an outage only past
+// twice the spacing it reports.
+const SAMPLE_SECONDS = 60;
+const MISSED_SAMPLES = 10;
+const THINNED_GAP_FACTOR = 2;
 const HEADROOM = 1.1;
 // lineChart offers four colours; the compute line is dashed so it stays apart from the infrastructure one.
 const KIND_STYLE = {claude: {color: 'accent'}, codex: {color: 'series-2'}, infra: {color: 'text'}, compute: {color: 'muted', dashed: true}};
@@ -29,14 +33,20 @@ export function chartSeries(spec, series) {
     .filter(entry => entry.points.length);
 }
 
-function drawHistory(series, window) {
+/** Longest gap a chart bridges: the largest spacing the store reported for any of its series sets it, never below the cadence rule. */
+export function chartMaxGap(spec, spacing) {
+  const widest = Math.max(0, ...spec.keys.map(key => Number(spacing?.[key]) || 0));
+  return Math.max(MISSED_SAMPLES * SAMPLE_SECONDS, THINNED_GAP_FACTOR * widest);
+}
+
+function drawHistory(series, window, spacing) {
   return CHARTS.flatMap(spec => {
     const lines = chartSeries(spec, series ?? {});
     if (!lines.length) return [];
     const peak = Math.max(...lines.flatMap(entry => entry.points.map(point => point.value)));
     const copy = COPY_HISTORY.charts[spec.id];
     return [node('h4', copy.title), lineChart({series: lines, ...window, yMin: 0, yMax: Math.max(peak * HEADROOM, 1), yFormat: spec.format,
-      yLabel: copy.unit, maxGap: MAX_GAP_SECONDS})];
+      yLabel: copy.unit, maxGap: chartMaxGap(spec, spacing)})];
   });
 }
 
