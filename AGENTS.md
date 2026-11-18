@@ -451,7 +451,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `process_table.py` (ps parse, `display_name`), `executable_name.py` (`proc_pidpath` base name for a
   process whose argv[0] is a title), `process_invocation.py` (script or `-m` module read from
   arguments only when they parse with confidence), `system_metrics.py`, `llm_sessions.py` (Claude registry
-  `~/.claude/sessions/<pid>.json`, Codex rollout/index naming, `NameSource`), `resource_groups.py` (kinds and
+  `~/.claude/sessions/<pid>.json`, Codex names guessed by rollout start time and never proven, `NameSource`), `resource_groups.py` (kinds and
   membership; every Codex process roots its own group), `process_roles.py` (session, Codex, infra, compute and shell
   roles for safety: infra and compute by substring, an unsure parse protects), `signal_policy.py` (the one allow decision; protected by argv[0] and kernel name),
   `process_hosting.py` (outside processes with a terminal or LLM root beneath them are blocked),

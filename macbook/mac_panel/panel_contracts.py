@@ -434,7 +434,8 @@ class ResourceGroupRecord(TypedDict):
     id: str
     kind: str
     name: str
-    # Session groups only: how `name` was established (llm_sessions.NameSource); null otherwise.
+    # Session groups only: how `name` was established (llm_sessions.NameSource; only
+    # `registry` proves it); null otherwise.
     name_source: str | None
     detail: str | None
     status: str | None

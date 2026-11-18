@@ -4,7 +4,7 @@ import {button, confirmText, info, node, notice} from './panel_dom.mjs';
 import {action} from './panel_sections.mjs';
 import {RESOURCES_COPY as COPY} from './section_copy.mjs';
 import {plural, shortFolder} from './resources_format.mjs';
-import {UNPROVEN_NAME_SOURCES} from './resources_names.mjs';
+import {nameUnconfirmed} from './resources_names.mjs';
 
 export const SECTION = 'resources';
 const ENDPOINT = '/api/resources';
@@ -86,7 +86,7 @@ export const rowKey = (actionId, row) => identityKey(actionId, row);
 export const sessionKey = group => identityKey('session', {pid: group.root_pid, started: group.started});
 export const sessionConfirm = (group, rows) => confirmText(COPY.sessions.terminateConfirm({
   kind: COPY.kinds[group.kind] ?? group.kind, name: group.name, pid: group.root_pid, folder: shortFolder(group.cwd),
-  seen: `${plural(rows, 'process', 'processes')} seen`, unconfirmed: UNPROVEN_NAME_SOURCES.includes(group.name_source)}));
+  seen: `${plural(rows, 'process', 'processes')} seen`, unconfirmed: nameUnconfirmed(group)}));
 
 /** "Terminate session" for a session group; absent, with the reason, when the group has a nested session. */
 export function sessionAction(group) {

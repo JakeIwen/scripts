@@ -306,7 +306,7 @@ test('an unavailable pressure draws the memory gauge unknown and says so, with i
 
 // ---- the name source and the session confirmation ----
 
-test('an unproven session name is marked unconfirmed with an info note; proven and absent sources show no marker', () => {
+test('finding 5: only a registry name reads as confirmed; every other or absent source is marked with an info note', () => {
   reset();
   const render = source => {
     const data = payload();
@@ -314,21 +314,24 @@ test('an unproven session name is marked unconfirmed with an info note; proven a
     return resources.render(data).node;
   };
   const marker = node => findAll(node, element => hasClass(element, 'session-name') && text(element).includes('codex · scripts'))[0];
-  for (const source of ['rollout-time', 'fallback']) {
+  // A Codex name is never proven, and anything but Claude's own registry record reads as unconfirmed.
+  for (const source of ['rollout-time', 'fallback', 'not-a-source', undefined]) {
     const cell = marker(render(source));
-    assert.match(text(cell), /unconfirmed name/, source);
-    assert.ok(findAll(cell, element => element.dataset?.tip?.includes('could not prove')).length === 1, 'the explanation is an info popover');
+    assert.match(text(cell), /unconfirmed name/, String(source));
+    assert.ok(findAll(cell, element => element.dataset?.tip?.includes('could not prove')).length === 1, String(source));
   }
-  for (const source of ['registry', 'rollout-open', undefined]) assert.doesNotMatch(text(marker(render(source))), /unconfirmed/, String(source));
+  assert.doesNotMatch(text(marker(render('registry'))), /unconfirmed/);
 });
 
 test('a session confirmation names kind, pid, folder and the snapshot count, and flags an unconfirmed name', () => {
   reset();
   const data = payload();
-  data.groups.find(group => group.id === 'codex:6000').name_source = 'fallback';
-  const [terminate] = withIdentity(resources.render(data).node, 'session', 6000);
-  terminate.click();
-  assert.equal(text(terminate), 'Confirm: send terminate to Codex session "codex · scripts" (pid 6000, ~/dev/scripts, 3 processes seen, name unconfirmed)');
+  for (const source of ['fallback', 'rollout-time']) {
+    data.groups.find(group => group.id === 'codex:6000').name_source = source;
+    const [terminate] = withIdentity(resources.render(data).node, 'session', 6000);
+    terminate.click();
+    assert.equal(text(terminate), 'Confirm: send terminate to Codex session "codex · scripts" (pid 6000, ~/dev/scripts, 3 processes seen, name unconfirmed)', source);
+  }
 });
 
 // ---- the result line describes delivery ----

@@ -350,11 +350,13 @@ base name of the file the kernel says the process is running (`proc_pidpath`, in
 short name begins it, and otherwise the kernel's short name (16 characters). At most
 `EXECUTABLE_LOOKUP_LIMIT` (256) lookups run per table read; the full path never leaves the
 backend. Compute job rows are named `job · <program>`. A session's
-`name_source` (`registry`, `rollout-open`, `rollout-time` or `fallback`) says how its name
-was established: `rollout-open` needs exactly one rollout-like open file, an exact rollout
-file name inside `~/.codex/sessions`; a Codex name matched only by start time is a guess,
-and the page shows a guessed or fallback name as unconfirmed, also in the Terminate session
-confirmation.
+`name_source` (`registry`, `rollout-time` or `fallback`) says how its name was established.
+Only `registry`, Claude's own record for that exact process, proves a name. A Codex name is
+never proven: nothing on disk ties a running Codex process to its conversation (a rollout it
+has open may be an old thread it is reading), so it is at most the title of the one rollout
+created near its start (`rollout-time`), else `codex · <folder>`; lsof is used only for
+working folders. The page marks every name that is not `registry` as unconfirmed, and the
+Terminate session confirmation then says "name unconfirmed" beside the pid and folder.
 
 ## Tests
 

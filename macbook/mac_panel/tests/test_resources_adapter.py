@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 from cli_runner import CommandResult
-from llm_sessions import LSOF, NameSource
+from llm_sessions import NameSource, lsof_command
 from panel_contracts import ApiError, Level, Section
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, auth, request, running_server
@@ -189,7 +189,7 @@ class AdapterFixture(unittest.TestCase):
                                     Probe.MEMORY_TOTAL: TOTAL}, ['thermal'])
         self.clock = Clock()
         self.lsof = CommandResult(0, 'p300\nfcwd\nn/Users/me/dev/taxes\n')
-        self.runner = ArgvRunner({(LSOF, '-a', '-p', '300', '-Fpfn'): self.lsof})
+        self.runner = ArgvRunner({lsof_command((300,)): self.lsof})
         self.write_registry(200, name='Budget review', status='busy', cwd='/Users/me/dev/pay',
                             kind='interactive', procStart=STARTED)
 
@@ -285,7 +285,7 @@ class AdapterReadTests(AdapterFixture):
         self.assertNotIn(2001, listed)
 
     def test_a_registry_entry_for_a_reused_pid_is_ignored(self):
-        self.runner.answers[(LSOF, '-a', '-p', '200,300', '-Fpfn')] = CommandResult(
+        self.runner.answers[lsof_command((200, 300))] = CommandResult(
             1, 'p200\nfcwd\nn/Users/me/dev/other\np300\nfcwd\nn/Users/me/dev/taxes\n')
         # Another start, or no well-formed procStart at all, is not this process's record.
         for proc_start in ('Mon Nov  2 01:00:00 2026', None, True, 17, '', 'garbage'):
@@ -372,47 +372,41 @@ class AdapterReadTests(AdapterFixture):
     def test_two_codex_processes_starting_together_are_not_guessed(self):
         # One resumes an old thread, one starts a new one: the new rollout fits both.
         self.reader.rows.update(make_table((301, 101, 'codex resume')).rows)
-        self.runner.answers[(LSOF, '-a', '-p', '300,301', '-Fpfn')] = CommandResult(0, '')
+        self.runner.answers[lsof_command((300, 301))] = CommandResult(0, '')
         self.codex_world({'11111111-0000-0000-0000-000000000000': 1})
         groups = {group['id']: group for group in self.adapter().read()['groups']}
         for gid in ('codex:300', 'codex:301'):
             self.assertEqual((groups[gid]['name'], groups[gid]['name_source']), ('codex', 'fallback'))
 
-    def test_an_open_rollout_is_reserved_before_any_guess(self):
-        proven, other = '22222222-0000-0000-0000-000000000000', '33333333-0000-0000-0000-000000000000'
+    def test_finding5_rollouts_another_process_has_open_are_still_only_guesses(self):
+        # Open files are no evidence, so each process is matched by its start time alone.
+        first, second = '22222222-0000-0000-0000-000000000000', '33333333-0000-0000-0000-000000000000'
         self.reader.rows.update(make_table((301, 1, 'codex', {'started': 'Tue Nov 17 23:19:53 2026'})).rows)
-        self.codex_world({proven: 1, other: 3601})
-        self.runner.answers[(LSOF, '-a', '-p', '300,301', '-Fpfn')] = CommandResult(
-            0, f'p301\nf20w\nn{self.rollout_path(proven)}\n')
+        self.codex_world({first: 1, second: 3601})
+        self.runner.answers[lsof_command((300, 301))] = CommandResult(
+            0, f'p301\nf20w\nn{self.rollout_path(first)}\n')
         groups = {group['id']: group for group in self.adapter().read()['groups']}
         self.assertEqual((groups['codex:301']['name'], groups['codex:301']['name_source']),
-                         ('title 2222', 'rollout-open'))
-        # 300's window holds only the rollout 301 has open, so it gets no name.
-        self.assertEqual(groups['codex:300']['name_source'], 'fallback')
+                         ('title 3333', 'rollout-time'))
+        self.assertEqual((groups['codex:300']['name'], groups['codex:300']['name_source']),
+                         ('title 2222', 'rollout-time'))
 
     def rollout_path(self, uuid, name='rollout-2026-11-17T00-00-00-{}.jsonl'):
         return f'{self.home}/.codex/sessions/2026/11/17/{name.format(uuid)}'
 
-    def test_only_one_exact_rollout_in_the_sessions_tree_proves_a_name(self):
-        current, older = '44444444-0000-0000-0000-000000000000', '55555555-0000-0000-0000-000000000000'
-        # Neither rollout is near 300's start, so nothing can be guessed either.
-        self.codex_world({current: 7200, older: 9000})
-        key = (LSOF, '-a', '-p', '300', '-Fpfn')
-        cases = {
-            # The current rollout plus a backup copy of another open for reading.
-            'backup': f'{self.rollout_path(current)}\nf21r\nn{self.rollout_path(older, "backup-rollout-2026-11-17T00-00-00-{}.jsonl.bak")}',
-            'two rollouts': f'{self.rollout_path(current)}\nf21r\nn{self.rollout_path(older)}',
-            'outside the tree': f'/tmp/rollout-2026-11-17T00-00-00-{current}.jsonl',
-            'a dotted path': f'{self.home}/.codex/sessions/../elsewhere/rollout-2026-11-17T00-00-00-{current}.jsonl',
-        }
-        for case, files in cases.items():
-            self.runner.answers[key] = CommandResult(0, f'p300\nfcwd\nn/Users/me/dev/taxes\nf20w\nn{files}\n')
+    def test_finding5_an_open_rollout_never_proves_a_codex_name(self):
+        # The reviewer's case: one exact rollout open with no access mode. Reading an old
+        # thread (to resume it) looks the same as writing the current one.
+        current = '44444444-0000-0000-0000-000000000000'
+        # Not near 300's start, so nothing can be guessed either.
+        self.codex_world({current: 7200})
+        for mode in ('', 'r', 'w', 'u'):
+            self.runner.answers[lsof_command((300,))] = CommandResult(
+                0, f'p300\nfcwd\nn/Users/me/dev/taxes\nf20{mode}\nn{self.rollout_path(current)}\n')
             self.clock.now += SNAPSHOT_TTL
             group = next(g for g in self.adapter().read()['groups'] if g['id'] == 'codex:300')
-            self.assertEqual((group['name'], group['name_source']), ('codex · taxes', 'fallback'), case)
-        self.runner.answers[key] = CommandResult(0, f'p300\nf20w\nn{self.rollout_path(current)}\n')
-        group = next(g for g in self.adapter().read()['groups'] if g['id'] == 'codex:300')
-        self.assertEqual((group['name'], group['name_source']), ('title 4444', 'rollout-open'))
+            self.assertEqual((group['name'], group['name_source']), ('codex · taxes', 'fallback'), mode)
+        self.assertEqual({source.value for source in NameSource}, {'registry', 'rollout-time', 'fallback'})
 
     def test_stalled_naming_returns_fallback_names_within_its_bound(self):
         release = threading.Event()
@@ -448,7 +442,7 @@ class AdapterReadTests(AdapterFixture):
         self.assertEqual({path.split('.codex/sessions/')[1] for path in scanned}, days)
 
     def test_naming_that_times_out_falls_back_without_failing(self):
-        self.runner.answers[(LSOF, '-a', '-p', '300', '-Fpfn')] = ApiError(504, 'timed out')
+        self.runner.answers[lsof_command((300,))] = ApiError(504, 'timed out')
         payload = self.adapter().read()
         groups = {group['id']: group for group in payload['groups']}
         self.assertEqual(groups['codex:300']['name'], 'codex')
