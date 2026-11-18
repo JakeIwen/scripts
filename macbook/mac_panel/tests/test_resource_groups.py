@@ -1,17 +1,15 @@
 """Grouping by position and the signal policy's block reasons."""
+from pathlib import Path
 import unittest
 
-from functools import partial
-
-from resource_groups import Kind
-from resource_groups import build_grouping as build_any_grouping
+from resource_groups import Kind, build_grouping
 from resources_fixtures import PANEL_PID, make_table
 from signal_policy import (INCOMPLETE, KIND_REASONS, OTHER_USER, PANEL, PANEL_ANCESTOR,
                            PANEL_DESCENDANT, PANEL_UNKNOWN, PROTECTED_REASON, SHELL, SYSTEM_PID,
                            TREE_ONLY_SESSIONS, Scope, SignalPolicy, hosts_reason, tree_blocked)
 
-JOBS_ROOT = '/Users/me/Library/Caches/van-compute/jobs'
-build_grouping = partial(build_any_grouping, jobs_root=JOBS_ROOT)
+# Where van-compute keeps job folders: a path to them is argument text, never a label.
+JOBS_ROOT = str(Path.home() / 'Library/Caches/van-compute/jobs')
 
 WORLD = (
     (1, 0, '/sbin/launchd', {'uid': 0}),
@@ -80,23 +78,24 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(self.members('compute:500'), [(500, 0), (501, 1)])
         self.assertEqual(self.grouping.groups['compute:500'].label, 'worker')
         self.assertEqual(self.members('compute:502'), [(502, 0), (503, 1)])
-        self.assertEqual(self.grouping.groups['compute:502'].label, 'job-42')
+        self.assertEqual(self.grouping.groups['compute:502'].label, 'job · sh')
         self.assertEqual(self.grouping.groups['compute:502'].kind, Kind.COMPUTE)
 
     def test_a_job_without_a_job_path_is_named_by_its_program(self):
         table = make_table((500, 1, 'python3 -m van_compute.worker'), (502, 500, '/usr/bin/sandbox-exec -p x tool'))
         self.assertEqual(build_grouping(table).groups['compute:502'].label, 'job · sandbox-exec')
 
-    def test_a_job_name_comes_only_from_an_argument_under_the_jobs_root(self):
+    def test_a_job_is_named_by_its_program_never_by_argument_text(self):
         table = make_table(
             (500, 1, 'python3 -m van_compute.worker'),
             (502, 500, 'python3 -c print("Caches/van-compute/jobs/secret-name/x")'),
-            (503, 500, '/bin/sh --cwd=/Users/me/Library/Caches/van-compute/jobs/also-secret/x'),
+            # A jobs path mentioned inside a `bash -c` command is not a job name.
+            (503, 500, f'/bin/bash -c cd {JOBS_ROOT}/also-secret && make'),
             (504, 500, f'/bin/sh {JOBS_ROOT}/job-7/run.sh'))
         labels = {gid: group.label for gid, group in build_grouping(table).groups.items()}
+        self.assertEqual(labels['compute:503'], 'job · bash')
         self.assertEqual(labels['compute:502'], 'job · python3')
-        self.assertEqual(labels['compute:503'], 'job · sh')
-        self.assertEqual(labels['compute:504'], 'job-7')
+        self.assertEqual(labels['compute:504'], 'job · sh')
 
     def test_a_zombie_roots_no_group(self):
         table = make_table((1, 0, '/sbin/launchd', {'uid': 0}),

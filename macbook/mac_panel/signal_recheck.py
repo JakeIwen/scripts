@@ -115,7 +115,7 @@ def session_halt(policy, plan, fresh, grouping, context) -> Halt | None:
     return Halt(Outcome.CHANGED, reason) if reason else None
 
 
-def verify(reader, policy, plan: Plan, target: Target, deadline, clock, jobs_root):
+def verify(reader, policy, plan: Plan, target: Target, deadline, clock):
     """None when the target may be signalled now; else an Outcome for it or a Halt for all."""
     remaining = deadline - clock()
     if remaining <= 0:
@@ -124,7 +124,7 @@ def verify(reader, policy, plan: Plan, target: Target, deadline, clock, jobs_roo
         fresh = reader.table(timeout=min(TABLE_TIMEOUT, remaining))
     except ApiError:
         return Halt(Outcome.CHANGED, STOPPED_UNREADABLE)
-    grouping = build_grouping(fresh, jobs_root)
+    grouping = build_grouping(fresh)
     context = policy.context(fresh, grouping)
     if plan.group_id is not None:
         halt = session_halt(policy, plan, fresh, grouping, context)

@@ -2,30 +2,16 @@
 
 `ps` joins argv with spaces, so after argv[0] (which the process table reads separately) the
 argument boundaries are only a guess. The parse therefore accepts a short, known shape and
-nothing else: operand-free flags from a small per-interpreter table, then either `-m <module>`
+nothing else: operand-free flags from a small table of that interpreter's own, then either `-m <module>`
 (Python) or a first operand that plainly is a script file. Any other option, an inline program
 (`-c`, `-e`), an option with a value, or an operand that is not a script name yields no detail,
-so an argument value can never become a label. Unmatched is also the safe outcome for grouping:
-the process is then an ordinary app process and the signal policy still applies.
+so an argument value can never become a label. This parse is for labels only: roles that
+decide what may be signalled come from `process_roles`, which reads the same arguments the
+other way round.
 """
 from dataclasses import dataclass
-from enum import Enum
 import os
 import re
-
-
-class Family(str, Enum):
-    PYTHON = 'python'
-    NODE = 'node'
-    SHELL = 'shell'
-    RUBY = 'ruby'
-    PERL = 'perl'
-
-
-SHELLS = frozenset(('zsh', 'bash', 'sh', 'dash', 'fish', 'ksh', 'tcsh', 'csh'))
-PYTHON_NAME = re.compile(r'python(?:w)?(?:\d+(?:\.\d+)*)?', re.I)
-FAMILY_NAMES = {'node': Family.NODE, 'nodejs': Family.NODE, 'ruby': Family.RUBY,
-                'perl': Family.PERL, **dict.fromkeys(SHELLS, Family.SHELL)}
 
 
 @dataclass(frozen=True)
@@ -39,16 +25,23 @@ class OperandFreeFlags:
     module: bool = False
 
 
-FAMILY_FLAGS = {
-    Family.PYTHON: OperandFreeFlags(frozenset('PBIuEsSOq'), module=True),
-    Family.NODE: OperandFreeFlags(frozenset(), frozenset((
+PYTHON = 'python'
+PYTHON_NAME = re.compile(r'python(?:w)?(?:\d+(?:\.\d+)*)?', re.I)
+INTERPRETER_ALIASES = {'nodejs': 'node'}
+# One table per interpreter: the same letter can be operand-free in one shell and take a
+# path in another (fish `-p` writes a profile to a file). An interpreter without a table
+# shows the bare program. `-c` and `-e` are absent everywhere: their operand is a program.
+INTERPRETER_FLAGS = {
+    PYTHON: OperandFreeFlags(frozenset('PBIuEsSOq'), module=True),
+    'node': OperandFreeFlags(frozenset(), frozenset((
         '--no-warnings', '--enable-source-maps', '--no-deprecation', '--trace-warnings',
         '--expose-gc', '--experimental-vm-modules'))),
-    # `-c` is absent on purpose: its operand is inline program text.
-    Family.SHELL: OperandFreeFlags(frozenset('lieuxfp'), frozenset(('--login', '--noprofile',
-                                                                     '--norc'))),
-    Family.RUBY: OperandFreeFlags(frozenset('w')),
-    Family.PERL: OperandFreeFlags(frozenset('wTt')),
+    'zsh': OperandFreeFlags(frozenset('lifuvx'), frozenset(('--login',))),
+    'bash': OperandFreeFlags(frozenset('lifuvx'), frozenset(('--login', '--noprofile', '--norc'))),
+    'sh': OperandFreeFlags(frozenset('ifuvx')),
+    'dash': OperandFreeFlags(frozenset('lifuvx')),
+    'ruby': OperandFreeFlags(frozenset('w')),
+    'perl': OperandFreeFlags(frozenset('wTt')),
 }
 SCRIPT_SUFFIXES = frozenset(('.py', '.js', '.mjs', '.cjs', '.ts', '.sh', '.zsh', '.bash',
                              '.rb', '.pl'))
@@ -62,15 +55,17 @@ MODULE_NAME = re.compile(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){0,8}')
 @dataclass(frozen=True)
 class Invocation:
     """What an interpreter runs: a script operand or a module (internal only)."""
-    family: Family | None
+    interpreter: str | None
     script: str | None = None
     module: str | None = None
 
 
-def interpreter_family(exe) -> Family | None:
+def interpreter_name(exe) -> str | None:
+    """The key of the interpreter's flag table, or None for a program without one."""
     if PYTHON_NAME.fullmatch(exe):
-        return Family.PYTHON
-    return FAMILY_NAMES.get(exe)
+        return PYTHON
+    name = INTERPRETER_ALIASES.get(exe, exe)
+    return name if name in INTERPRETER_FLAGS else None
 
 
 def script_label(token) -> str | None:
@@ -93,10 +88,10 @@ def module_after(tokens, index) -> str | None:
 
 
 def invocation(exe, arguments_text) -> Invocation:
-    family = interpreter_family(exe)
-    if family is None:
+    interpreter = interpreter_name(exe)
+    if interpreter is None:
         return Invocation(None)
-    flags = FAMILY_FLAGS[family]
+    flags = INTERPRETER_FLAGS[interpreter]
     tokens = arguments_text.split()
     for index, token in enumerate(tokens):
         if token in flags.words:
@@ -104,14 +99,14 @@ def invocation(exe, arguments_text) -> Invocation:
         if SHORT_CLUSTER.fullmatch(token):
             letters = token[1:]
             if flags.module and letters[-1] == 'm' and set(letters[:-1]) <= flags.letters:
-                return Invocation(family, module=module_after(tokens, index))
+                return Invocation(interpreter, module=module_after(tokens, index))
             if set(letters) <= flags.letters:
                 continue
-            return Invocation(family)
+            return Invocation(interpreter)
         if token.startswith(('-', '+')):
-            return Invocation(family)
-        return Invocation(family, script=token if script_label(token) else None)
-    return Invocation(family)
+            return Invocation(interpreter)
+        return Invocation(interpreter, script=token if script_label(token) else None)
+    return Invocation(interpreter)
 
 
 def invocation_detail(call: Invocation) -> str | None:

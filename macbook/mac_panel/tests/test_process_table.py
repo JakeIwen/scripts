@@ -171,6 +171,25 @@ class DisplayNameTests(unittest.TestCase):
         for command, expected in cases.items():
             self.assertName(command, expected)
 
+    def test_a_path_title_with_spaces_is_not_trusted_unless_the_kernel_name_begins_it(self):
+        # A rewritten title that starts with a path still carries arguments after it.
+        self.assertName('/usr/bin/worker --note plain-example', 'node',
+                        argv0='/usr/bin/worker --note plain-example', ucomm='node')
+        self.assertName('node --secret value', 'node', argv0='node --secret value', ucomm='node')
+        # The kernel keeps 16 characters of the real file name, so a long name with spaces stays.
+        helper = '/Applications/Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)'
+        self.assertName(f'{helper} --type=renderer', 'Google Chrome Helper (Renderer)', argv0=helper)
+        self.assertName('Google Chrome Helper --token X', 'Google Chrome He',
+                        argv0='Google Chrome Helper --token X', ucomm='Google Chrome He')
+
+    def test_each_shell_parses_only_its_own_flags(self):
+        # fish `-p` writes a profile to the path after it; fish has no table, so no detail.
+        self.assertName('fish -p /Users/me/profile-notes.sh', 'fish')
+        self.assertName('ksh /Users/me/run.sh', 'ksh')
+        self.assertName('zsh -l /Users/me/run.zsh', 'zsh run.zsh')
+        self.assertName('bash -p /Users/me/privileged.sh', 'bash')
+        self.assertName('/bin/bash -c sh /x/Library/Caches/van-compute/jobs/secret/run.sh', 'bash')
+
     def test_argument_text_is_kept_out_of_repr(self):
         row = row_for('claude -p "secret prompt"')
         self.assertNotIn('secret', repr(row))

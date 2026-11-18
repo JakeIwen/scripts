@@ -50,10 +50,10 @@ def parse_request(body) -> SignalRequest:
 class ProcessSignaller:
     def __init__(self, reader, policy: SignalPolicy, kill=os.kill,
                  getpriority=os.getpriority, setpriority=os.setpriority,
-                 clock=time.monotonic, jobs_root=None):
+                 clock=time.monotonic):
         self.reader, self.policy = reader, policy
         self.kill, self.getpriority, self.setpriority = kill, getpriority, setpriority
-        self.clock, self.jobs_root = clock, jobs_root
+        self.clock = clock
 
     def mutate(self, body) -> SignalResult:
         request = parse_request(body)
@@ -62,7 +62,7 @@ class ProcessSignaller:
         row = table.rows.get(request.pid)
         if row is None or row.started != request.started:
             raise ApiError(409, 'That process has exited or changed since the page loaded; refresh')
-        grouping = build_grouping(table, self.jobs_root)
+        grouping = build_grouping(table)
         plan = self.plan(request, row, grouping, self.policy.context(table, grouping))
         return self.carry_out(plan, deadline)
 
@@ -92,8 +92,7 @@ class ProcessSignaller:
         counts, stopped = Counter({Outcome.SKIPPED: plan.skipped}), None
         pending = ordered(plan.targets, plan.request.action)
         for index, target in enumerate(pending):
-            verdict = verify(self.reader, self.policy, plan, target, deadline, self.clock,
-                             self.jobs_root)
+            verdict = verify(self.reader, self.policy, plan, target, deadline, self.clock)
             if isinstance(verdict, Halt):
                 # Nothing more is signalled; every target not yet reached is counted.
                 counts[verdict.outcome] += len(pending) - index

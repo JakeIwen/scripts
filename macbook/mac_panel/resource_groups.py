@@ -7,8 +7,6 @@ session, so a session's own `grep model-gateway.js` stays an ordinary member.
 """
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-import re
 
 from process_roles import (CLAUDE, CODEX_VALUE_OPTIONS, CodexRole, codex_role, infra_label,
                            is_codex, is_compute_root)
@@ -32,9 +30,6 @@ TOTAL_KINDS = (Kind.CLAUDE, Kind.CODEX, Kind.INFRA, Kind.COMPUTE)
 CODEX_DETAILS = {'exec': 'exec', 'e': 'exec', 'resume': 'resumed', 'review': 'review'}
 
 COMPUTE_WORKER_LABEL = 'worker'
-# Relative to the home directory; a job is named only from an argument under this root.
-JOBS_ROOT = Path('Library/Caches/van-compute/jobs')
-JOB_NAME = re.compile(r'[A-Za-z0-9._-]{1,80}')
 # ssh options that consume the next token; a control master runs with -N and -M.
 SSH_VALUE_LETTERS = frozenset('BbcDEeFIiJLlmOoPpQRSWw')
 SSH_MASTER_FLAGS = frozenset('NM')
@@ -81,19 +76,9 @@ def is_control_master(row: ProcessRow) -> bool:
     return SSH_MASTER_FLAGS <= letters
 
 
-def job_label(row: ProcessRow, jobs_root: str) -> str:
-    """The job directory named by an argument that starts with the jobs root, else the program."""
-    prefix = jobs_root.rstrip('/') + '/'
-    for token in row.arguments:
-        if token.startswith(prefix):
-            name = token[len(prefix):].split('/', 1)[0]
-            if JOB_NAME.fullmatch(name) and name not in ('.', '..'):
-                return name
-    return f'job · {row.name}'
-
-
-def default_jobs_root() -> str:
-    return str(Path.home() / JOBS_ROOT)
+def job_label(row: ProcessRow) -> str:
+    """A job row's name: its program only. Job paths and arguments can carry anything."""
+    return f'job · {row.exe}'
 
 
 @dataclass(frozen=True)
@@ -157,8 +142,7 @@ def compute_assignment(table, root, owned):
     return assign
 
 
-def build_grouping(table: ProcessTable, jobs_root: str | None = None) -> Grouping:
-    jobs_root = jobs_root or default_jobs_root()
+def build_grouping(table: ProcessTable) -> Grouping:
     # A zombie is named only by the kernel ("codex"), with no arguments: it roots nothing.
     live = {pid: row for pid, row in table.rows.items() if not row.zombie}
     sessions = {pid: kind for pid, row in live.items() if (kind := session_kind(row))}
@@ -186,7 +170,7 @@ def build_grouping(table: ProcessTable, jobs_root: str | None = None) -> Groupin
         if gid not in groups:
             row = table.rows[root]
             label = (infras.get(root) if kind is Kind.INFRA else
-                     (COMPUTE_WORKER_LABEL if root in computes else job_label(row, jobs_root))
+                     (COMPUTE_WORKER_LABEL if root in computes else job_label(row))
                      if kind is Kind.COMPUTE else None)
             groups[gid] = Group(gid, kind, row, label,
                                 role_unknown=kind in SESSION_KINDS and role_unknown(row))

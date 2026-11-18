@@ -23,8 +23,7 @@ from panel_contracts import (AppRecord, ApiError, GroupProcessRecord, KindTotals
 from process_signals import ProcessSignaller
 from process_table import ProcessReader, ProcessTable
 from process_roles import is_compute_root
-from resource_groups import (JOBS_ROOT, SESSION_KINDS, TOTAL_KINDS, Group, Grouping, Kind,
-                             build_grouping)
+from resource_groups import SESSION_KINDS, TOTAL_KINDS, Group, Grouping, Kind, build_grouping
 from signal_policy import PolicyContext, Scope, SignalPolicy, tree_blocked
 from system_metrics import Pressure, Probe, SystemFacts, SystemMetrics, Thermal, cpu_percent
 
@@ -222,13 +221,12 @@ class ResourcesAdapter:
                  setpriority=os.setpriority, policy=None):
         runner = runner or CliRunner()
         home = Path(home) if home else Path.home()
-        self.jobs_root = str(home / JOBS_ROOT)
         self.reader = reader or ProcessReader(runner, clock)
         self.metrics = metrics or SystemMetrics(runner, clock=clock, wall_clock=wall_clock)
         self.sessions = SessionDirectory(runner, home, clock)
         self.policy = policy or SignalPolicy()
         self.signaller = ProcessSignaller(self.reader, self.policy, kill, getpriority, setpriority,
-                                          clock, self.jobs_root)
+                                          clock)
         self.clock, self.wall_clock = clock, wall_clock
         # The naming call still running from an earlier snapshot, if one overran its wait.
         self.naming: BoundedCall | None = None
@@ -285,7 +283,7 @@ class ResourcesAdapter:
     def collect(self) -> ResourcesPayload:
         table = self.reader.table()
         facts = self.metrics.collect()
-        grouping = build_grouping(table, self.jobs_root)
+        grouping = build_grouping(table)
         builder = SnapshotBuilder(table, grouping, self.describe_sessions(grouping), self.policy,
                                   self.policy.context(table, grouping))
         groups = builder.groups()

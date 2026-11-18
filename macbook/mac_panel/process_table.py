@@ -88,11 +88,15 @@ class ProcessRow:
 def program_name(argv0, kernel_name) -> str:
     """The executable's base name from argv[0], or the kernel's name when argv[0] is a title.
 
-    A path or a plain word (`-zsh` for a login shell) names the program. Anything else is a
-    title the process gave itself (`tmux: server`, `npm exec pkg args`, `Kapture MCP Bridge`),
-    which can carry arguments, so the kernel's name stands in for it.
+    Without whitespace, argv[0] names the program: a path's base name or a plain word (`-zsh`
+    for a login shell). With whitespace it is usually a title the process gave itself
+    (`tmux: server`, `/usr/bin/worker --note x`), which can carry arguments, so the kernel's
+    name stands in for it, unless that name begins it (see `kernel_named`).
     """
     text = argv0.strip()
+    if any(char.isspace() for char in text):
+        base = os.path.basename(text.rstrip('/'))
+        return base if kernel_named(base, kernel_name) else kernel_name or '?'
     if text.startswith('/'):
         return os.path.basename(text.rstrip('/')) or kernel_name or '?'
     plain = text[1:] if text.startswith('-') else text
@@ -101,6 +105,20 @@ def program_name(argv0, kernel_name) -> str:
     if SAFE_PATH.fullmatch(plain):
         return os.path.basename(plain)
     return kernel_name or '?'
+
+
+def kernel_named(base, kernel_name) -> bool:
+    """True when a base name with spaces is the name of the file that was really run.
+
+    The kernel keeps the first KERNEL_NAME_LIMIT characters of that file's name, which is how
+    `Google Chrome Helper (Renderer)` stays readable: a shorter kernel name must be the whole
+    base name, a full-length one its start, and no later word may look like an option.
+    """
+    if not kernel_name or not base.startswith(kernel_name):
+        return False
+    if len(kernel_name) < KERNEL_NAME_LIMIT and base != kernel_name:
+        return False
+    return not any(word.startswith('-') or '=' in word for word in base.split()[1:])
 
 
 def display_name(row) -> str:
