@@ -390,13 +390,22 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/deferred_agent_run.zsh` that ntfys the result and a resume
   command, through `macbook/scripts/deferred_agent_notify.zsh` (shared with the
   vanpi path). `add-agent --host vanpi` (or a `vanpi:/path` prompt) instead copies
-  in `macbook/scripts/deferred_pi_run.py`, a durable-state machine that starts the
-  run through `~/.claude/skills/pi-agent/pi_agent.py`, collects it at later checks,
-  and answers the `describe`, `cancel [--abandon]` and `clear-hold` verbs that
-  `list --json`, `cancel` (exit 6 when a Pi run may still be active) and
-  `retry`/`run-now` call. Usage and the run states are in `macbook/README.md`.
-  Its `list --json` (with `ready`, `give_up`, `last_not_ready`, and for agent jobs
-  `host`, `model`, `effort`, `remote_state`, `remote_run`) feeds the Mac Panel's
+  in `macbook/scripts/deferred_pi_run.py` (the job's `run`: a durable-state machine
+  that starts the run through `~/.claude/skills/pi-agent/pi_agent.py` and collects
+  it at later checks) with copies of `deferred_pi_state.py` (state files, schema,
+  vocabulary, the trusted reader) and `deferred_pi_remote.py` (Pi calls under a
+  time budget) beside it. `macbook/scripts/deferred_pi_schedule.zsh` (sourced by
+  deferred.zsh) separates launching from collecting: a job owning a run gets a
+  collect-only pass at every check whatever its state, due or give-up time.
+  `list --json` (through `macbook/scripts/deferred_list_json.py`), `cancel` (exit
+  6 when a Pi run may still be active) and `retry`/`run-now --relaunch TOKEN`
+  (exit 7 without the held launch's token) read that state with the repository's
+  `macbook/scripts/deferred_pi_control.py`, never the job's own files; the job
+  record's `kind`/`host` says what a job is. Usage and the run states are in
+  `macbook/README.md`.
+  Its `list --json` (with `ready`, `give_up`, `last_not_ready`, a `problem` on
+  invalid rows, and for agent jobs `host`, `model`, `effort`, `remote_state`,
+  `remote_run`, `remote_token`) feeds the Mac Panel's
   "Ready condition" disclosure (`mac_panel/static/section_deferred_ready.mjs`)
   and agent-job tags (`mac_panel/static/deferred_agent_job.mjs`);
   its `add-agent`, `cancel [--abandon]`, `retry`, `run-now` and `reschedule` serve

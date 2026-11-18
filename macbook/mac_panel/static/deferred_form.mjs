@@ -1,5 +1,9 @@
 // Validation and request shaping for the Add job form; pure, so Node can test it. Mirrors deferred_adapter.add.
-const NAME = /^[a-z0-9][a-z0-9-]{0,59}$/;
+// A new job's name, shared by both add forms: the dated id (YYYY-MM-DD-NAME) must stay within the CLI's 60
+// characters (deferred_adapter.NAME_LIMIT).
+export const NAME_LIMIT = 49;
+export const NAME = new RegExp(`^[a-z0-9][a-z0-9-]{0,${NAME_LIMIT - 1}}$`);
+export const NAME_PROBLEM = `Use lower-case letters, digits and hyphens, starting with a letter or digit (${NAME_LIMIT} characters at most).`;
 export const FIELDS = ['due', 'name', 'description', 'script', 'attempts', 'timeout'];
 // The server's wording per field, tried in order; `script` also covers its NUL-byte message.
 const SERVER_FIELD = [['due', /\bdue\b/i], ['name', /\bname\b/i], ['attempts', /\battempts\b/i],
@@ -11,7 +15,7 @@ const positive = text => /^\d+$/.test(text) && Number(text) > 0;
 export function validateAdd(values) {
   const problems = {};
   if (!values.due) problems.due = 'Choose when the job is due.';
-  if (!NAME.test(values.name)) problems.name = 'Use lower-case letters, digits and hyphens, starting with a letter or digit (60 characters at most).';
+  if (!NAME.test(values.name)) problems.name = NAME_PROBLEM;
   if (!values.script.startsWith('#!')) problems.script = 'The script must start with a #! line.';
   ['attempts', 'timeout'].forEach(key => {
     if (values[key] && !positive(values[key])) problems[key] = `${key[0].toUpperCase()}${key.slice(1)} must be a positive whole number.`;

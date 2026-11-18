@@ -119,3 +119,30 @@ test('search offers the agent form', () => {
   const items = searchItems({jobs: []});
   assert.ok(items.some(item => item.title === 'Add an agent job' && item.anchor === 'add-agent-job'));
 });
+
+test('both add forms stop names at the length whose dated id the CLI accepts', async () => {
+  const {NAME_LIMIT, validateAdd} = await import('../static/deferred_form.mjs');
+  assert.equal(NAME_LIMIT, 49);
+  assert.deepEqual(validateAgent({...mac, name: 'n'.repeat(49)}), {});
+  assert.ok(validateAgent({...mac, name: 'n'.repeat(50)}).name);
+  const script = {due: '2026-11-06T09:30', name: 'n'.repeat(50), description: '', script: '#!/bin/zsh\n', attempts: '', timeout: ''};
+  assert.ok(validateAdd(script).name);
+  assert.deepEqual(validateAdd({...script, name: 'n'.repeat(49)}), {});
+});
+
+test('a vanpi timeout below what one check needs is named', () => {
+  assert.match(validateAgent({...vanpi, timeout: '389'}).timeout, /at least 390/);
+  assert.deepEqual(validateAgent({...vanpi, timeout: '390'}), {});
+  assert.deepEqual(validateAgent({...mac, timeout: '60'}), {});
+});
+
+test('a held launch sends its token with Run now and Retry; a still-running Pi run-now is not a failure', async () => {
+  const {collectedLater, relaunchFields} = await import('../static/deferred_agent_job.mjs');
+  const held = {host: 'vanpi', remote_state: 'launch-unknown', remote_token: 'd0123456789abcdef'};
+  assert.deepEqual(relaunchFields(held), {confirmed: true, relaunch: 'd0123456789abcdef'});
+  assert.deepEqual(relaunchFields({...held, remote_state: 'running'}), {});
+  assert.equal(collectedLater({host: 'vanpi', remote_state: 'running'}, {exit_status: 4, message: ''}), true);
+  assert.equal(collectedLater({host: 'vanpi', remote_state: 'unlaunched'}, {exit_status: 4, message: 'running 2026-x: its Pi run'}), true);
+  assert.equal(collectedLater({host: 'vanpi', remote_state: 'unlaunched'}, {exit_status: 4, message: 'not ready x'}), false);
+  assert.equal(collectedLater({host: 'mac', remote_state: null}, {exit_status: 4, message: 'running x'}), false);
+});

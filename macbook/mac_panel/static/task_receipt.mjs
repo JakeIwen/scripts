@@ -18,8 +18,9 @@ function outcomeText(label, task) {
   return clip(`${label}: ${task.state}, exit ${exit}${task.message ? `: ${task.message}` : ''}`);
 }
 
-/** Polls a receipt ({id, ...}) every 2 s until it has a finish time, then shows the outcome and reloads `section`. */
-export function watchTask(section, receipt, label) {
+/** Polls a receipt ({id, ...}) every 2 s until it has a finish time, then shows the outcome and reloads `section`.
+ * `describe(task)` may return the outcome's own wording (shown as ok) for a nonzero exit that is not a failure. */
+export function watchTask(section, receipt, label, describe = () => undefined) {
   if (watching.has(receipt.id)) return;
   watching.add(receipt.id);
   notice(section, `${label}: running…`, 'working');
@@ -31,7 +32,8 @@ export function watchTask(section, receipt, label) {
         return;
       }
       watching.delete(receipt.id);
-      notice(section, outcomeText(label, task), task.state === TaskState.FAILED ? 'error' : 'ok');
+      const own = describe(task);
+      notice(section, own ? clip(`${label}: ${own}`) : outcomeText(label, task), !own && task.state === TaskState.FAILED ? 'error' : 'ok');
       await refreshIfIdle(section);
     } catch (error) {
       watching.delete(receipt.id);
@@ -49,8 +51,9 @@ export function resumeTasks(section, tasks, labelOf) {
 export const latestTask = (tasks, job) =>
   tasks.filter(task => task.job === job).sort((a, b) => b.started_at - a.started_at)[0];
 
-/** One status line for a task receipt, with the tool's output in a disclosure. */
-export function taskLine(task) {
+/** One status line for a task receipt, with the tool's output in a disclosure; `own` ({level, text}) replaces the
+ * done/failed wording for an exit status the caller knows is not a failure. */
+export function taskLine(task, own) {
   const when = timeNode(task.finished_at ?? task.started_at);
   const detail = node('span');
   if (task.state === TaskState.RUNNING) {
@@ -60,7 +63,8 @@ export function taskLine(task) {
   detail.append(`exit ${task.exit_status ?? 'unknown'} · `, when);
   const line = node('div');
   const failed = task.state === TaskState.FAILED;
-  line.append(status(failed ? Level.ERROR : Level.OK, failed ? 'panel run failed' : 'panel run done', detail));
+  line.append(own ? status(own.level, own.text, detail)
+    : status(failed ? Level.ERROR : Level.OK, failed ? 'panel run failed' : 'panel run done', detail));
   if (task.message && task.message !== 'Running') line.append(details('Output', task.message, `task-${task.id}`));
   return line;
 }
