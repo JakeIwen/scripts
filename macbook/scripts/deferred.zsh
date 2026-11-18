@@ -43,6 +43,7 @@ not_ready_status=75     # a job's own "condition not met yet" exit status
 run_now_not_ready=4     # run-now's exit status for it (75 there means the lock is busy)
 default_give_up_seconds=$(( 7 * 86400 ))
 agent_template=$repo/macbook/scripts/deferred_agent_run.zsh
+agent_notify=$repo/macbook/scripts/deferred_agent_notify.zsh
 typeset -A job          # the record load_job last read
 typeset run_job_status=0 run_job_not_ready=0
 
@@ -86,12 +87,13 @@ record_not_ready() {  # the check just made exited not-ready: remember when and 
   job[not_ready_checks]=$(( ${job[not_ready_checks]:-0} + 1 ))
 }
 
-ready_command() {  # DIR: sets REPLY to the add-agent --ready command as typed; empty when none
+agent_setting() {  # DIR KEY: sets REPLY to an add-agent setting as typed; empty when none
+  # Read line by line, never sourced: listing a job must not run anything from it.
   local line
   REPLY=
   [[ -f $1/agent.env ]] || return 0
   while IFS= read -r line; do
-    [[ $line == agent_ready=* ]] && { REPLY=${(Q)${line#agent_ready=}}; return 0 }
+    [[ $line == $2=* ]] && { REPLY=${(Q)${line#$2=}}; return 0 }
   done < $1/agent.env
 }
 
@@ -220,7 +222,7 @@ cmd_add_agent() {
   /usr/bin/install -m 600 -- $3 $stage/prompt.txt
   print -rl -- "agent_name=${(q)2}" "agent_cwd=${(q)cwd}" "agent_model=${(q)model}" "agent_effort=${(q)effort}" \
     "agent_ready=${(q)ready}" "agent_topic_var=${(q)topic_var}" "agent_notifier=${(q)notifier}" \
-    "agent_secrets=${(q)secrets}" > $stage/agent.env
+    "agent_secrets=${(q)secrets}" "agent_notify=${(q)agent_notify}" > $stage/agent.env
   local rc=0
   (cmd_add $add_opts --file $stage/prompt.txt --file $stage/agent.env $1 $2 $stage/run \
     "${4:-agent follow-up: $2}") || rc=$?
@@ -261,7 +263,7 @@ emit_list_json_records() {
     emit_json_field "$dir/last.log"
     emit_json_field "$(give_up_stamp)"
     emit_json_field "$([[ -f $dir/agent.env ]] && print 1 || print 0)"
-    ready_command $dir   # not in $(...), which would strip trailing newlines
+    agent_setting $dir agent_ready   # not in $(...), which would strip trailing newlines
     emit_json_field "$REPLY"
     emit_json_field "$job[last_not_ready]"
     emit_json_field "${job[not_ready_checks]:-0}"
