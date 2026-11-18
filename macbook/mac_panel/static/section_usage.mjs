@@ -142,6 +142,9 @@ export async function load() {
   return {...usage, budget_settings: tool ? {tools: [tool]} : null};
 }
 
+// Settings cards that are real forms, as opposed to the "settings unavailable" placeholder.
+const editableSettings = new WeakSet();
+
 function settingsCard(data) {
   const tool = data.budget_settings?.tools[0];
   if (!tool || tool.error) {
@@ -149,6 +152,7 @@ function settingsCard(data) {
   }
   const result = toolCard(tool, SECTION);
   result.dataset.anchor = COPY.settingsAnchor;
+  editableSettings.add(result);
   return result;
 }
 
@@ -215,12 +219,13 @@ function restoreSlot() {
 }
 
 // The settings form can hold unsaved edits, so retrying the failed allowance read hands the same form back to the next
-// render instead of building a fresh one from the saved values.
+// render instead of building a fresh one from the saved values. An error placeholder holds nothing worth keeping, so a
+// recovered form replaces it.
 let errorSettings = null;
 let keptSettings = null;
 
 async function retryAllowance() {
-  keptSettings = errorSettings;
+  keptSettings = editableSettings.has(errorSettings) ? errorSettings : null;
   try { await refresh(SECTION); } finally { keptSettings = null; }
 }
 

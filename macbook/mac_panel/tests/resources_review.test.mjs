@@ -153,6 +153,27 @@ for (const outcome of ['succeeds', 'fails again']) {
   });
 }
 
+test('retrying after both reads failed shows the recovered settings form, not the old error placeholder', async () => {
+  const content = new Element();
+  const root = section('usage');
+  root.parts['.content'] = content;
+  section('llm-restore');
+  let loads = 0;
+  const answer = () => (loads++ === 0
+    ? {error: 'usage tool down', budget_settings: {tools: [{error: 'settings tool down'}]}}
+    : {availability: {claude: 'ok', gpt: 'ok'}, age_minutes: 1, lean: 'balanced', budget_settings: {tools: [tool]}});
+  globalThis.fetch = async path => ({ok: true, status: 200, json: async () => (String(path).startsWith('/api/history') ? {series: {}, spacing: {}} : answer())});
+  register([{id: 'usage', endpoint: '/api/usage', render: usage.render}]);
+  await refresh('usage');
+  assert.match(content.textContent, /settings tool down/);
+  findAll(content, element => element.dataset?.key === 'retry')[0].click();
+  await tick();
+  await tick();
+  assert.equal(loads, 2);
+  assert.ok(findAll(content, element => element.dataset?.key === 'usage-budget-weekly').length, 'the recovered form is drawn');
+  assert.doesNotMatch(content.textContent, /settings tool down/);
+});
+
 // ---- finding 11: the hosted restore bookmark lands whichever render finishes last ----
 
 function bookmarkSetup(context) {
