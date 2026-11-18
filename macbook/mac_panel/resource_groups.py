@@ -152,8 +152,10 @@ def build_grouping(table: ProcessTable) -> Grouping:
             owner[pid] = (Kind.COMPUTE, root)
         elif (root := outermost(chain, infras)) is not None:
             owner[pid] = (Kind.INFRA, root)
+    # Only a worker that roots its own group splits into jobs: a process that merely matches
+    # the worker's text beneath another worker's job is an ordinary member of that job.
     for root in computes:
-        if owner.get(root, (None,))[0] is not Kind.COMPUTE:
+        if owner.get(root) != (Kind.COMPUTE, root):
             continue
         owned = {pid for pid, (kind, top) in owner.items() if kind is Kind.COMPUTE and top == root}
         for pid, target in compute_assignment(table, root, owned).items():
