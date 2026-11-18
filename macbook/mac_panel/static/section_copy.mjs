@@ -300,7 +300,9 @@ export const RESOURCES_COPY = {
     terms: {load: 'Load (1, 5, 15 min)', pressure: 'Memory pressure', thermal: 'Thermal', power: 'Power', processes: 'Processes',
       uptime: 'Uptime', breakdown: 'Memory breakdown'},
     memoryParts: {app: 'App', wired: 'Wired', compressed: 'Compressed', cached: 'Cached files', free: 'Free', other: 'Other'},
-    power: {ac: 'AC power', battery: 'Battery', charging: 'charging', notCharging: 'not charging'},
+    pressure: {normal: 'Normal', warn: 'Elevated', critical: 'Critical'},
+    thermal: {nominal: 'Nominal', warning: 'Warning recorded'},
+    power: {ac: 'AC power', battery: 'Battery', ups: 'UPS', charging: 'charging', notCharging: 'not charging'},
     info: {
       gauges: 'Each bar shows what is left, so a short bar is the thing to watch. CPU is the share of the whole machine, estimated from the processes\' recent averages.',
       memory: 'Used is app, wired and compressed memory. Cached files and free memory are given back on demand. All parts are estimates from vm_stat and can differ a little from Activity Monitor.',

@@ -8,7 +8,7 @@ import {formatBytes, formatDuration, formatPercent} from './resources_format.mjs
 
 const COPY_SYSTEM = COPY.system;
 const WHOLE = 100;
-const PRESSURE_NAMES = {1: 'normal', 2: 'warn', 4: 'critical'};
+const PRESSURE_LEVEL = {normal: Level.OK, warn: Level.WARN, critical: Level.ERROR};
 
 // The backend computes health.level once; the page only maps its words onto the shared Level vocabulary.
 export const HEALTH_LEVEL = Object.freeze({ok: Level.OK, warn: Level.WARN, error: Level.ERROR, unknown: Level.UNKNOWN});
@@ -37,22 +37,14 @@ function gaugeBlock(spec, system) {
   return row;
 }
 
-// Memory pressure arrives as a word, or as the kernel's level number; anything else is shown as it came.
-export function pressureText(pressure) {
-  if (!known(pressure) && typeof pressure !== 'string') return null;
-  return PRESSURE_NAMES[pressure] ?? String(pressure);
-}
-
-// Thermal is a word or an object carrying one; the page does not judge it, only shows it.
-export function thermalText(thermal) {
-  if (thermal === null || thermal === undefined) return null;
-  if (typeof thermal === 'object') return thermal.text ?? thermal.status ?? thermal.state ?? thermal.level ?? null;
-  return String(thermal);
-}
+// The backend sends the words normal | warn | critical, thermal as nominal | warning, and power.source as ac | battery | ups
+// or the raw lower-case text it read; a word the page has no wording for is shown as it came.
+export const pressureTag = pressure => (pressure ? tag(COPY_SYSTEM.pressure[pressure] ?? pressure, PRESSURE_LEVEL[pressure]) : null);
+export const thermalText = thermal => (thermal ? COPY_SYSTEM.thermal[thermal] ?? thermal : null);
 
 export function powerText(power) {
   if (!power) return null;
-  const parts = [power.source === 'battery' ? COPY_SYSTEM.power.battery : power.source === 'ac' ? COPY_SYSTEM.power.ac : power.source];
+  const parts = [COPY_SYSTEM.power[power.source] ?? power.source];
   if (known(power.percent)) parts.push(`${Math.round(power.percent)} %`);
   if (power.charging !== undefined && power.charging !== null) parts.push(power.charging ? COPY_SYSTEM.power.charging : COPY_SYSTEM.power.notCharging);
   return parts.filter(Boolean).join(' · ') || null;
@@ -68,12 +60,11 @@ function memoryBreakdown(memory) {
 }
 
 function readings(system) {
-  const pressure = pressureText(system.memory?.pressure);
   const unavailable = COPY_SYSTEM.unavailable;
   const text = value => value ?? node('span', unavailable, 'muted');
   return kv([
     [COPY_SYSTEM.terms.load, text(loadText(system.load))],
-    [COPY_SYSTEM.terms.pressure, text(pressure ? tag(pressure) : null)],
+    [COPY_SYSTEM.terms.pressure, text(pressureTag(system.memory?.pressure))],
     [COPY_SYSTEM.terms.thermal, text(thermalText(system.thermal))],
     [COPY_SYSTEM.terms.power, text(powerText(system.power))],
     [COPY_SYSTEM.terms.processes, text(known(system.process_count) ? String(system.process_count) : null)],

@@ -4,6 +4,7 @@
 import {card, emptyState, info, node, tag} from './panel_dom.mjs';
 import {RESOURCES_COPY as COPY} from './section_copy.mjs';
 import {Level} from './status_cell.mjs';
+import {groupKind} from './resources_groups.mjs';
 import {rowActions} from './resources_actions.mjs';
 import {numberTable} from './resources_table.mjs';
 import {formatAge, formatBytes, formatPercent} from './resources_format.mjs';
@@ -21,14 +22,15 @@ const byName = (a, b) => lower(a.name).localeCompare(lower(b.name));
 export function visibleRows(rows, {sort, filter}) {
   const terms = lower(filter).split(/\s+/).filter(Boolean);
   return rows
-    .filter(row => terms.every(term => [row.name, row.pid ?? row.root_pid, row.group, row.user].some(field => lower(field).includes(term))))
+    .filter(row => terms.every(term => [row.name, row.pid ?? row.root_pid, groupKind(row.group), row.user].some(field => lower(field).includes(term))))
     .sort((a, b) => (b[sort] ?? 0) - (a[sort] ?? 0) || byName(a, b));
 }
 
 function nameCell(row) {
   const cell = node('span');
   cell.append(row.name);
-  if (row.group) cell.append(' ', tag(COPY.kinds[row.group] ?? row.group));
+  const kind = groupKind(row.group);
+  if (kind) cell.append(' ', tag(COPY.kinds[kind] ?? kind));
   if (row.stopped) cell.append(' ', tag(COPY_PROCESSES.pausedTag, Level.WARN));
   if (row.nice > 0) cell.append(' ', node('span', COPY_PROCESSES.niceTag(row.nice), 'muted small'));
   return cell;

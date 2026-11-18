@@ -37,22 +37,20 @@ test('renders every card from the full fixture: sessions by name, nesting, total
   }
   const sessions = findAll(node, element => hasClass(element, 'session'));
   assert.deepEqual(sessions.map(element => element.dataset.key),
-    ['session-claude-5000', 'session-codex-6000', 'session-claude-4100', 'session-claude-4200']);
+    ['session-claude:5000', 'session-codex:6000', 'session-claude:4100', 'session-claude:4200']);
   assert.ok(content.includes('Claude'), 'kind tag');
   assert.ok(content.includes('Codex'));
   assert.match(content, /Claude: 3 sessions · 9 processes/);
   assert.match(content, /Codex: 1 session · 3 processes/);
-  assert.ok(content.includes('model-gateway.js'), 'infra row');
+  assert.ok(content.includes('model gateway'), 'infra row');
   assert.ok(content.includes('worker'), 'compute worker row');
   assert.ok(content.includes('idle: no job is running'));
 });
 
-test('nested sessions sit directly under the session they started in, whether parent names an id or a name', () => {
+test('nested sessions sit directly under the session they started in, by the outer group id', () => {
   const groups = payload().groups.filter(group => group.kind === 'claude');
   const order = orderSessions(groups).map(({group, depth}) => `${depth}:${group.name}`);
   assert.deepEqual(order, ['0:agent-b', '0:panel work', '1:inner']);
-  const byName = groups.map(group => (group.name === 'inner' ? {...group, parent: 'panel work'} : group));
-  assert.deepEqual(orderSessions(byName).map(({group, depth}) => `${depth}:${group.name}`), order);
 });
 
 test('health levels map through one table, anything else is unknown', () => {
@@ -89,11 +87,28 @@ test('a render with no system object at all still draws', () => {
 
 test('a compute job row shows beside the worker and removes the idle line', () => {
   const data = payload();
-  data.groups.push({id: 'compute-job-1', kind: 'compute', name: 'job-render', detail: null, status: null, parent: null, root_pid: 810,
+  data.groups.push({id: 'compute:810', kind: 'compute', name: 'job-render', detail: 'ffmpeg', status: null, parent: null, root_pid: 810,
     started: 'Tue Nov 17 07:50:00 2026', cpu: 90, rss: 2 * 1024 ** 3, count: 3, tree_blocked: null, processes: []});
   const content = text(resources.render(data).node);
   assert.ok(content.includes('job-render'));
   assert.ok(!content.includes('idle: no job is running'));
+});
+
+test('a compute row named "job · <program>" is a job, so the idle line goes', () => {
+  const data = payload();
+  data.groups.push({...data.groups.find(group => group.kind === 'compute'), id: 'compute:811', name: 'job · ffmpeg', root_pid: 811});
+  assert.ok(!text(resources.render(data).node).includes('idle: no job is running'));
+});
+
+test('pressure, thermal and power use the backend vocabulary', () => {
+  const data = payload();
+  data.system.memory.pressure = 'critical';
+  data.system.thermal = 'warning';
+  data.system.power = {source: 'ups', percent: 50, charging: null};
+  const content = text(resources.render(data).node);
+  assert.match(content, /Memory pressure\s*Critical/);
+  assert.match(content, /Thermal\s*Warning recorded/);
+  assert.match(content, /Power\s*UPS · 50 %/);
 });
 
 test('swap with no total reads as none in use, not as an empty gauge', () => {
@@ -169,7 +184,6 @@ test('request bodies carry confirmed, pid, started, scope and action for every a
 test('result text lists the reply counts in plain words and leaves zeros out', () => {
   assert.equal(resultText('terminate', {applied: 12, gone: 1, changed: 0, skipped: 2, refused: 0, unchanged: 0}),
     'Terminated 12 processes, 1 process already gone, 2 processes skipped as protected');
-  assert.equal(resultText('terminate', {counts: {applied: 1}}), 'Terminated 1 process');
   assert.equal(resultText('lower-priority', {applied: 0, unchanged: 1}), 'Nothing was signalled, 1 process already at that priority');
   assert.equal(resultText('kill', {applied: 0, changed: 2, refused: 1}), 'Nothing was signalled, 2 processes changed since the snapshot and left alone, 1 process refused by the system');
 });
@@ -216,7 +230,7 @@ test('typing in the filter redraws only the list and keeps the input element', (
 });
 
 test('visibleRows filters on name, pid and group and sorts by the chosen key, ties by name', () => {
-  const rows = [{name: 'b', pid: 2, cpu: 5, rss: 1}, {name: 'a', pid: 3, cpu: 5, rss: 9}, {name: 'c', pid: 4, cpu: 1, rss: 99, group: 'claude'}];
+  const rows = [{name: 'b', pid: 2, cpu: 5, rss: 1}, {name: 'a', pid: 3, cpu: 5, rss: 9}, {name: 'c', pid: 4, cpu: 1, rss: 99, group: 'claude:12'}];
   assert.deepEqual(visibleRows(rows, {sort: 'cpu', filter: ''}).map(row => row.name), ['a', 'b', 'c']);
   assert.deepEqual(visibleRows(rows, {sort: 'rss', filter: ''}).map(row => row.name), ['c', 'a', 'b']);
   assert.deepEqual(visibleRows(rows, {sort: 'cpu', filter: 'CLAUDE'}).map(row => row.name), ['c']);

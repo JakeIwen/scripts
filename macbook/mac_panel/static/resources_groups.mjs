@@ -12,15 +12,18 @@ export const SESSION_KINDS = [GroupKind.CLAUDE, GroupKind.CODEX];
 const SESSION_LEVEL = {busy: Level.OK, idle: Level.IDLE};
 const TREE_NUMBERS = [1, 2, 3, 4];
 const READ_ONLY_NUMBERS = [1, 2, 3, 4];
-const COMPUTE_WORKER = /worker/i;
+// The backend names the worker's own row exactly this; every other compute row is a job.
+const COMPUTE_WORKER_NAME = 'worker';
 
 export const sessionAnchor = group => `session-${group.id}`;
+/** A process row's `group` is a group id, `<kind>:<root pid>`; its kind is the prefix. */
+export const groupKind = id => (id ? String(id).split(':')[0] : null);
 export const groupsOfKind = (data, kinds) => (data.groups ?? []).filter(group => kinds.includes(group.kind));
 const sum = (groups, key) => groups.reduce((total, group) => total + (group[key] ?? 0), 0);
 
-/** Sessions by name, each nested session directly under the one it started in. `parent` may name the outer group by id or name. */
+/** Sessions by name, each nested session directly under the one it started in (`parent` is the outer group's id). */
 export function orderSessions(groups) {
-  const outer = group => groups.find(other => other !== group && (other.id === group.parent || other.name === group.parent));
+  const outer = group => groups.find(other => other.id === group.parent);
   const byName = (a, b) => String(a.name).localeCompare(String(b.name));
   const roots = groups.filter(group => !group.parent || !outer(group)).sort(byName);
   const ordered = [];
@@ -125,7 +128,7 @@ export function sessionsCard(data) {
   return card({title: COPY.sessions.title, body, anchor: 'sessions', actions: info(COPY.sessions.info.table)});
 }
 
-export const isComputeWorker = group => COMPUTE_WORKER.test(`${group.detail ?? ''} ${group.name ?? ''}`);
+export const isComputeWorker = group => group.name === COMPUTE_WORKER_NAME;
 
 export function computeCard(data) {
   const groups = groupsOfKind(data, [GroupKind.COMPUTE]);

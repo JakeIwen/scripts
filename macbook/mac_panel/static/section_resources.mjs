@@ -7,7 +7,7 @@ import {goTo} from './shell.mjs';
 import {Level, status} from './status_cell.mjs';
 import {SECTION, processActions, sessionKey} from './resources_actions.mjs';
 import {formatBytes, formatPercent, plural} from './resources_format.mjs';
-import {SESSION_KINDS, computeCard, groupsOfKind, sessionAnchor, sessionsCard} from './resources_groups.mjs';
+import {SESSION_KINDS, computeCard, groupKind, groupsOfKind, sessionAnchor, sessionsCard} from './resources_groups.mjs';
 import {historyCard} from './resources_history.mjs';
 import {processesCard, revealProcessList} from './resources_processes.mjs';
 import {healthLevel, systemCard} from './resources_system.mjs';
@@ -61,7 +61,7 @@ function processItem(row) {
     run: () => { reveal(); stageAction(SECTION, 'processes', `${id}-${row.pid}`, {arm: true}); },
   }));
   return {title: row.name, subtitle: `pid ${row.pid} · ${formatPercent(row.cpu)} CPU · ${formatBytes(row.rss)}`,
-    keywords: ['process', 'resources', 'kill', 'terminate', 'memory', 'cpu', row.group].filter(Boolean), anchor: 'processes',
+    keywords: ['process', 'resources', 'kill', 'terminate', 'memory', 'cpu', groupKind(row.group)].filter(Boolean), anchor: 'processes',
     actions: [{label: 'Open', run: () => { reveal(); goTo(SECTION, 'processes'); }}, ...actions]};
 }
 

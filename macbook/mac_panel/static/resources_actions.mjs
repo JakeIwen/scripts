@@ -26,9 +26,8 @@ export function processActions(row) {
   return ids;
 }
 
-/** One sentence from a mutate reply; zero counts are left out. Accepts the counts at the top level or under `counts`. */
-export function resultText(actionId, reply) {
-  const counts = reply?.counts ?? reply ?? {};
+/** One sentence from a mutate reply (six flat counts); zero counts are left out. */
+export function resultText(actionId, counts) {
   const applied = Number(counts.applied) || 0;
   const parts = [applied ? `${COPY.actions[actionId].done} ${plural(applied, 'process', 'processes')}` : COPY.results.none];
   REPLY_COUNTS.forEach(key => {
@@ -43,7 +42,7 @@ const resultKind = counts => (Number(counts?.applied) > 0 || !REPLY_COUNTS.some(
 
 export function runAction(actionId, target, scope = Scope.PROCESS) {
   return action(SECTION, ENDPOINT, requestBody(actionId, target, scope), {
-    after: reply => notice(SECTION, resultText(actionId, reply), resultKind(reply?.counts ?? reply)),
+    after: reply => notice(SECTION, resultText(actionId, reply), resultKind(reply)),
   });
 }
 
