@@ -26,12 +26,17 @@ export function relaunchFields(job) {
   return job.relaunch_id ? {confirmed: true, relaunch: job.relaunch_id} : {};
 }
 
-const STILL_RUNNING = /^running /;
+// run-now's exit-4 lines; a relaunch prints what it cleared before the "running" line.
+const STILL_RUNNING = /^running /m;
+const NOT_READY = /^not ready .*$/m;
 
-/** run-now's outcome wording from the finished task alone, for the click and the resumed-task paths: exit 4 with a
- * "running ..." message is a Pi run left going, collected by a later check, not a failure. */
+/** run-now's outcome wording from the finished task alone, for the click and the resumed-task paths. Exit 4 is not a
+ * failure: a "running ..." line is a Pi run left going, collected by a later check, and a "not ready ..." line (the
+ * CLI's own, saying when the checker tries again) is shown as it is. */
 export function describeRunNow(task) {
-  return task.exit_status === RUN_NOW_PENDING && STILL_RUNNING.test(task.message ?? '') ? COPY.collectedLater : undefined;
+  if (task.exit_status !== RUN_NOW_PENDING) return undefined;
+  const message = task.message ?? '';
+  return STILL_RUNNING.test(message) ? COPY.collectedLater : message.match(NOT_READY)?.[0];
 }
 
 /** The Pi attempt a card shows (its launch token, else its run id), or '' when there is none. */

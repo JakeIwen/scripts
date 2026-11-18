@@ -179,8 +179,14 @@ test('a still-running Pi run-now is not a failure, and the card shows it only wh
   const {collectedLaterOnCard, describeRunNow, collectedLaterText} = await import('../static/deferred_agent_job.mjs');
   const pending = {exit_status: 4, message: 'running 1120-x: its Pi run is going'};
   assert.equal(describeRunNow(pending), collectedLaterText);
-  assert.equal(describeRunNow({exit_status: 4, message: 'not ready x'}), undefined);
+  // The CLI's own not-ready line says when the checker tries again; a relaunch prints what it cleared first.
+  const notReady = 'not ready 1120-x; the checker retries from its due time 2026-11-20 09:00; output in /j/last.log';
+  assert.equal(describeRunNow({exit_status: 4, message: notReady}), notReady);
+  assert.equal(describeRunNow({exit_status: 4, message: 'Cleared the unresolved attempt d1; the next launch starts a new run.\n'
+    + 'running 1120-x: its Pi run is still going'}), collectedLaterText);
+  assert.equal(describeRunNow({exit_status: 4, message: 'Tool exited 4; refresh its state before retrying'}), undefined);
   assert.equal(describeRunNow({exit_status: 1, message: 'running x'}), undefined);
+  assert.equal(describeRunNow({exit_status: 3, message: notReady}), undefined);
   assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'running'}, pending), true);
   assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'launching'}, pending), true);
   assert.equal(collectedLaterOnCard({host: 'vanpi', remote_state: 'finished'}, pending), false);
