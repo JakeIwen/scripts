@@ -1,9 +1,10 @@
 """What role a process has, for grouping and the signal policy: here, uncertainty protects.
 
 The display parse (`process_invocation`) shows less when it is unsure. These classifiers
-decide what may be signalled, so they lean the other way. A process is an infra or compute
-root when its program or any whole argument names one, whatever options surround it; a
-false positive only makes a row read-only. Every Codex process roots a group of its own
+decide what may be signalled, so they lean the other way. Infra and compute roots are found
+by substring of the whole command text (or the kernel's name), with no option parsing at
+all, so no spelling of the options can hide one; a false positive only makes a row
+read-only, and inside a session such a process is still that session's member. Every Codex process roots a group of its own
 wherever it runs (`resource_groups`), so its role decides only how that group is shown and
 whether it may be ended as a session: a session when `codex_role` is sure, otherwise
 read-only infrastructure, with nothing in it signalled when the role is unknown
@@ -11,9 +12,8 @@ read-only infrastructure, with nothing in it signalled when the role is unknown
 """
 from enum import Enum
 import os
-import re
 
-from process_table import ProcessRow
+from process_table import KERNEL_NAME_LIMIT, ProcessRow
 
 SHELLS = frozenset(('zsh', 'bash', 'sh', 'dash', 'fish', 'ksh', 'tcsh', 'csh'))
 CLAUDE = 'claude'
@@ -55,18 +55,11 @@ NON_SESSION_SUBCOMMANDS = frozenset(SERVICE_SUBCOMMANDS) | OTHER_SUBCOMMANDS
 
 CODEX_LABELS = {CodexRole.APP_SERVER: 'Codex app server', CodexRole.SERVICE: 'Codex service',
                 CodexRole.COMMAND: 'Codex command', CodexRole.UNCERTAIN: 'Codex (role unread)'}
-# Base names of a program or of any argument that make a process shared infrastructure.
-INFRA_NAMES = {'claude-code-proxy': 'model gateway proxy', 'model-gateway.js': 'model gateway',
-               'usage-server.mjs': 'usage server', 'llm_switchboard': 'LLM switchboard',
-               'llm_switchboard.py': 'LLM switchboard'}
-# The Playwright MCP server is a generic `cli.js`, so its package path identifies it.
-PLAYWRIGHT_PACKAGE = '@playwright/mcp/'
-PLAYWRIGHT_SCRIPT = 'cli.js'
-PLAYWRIGHT_LABEL = 'Playwright MCP'
-INFRA_MODULES = {'llm_switchboard': 'LLM switchboard'}
-COMPUTE_MODULE = 'van_compute.worker'
-# `-m module`, or a short-option cluster ending in m (`-Bm module`).
-MODULE_OPTION = re.compile(r'-[A-Za-z]*m')
+# Text that makes a process shared infrastructure wherever it appears in its command.
+INFRA_MARKERS = {'llm_switchboard': 'LLM switchboard', 'model-gateway.js': 'model gateway',
+                 'claude-code-proxy': 'model gateway proxy', 'usage-server.mjs': 'usage server',
+                 '@playwright/mcp': 'Playwright MCP'}
+COMPUTE_MARKER = 'van_compute.worker'
 
 
 def program_names(row: ProcessRow) -> frozenset:
@@ -127,33 +120,15 @@ def codex_role(row: ProcessRow) -> CodexRole:
     return CodexRole.SESSION
 
 
-def modules(tokens):
-    """Every module named after `-m` (or `-Bm`, or `-mname`) anywhere in the arguments."""
-    for index, token in enumerate(tokens):
-        if MODULE_OPTION.fullmatch(token) and index + 1 < len(tokens):
-            yield tokens[index + 1]
-        elif token.startswith('-m') and not token.startswith('--') and len(token) > 2:
-            yield token[2:]
-
-
-def argument_names(token):
-    """Base names an argument could carry: the whole token and an `--option=value` value."""
-    return {os.path.basename(token), os.path.basename(token.split('=')[-1])}
+def names_marker(row: ProcessRow, marker) -> bool:
+    """The command text contains the marker, or the kernel's (truncated) name is it."""
+    return marker in row.argv_text or row.kernel_name == marker[:KERNEL_NAME_LIMIT]
 
 
 def infra_label(row: ProcessRow) -> str | None:
-    """The infra table's label when the program or any whole argument names shared infrastructure."""
-    for name in program_names(row):
-        if name in INFRA_NAMES:
-            return INFRA_NAMES[name]
-    for token in row.arguments:
-        for name in argument_names(token):
-            if name in INFRA_NAMES:
-                return INFRA_NAMES[name]
-            if name == PLAYWRIGHT_SCRIPT and PLAYWRIGHT_PACKAGE in token:
-                return PLAYWRIGHT_LABEL
-    return next((INFRA_MODULES[name] for name in modules(row.arguments) if name in INFRA_MODULES), None)
+    """The infra table's label when the command text names shared infrastructure anywhere."""
+    return next((label for marker, label in INFRA_MARKERS.items() if names_marker(row, marker)), None)
 
 
 def is_compute_root(row: ProcessRow) -> bool:
-    return COMPUTE_MODULE in modules(row.arguments)
+    return names_marker(row, COMPUTE_MARKER)

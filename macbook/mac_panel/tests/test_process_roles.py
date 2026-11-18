@@ -131,17 +131,22 @@ class InfraAndComputeTests(unittest.TestCase):
         self.assertEqual(world.calls, [])
 
     def test_any_whole_argument_or_module_matches(self):
+        kernel = {'renamed serve': 'claude-code-prox'}
         for command, label in (
                 ('node --inspect=0 /x/usage-server.mjs', 'usage server'),
                 ('node --loader x.mjs /a/node_modules/@playwright/mcp/cli.js --port 1', 'Playwright MCP'),
                 ('/opt/bin/claude-code-proxy serve', 'model gateway proxy'),
                 ('python3 -X utf8 -m llm_switchboard', 'LLM switchboard'),
                 ('python3 /srv/llm_switchboard.py', 'LLM switchboard'),
-                ('node --script=/x/model-gateway.js', 'model gateway')):
-            self.assertEqual(infra_label(row(command)), label, command)
+                ('node --script=/x/model-gateway.js', 'model gateway'),
+                ('python3 -IBmllm_switchboard', 'LLM switchboard'),
+                ('renamed serve', 'model gateway proxy')):
+            options = {'ucomm': kernel[command]} if command in kernel else {}
+            self.assertEqual(infra_label(row(command, **options)), label, command)
         self.assertIsNone(infra_label(row('node /x/cli.js')))
         for command in ('python3 -Bm van_compute.worker', 'python3 -W ignore -m van_compute.worker',
-                        'python3 -mvan_compute.worker'):
+                        'python3 -mvan_compute.worker', 'python3 -Bmvan_compute.worker',
+                        'python3 -c import runpy; runpy.run_module("van_compute.worker")'):
             self.assertTrue(is_compute_root(row(command)), command)
 
     def test_a_sessions_own_command_that_mentions_the_gateway_stays_its_member(self):
@@ -194,6 +199,15 @@ class RoundThreeTests(unittest.TestCase):
             self.assertEqual(world.grouping.kind(301), Kind.INFRA, command)
             self.assertEqual(world.reason(300), KIND_REASONS[Kind.INFRA], command)
             self.assertRefused(world, (300, 'tree'), (300, 'process'), (301, 'process'))
+
+    def test_finding3_a_clustered_module_option_with_an_attached_operand_is_protected(self):
+        world = Harness((500, 1, 'python3 -Bmvan_compute.worker'),
+                        (510, 1, 'python3 -IBmllm_switchboard --serve'))
+        self.assertEqual(world.grouping.kind(500), Kind.COMPUTE)
+        self.assertEqual(world.grouping.kind(510), Kind.INFRA)
+        self.assertEqual(world.reason(500), KIND_REASONS[Kind.COMPUTE])
+        self.assertEqual(world.reason(510), KIND_REASONS[Kind.INFRA])
+        self.assertRefused(world, (500, 'process'), (510, 'process'))
 
 
 class ShellTests(unittest.TestCase):

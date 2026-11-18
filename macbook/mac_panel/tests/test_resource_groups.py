@@ -68,9 +68,9 @@ class GroupingTests(unittest.TestCase):
             self.assertEqual(self.grouping.kind(pid), Kind.APP, pid)
 
     def test_a_mention_outside_any_session_errs_toward_read_only(self):
-        # Matching for safety is liberal: these only mention a gateway or the worker, and are
-        # read-only as a result, which is the safe side of the mistake.
-        self.assertEqual(self.grouping.kind(600), Kind.INFRA)
+        # Matching for safety is by substring: these only mention a gateway or the worker,
+        # and are read-only as a result, which is the safe side of the mistake.
+        self.assertEqual(self.grouping.kind(600), Kind.COMPUTE)
         self.assertEqual(self.grouping.kind(601), Kind.COMPUTE)
         self.assertEqual(self.grouping.kind(602), Kind.INFRA)
 

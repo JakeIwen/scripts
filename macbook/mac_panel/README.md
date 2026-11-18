@@ -309,11 +309,12 @@ can be signalled only as members of a session tree. Shared LLM infrastructure an
 van-compute rows are read-only.
 
 Roles that decide what may be signalled come from `process_roles.py`, which reads the
-arguments the opposite way to the display parse: when unsure, it protects. A process is
-infrastructure or a compute worker when its program, kernel name or any whole argument names
-one (`model-gateway.js`, `claude-code-proxy`, `usage-server.mjs`, `llm_switchboard`, the
-Playwright MCP `cli.js`) or `-m` names `van_compute.worker` or `llm_switchboard` anywhere; a
-command that merely mentions one outside a session is read-only as a result. Inside a
+arguments the opposite way to the display parse: when unsure, it protects. Outside a
+session, a process is the compute worker when its command text contains `van_compute.worker`,
+and infrastructure when it contains `llm_switchboard`, `model-gateway.js`, `claude-code-proxy`,
+`usage-server.mjs` or `@playwright/mcp` (or its kernel name is one of them): plain substring
+matching with no option parsing, so no spelling of the options (`-Bmvan_compute.worker`)
+hides one, and a command that merely mentions one is read-only as a result. Inside a
 session, a process belongs to that session, with one exception: every Codex process roots a
 group of its own wherever it runs, even inside another session, because `ps` flattens its
 arguments and a prompt or an option value can look like a subcommand. Its role decides only
