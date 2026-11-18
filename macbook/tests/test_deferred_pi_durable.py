@@ -7,7 +7,6 @@ pi_agent.py and ssh as in deferred_pi_fixture.
 """
 import datetime
 import json
-from pathlib import Path
 import time
 
 import deferred_pi_state
@@ -170,14 +169,11 @@ class AlertRetryTests(PiHarness):
         job = self.add_pi()
         self.deferred("run-due")
         (job / "deferred_pi_remote.py").unlink()
-        secrets = self.env["DEFERRED_SECRETS"]
-        unreachable = Path(self.tmp / "unreachable-secrets")
-        unreachable.write_text("export NTFY_WARNING_URL='http://127.0.0.1:9/warn'\n")
-        self.env["DEFERRED_SECRETS"] = str(unreachable)
+        self.warnings_down()
         self.deferred("run-due")
         self.assertEqual(self.alerts(), [])
         self.assertIn("warning undelivered", self.scheduler_log())
-        self.env["DEFERRED_SECRETS"] = secrets
+        self.warnings_down(False)
         self.deferred("run-due")
         self.deferred("run-due")
         self.assertEqual(self.alerts(), [f"Deferred job collector failed: {job.name}"])

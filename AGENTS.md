@@ -398,7 +398,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   deferred.zsh) separates launching from collecting and owns the collection
   deadline and the alerts: a vanpi job starts at most one Pi run by itself, a job
   owning a run gets a collect-only pass at every check whatever its state, due or
-  give-up time, and another run starts only by `retry`/`run-now`. It reads a
+  give-up time, and another run starts only by `retry`/`run-now` (one such
+  launch that was not ready yet waits as `pending` for the checker). A warning
+  it raises is owed (`alerts.owed`) until a check sends it, at most 48 failed
+  sends. It reads a
   pass's outcome from the state files, never its exit status (a job is deleted
   only once finished and `delivered`), evaluates the deadline before any pass
   and without the job's `run`, and checks the give-up time per job and, through

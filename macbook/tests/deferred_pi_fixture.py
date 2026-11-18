@@ -214,6 +214,17 @@ class PiHarness(DeferredHarness):
     def offline(self, on=True):
         self.control("unreachable") if on else self.clear("unreachable")
 
+    def warnings_down(self, on=True):
+        """Points the scheduler's warnings at a closed port (on) or back at the stand-in topic.
+        A job's result ntfy keeps the secrets file it was added with."""
+        if on:
+            self.warnings_up = self.env["DEFERRED_SECRETS"]
+            closed = self.tmp / "closed-secrets"
+            closed.write_text("export NTFY_WARNING_URL='http://127.0.0.1:9/warn'\n")
+            self.env["DEFERRED_SECRETS"] = str(closed)
+        else:
+            self.env["DEFERRED_SECRETS"] = self.warnings_up
+
     def add_pi(self, *args, prompt=None, name="pijob", due=YESTERDAY, check=True):
         result = self.deferred("add-agent", "--host", "vanpi", "--timeout", "600", *args, due, name,
                                str(prompt or self.prompt), check=check)

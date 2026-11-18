@@ -12,12 +12,18 @@
 # the Pi, they need --relaunch naming it (deferred_pi_control.py rearm).
 #
 # The scheduler, not the job's copied run script, owns the collection deadline
-# and the alerts, so both hold when that copy cannot run. The Pi state is read
+# and the alerts, so both hold when that copy cannot run. A warning it raises is
+# owed from that moment, whatever becomes of the job's state, and every check
+# sends what is still owed until a send succeeds or pi_alert_send_limit sends
+# have failed. The Pi state is read
 # by the repository's deferred_pi_control.py, never by running anything from
 # the job directory.
 
 typeset -A pi   # the last pi_snapshot: state run token owes unresolved delivered failure_kind
-pi_alerts=alerts.sent   # in the job directory: one "KIND ATTEMPT" line per alert sent successfully
+# In the job directory: alerts.sent holds one "KIND ATTEMPT" key per warning sent, alerts.owed one
+# "KEY<TAB>FAILED SENDS<TAB>TITLE<TAB>MESSAGE" line per warning raised and not sent (kept once dropped).
+pi_alerts_sent=alerts.sent pi_alerts_owed=alerts.owed
+pi_alert_send_limit=48   # failed sends before an owed warning is dropped: about two days of hourly checks
 # deferred_pi_state.STATE_RECORDS: a record without kind/host beside any of them is an untrusted vanpi job.
 pi_state_records=(remote-run.json launching.json launch-unknown.json remote-failed.json report-checks.json)
 pi_launcher=$HOME/.claude/skills/pi-agent/pi_agent.py   # deferred_pi_remote.LAUNCHER, for alert text
@@ -53,14 +59,40 @@ pi_recovery() {  # how to check and stop the attempt by hand
   fi
 }
 
-pi_alert_once() {  # DIR KIND TITLE MESSAGE: one alert per kind and attempt; one not sent is tried at the next check
-  local file=$1/$pi_alerts key="$2 $(pi_attempt)"
-  local -a sent
-  [[ -f $file ]] && sent=("${(@f)$(<$file)}")
-  (( ${sent[(Ie)$key]} )) && return 0
-  # Recorded only once sent, so an unreachable notifier adds nothing here.
-  if send_alert $3 $4; then print -r -- $key >> $file; fi
-  return 0
+pi_alert_once() {  # DIR KIND TITLE MESSAGE: owes one warning per kind and attempt; pi_send_owed sends it
+  # An attempt not launched yet has no id: its launch window names it, and retry or run-now renews that.
+  local dir=$1 key="$2 ${$(pi_attempt):-window-$(give_up_stamp)}" line
+  local -a known
+  [[ -f $dir/$pi_alerts_sent ]] && known=("${(@f)$(<$dir/$pi_alerts_sent)}")
+  [[ -f $dir/$pi_alerts_owed ]] && for line in "${(@f)$(<$dir/$pi_alerts_owed)}"; do known+=(${line%%$'\t'*}); done
+  (( ${known[(Ie)$key]} )) && return 0
+  print -r -- "$key"$'\t'0$'\t'"${3//[$'\t\n']/ }"$'\t'"${4//[$'\t\n']/ }" >> $dir/$pi_alerts_owed
+}
+
+pi_send_owed() {  # DIR: sends each warning the job still owes; marks it sent only after a send succeeds
+  local dir=$1 owed=$1/$pi_alerts_owed line key fails
+  local -a fields sent kept
+  [[ -f $owed ]] || return 0
+  [[ -f $dir/$pi_alerts_sent ]] && sent=("${(@f)$(<$dir/$pi_alerts_sent)}")
+  for line in "${(@f)$(<$owed)}"; do
+    fields=("${(@ps:\t:)line}")
+    key=$fields[1] fails=$fields[2]
+    (( ${sent[(Ie)$key]} )) && continue   # sent before a crash rewrote this file
+    [[ $fails == <-> && ${#fields} -eq 4 ]] || { log_line "dropped a malformed owed warning for ${dir:t}"; continue }
+    if (( fails < pi_alert_send_limit )); then
+      if send_alert $fields[3] $fields[4]; then print -r -- $key >> $dir/$pi_alerts_sent; continue; fi
+      fails=$(( fails + 1 ))
+      (( fails < pi_alert_send_limit )) ||
+        log_line "dropped warning for ${dir:t} after $fails failed sends: $fields[3]"
+    fi
+    kept+=("$key"$'\t'$fails$'\t'$fields[3]$'\t'$fields[4])   # a dropped one stays, so it is never raised again
+  done
+  if (( ${#kept} )); then
+    print -rl -- $kept > $owed.tmp
+    /bin/mv -f -- $owed.tmp $owed
+  else
+    /bin/rm -f -- $owed
+  fi
 }
 
 pi_collect() {  # DIR MODE: one collect-only pass
@@ -100,12 +132,12 @@ pi_unlaunched() {  # DIR MODE RC [collect]: the pass left nothing on record
   local dir=$1 mode=$2 rc=$3
   if (( rc == 0 )); then
     # Success with nothing launched and nothing delivered: the job's `run` is broken.
+    [[ $mode != scheduled ]] || pi_alert_once $dir collector "Deferred job collector failed: ${dir:t}" \
+      "Its vanpi pass exited 0 but recorded no launch and delivered no report (see $dir/last.log). Nothing starts a run until you retry or run-now it in Mac Panel (macpanel)."
     job[state]=failed
     clear_not_ready
     save_job $dir
     log_line "${${mode:#scheduled}:+manual }collector failed ${dir:t}: exit 0 with nothing on record for vanpi; output in $dir/last.log"
-    [[ $mode != scheduled ]] || alert "Deferred job collector failed: ${dir:t}" \
-      "Its vanpi pass exited 0 but recorded no launch and delivered no report (see $dir/last.log). Nothing starts a run until you retry or run-now it in Mac Panel (macpanel)."
   elif [[ -n ${4-} ]]; then
     log_line "${${mode:#scheduled}:+manual }nothing to collect for ${dir:t}"
   elif [[ $mode == scheduled && ! $(strftime $stamp_format $EPOCHSECONDS) < $(give_up_stamp) ]]; then
@@ -150,30 +182,35 @@ pi_undelivered() {  # DIR MODE RC: the run finished and its report is saved, but
 
 pi_ended() {  # DIR MODE: the attempt ended badly, or its launch is unknown; the job waits for a person
   local dir=$1 mode=$2 what
-  job[state]=failed
-  clear_not_ready
-  save_job $dir
   if [[ $pi[state] == launch-unknown ]]; then
     what="Its launch with token $pi[token] could not be found on vanpi, so it may be running there"
   else
     what="Its vanpi run $(pi_attempt) ended badly ($pi[failure_kind])"
   fi
-  log_line "${${mode:#scheduled}:+manual }failed ${dir:t}: ${what:l}; output in $dir/last.log"
   [[ $mode != scheduled ]] || pi_alert_once $dir ended "Deferred job failed: ${dir:t}" \
     "$what. Nothing starts another run until you retry or run-now (deferred.zsh list --json shows whether --relaunch is needed: relaunch_id). $(pi_recovery) Job kept at $dir (see last.log); review it in Mac Panel (macpanel)."
+  job[state]=failed
+  clear_not_ready
+  save_job $dir
+  log_line "${${mode:#scheduled}:+manual }failed ${dir:t}: ${what:l}; output in $dir/last.log"
 }
 
 pi_window_closed() {  # DIR: an unlaunched job past its give-up time fails without launching
   local give_up=$(give_up_stamp)
+  pi_alert_once $1 gave-up "Deferred job gave up: ${1:t}" \
+    "Its give-up time ${give_up/T/ } passed before it could launch on vanpi, so nothing was started. Job kept at $1; retry or run-now it in Mac Panel (macpanel)."
   job[state]=failed
   clear_not_ready
   save_job $1
   log_line "failed ${1:t}: its give-up time $give_up passed before it launched on vanpi; nothing was started"
-  alert "Deferred job gave up: ${1:t}" \
-    "Its give-up time ${give_up/T/ } passed before it could launch on vanpi, so nothing was started. Job kept at $1; retry or run-now it in Mac Panel (macpanel)."
 }
 
-pi_check() {  # DIR NOW: the checker's turn for a vanpi job whose record is trusted
+pi_check() {  # DIR NOW: the checker's turn for a vanpi job whose record is trusted, then the warnings it owes
+  pi_check_turn $1 $2
+  [[ ! -d $1 ]] || pi_send_owed $1   # a delivered job is gone, and with it anything it owed
+}
+
+pi_check_turn() {  # DIR NOW
   local dir=$1
   if ! pi_snapshot $dir; then
     flag_invalid $dir "Its vanpi run state cannot be read (cancel --abandon removes it)"

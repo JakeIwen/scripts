@@ -1,9 +1,12 @@
 """`deferred.zsh` vanpi jobs: what a job still owes after a pass. A launch a
 person authorized with retry or run-now that was not ready yet waits as pending
-for the checker, which starts it once. Fake pi_agent.py and ssh as in
-deferred_pi_fixture.
+for the checker, which starts it once; a scheduled warning ntfy could not take
+is sent at a later check, a bounded number of times. Fake pi_agent.py and ssh
+as in deferred_pi_fixture.
 """
 from macbook.tests.deferred_pi_fixture import PiHarness
+
+OWED_SEND_LIMIT = 48  # deferred_pi_schedule.zsh pi_alert_send_limit: about two days of hourly checks
 
 
 class AuthorizedLaunchWaitsTests(PiHarness):
@@ -67,3 +70,64 @@ class AuthorizedLaunchWaitsTests(PiHarness):
         self.deferred("run-due")
         self.assertEqual(len(self.calls("run")), 2)  # the first run and the refused one; nothing more
 
+
+class OwedWarningTests(PiHarness):
+    def assert_sent_later_exactly_once(self, title):
+        self.assertEqual(self.alerts(), [])
+        self.assertIn(f"warning undelivered: {title}", self.scheduler_log())
+        self.warnings_down(False)
+        self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [title])
+
+    def test_a_failed_run_warning_the_notifier_missed_is_sent_at_a_later_check(self):
+        self.control("next-state", "done")
+        self.control("next-exit", "1")
+        job = self.add_pi()
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assertEqual(self.meta(job)["state"], "failed")
+        self.assert_sent_later_exactly_once(f"Deferred job failed: {job.name}")
+
+    def test_a_held_launch_warning_the_notifier_missed_is_sent_at_a_later_check(self):
+        self.control("launch-mode", "lost-nothing")
+        job = self.add_pi()
+        self.deferred("run-due")
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assertEqual((self.meta(job)["state"], self.listed(job)["remote_state"]), ("failed", "launch-unknown"))
+        self.assert_sent_later_exactly_once(f"Deferred job failed: {job.name}")
+
+    def test_a_give_up_warning_the_notifier_missed_is_sent_at_a_later_check(self):
+        job = self.add_pi()
+        self.set_meta(job, give_up=f"{self.meta(job)['due'][:10]}T00:01")
+        self.warnings_down()
+        self.deferred("run-due")
+        self.assertEqual((self.meta(job)["state"], self.calls("run")), ("failed", []))
+        self.assert_sent_later_exactly_once(f"Deferred job gave up: {job.name}")
+
+    def test_an_owed_warning_is_dropped_after_the_bound_with_a_log_line(self):
+        self.control("next-state", "done")
+        self.control("next-exit", "1")
+        job = self.add_pi()
+        self.warnings_down()
+        self.deferred("run-due")
+        title = f"Deferred job failed: {job.name}"
+        for _ in range(OWED_SEND_LIMIT - 1):
+            self.deferred("run-due")
+        self.assertEqual(self.scheduler_log().count(f"warning undelivered: {title}"), OWED_SEND_LIMIT)
+        self.assertIn(f"dropped warning for {job.name} after {OWED_SEND_LIMIT} failed sends: {title}",
+                      self.scheduler_log())
+        self.warnings_down(False)
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [])
+        self.assertEqual(self.scheduler_log().count(f"warning undelivered: {title}"), OWED_SEND_LIMIT)
+
+    def test_run_now_reports_its_failure_at_the_terminal_and_owes_no_warning(self):
+        self.control("next-state", "done")
+        self.control("next-exit", "1")
+        job = self.add_pi()
+        self.assertEqual(self.deferred("run-now", job.name, check=False).returncode, 3)
+        self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [])

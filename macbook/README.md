@@ -367,15 +367,17 @@ per run (a job with nothing on record also fails and waits for a person). A fail
 it (a crash between the two) is accounted at the next check instead of
 launching again.
 
-The scheduler also owns the alerts, one per kind and attempt (`alerts.sent` in
-the job directory records an alert only after it was sent, so a warning ntfy
-could not take is retried at the next check, and a notifier that stays
-unreachable adds nothing there but a `warning undelivered` line in
-`deferred.log` per check): a failed or held run, a job that gave up before launching,
-a collector pass that did not settle a run it owns, whatever its exit status, or
-a run file that cannot start (it keeps the run and every check tries again until
-the collection deadline), and a
-finished run whose report could not be delivered. That last job stays `pending`
+The scheduler also owns the alerts, one per kind and attempt: a failed or held
+run, a job that gave up before launching, a collector pass that did not settle a
+run it owns, whatever its exit status, or a run file that cannot start (it keeps
+the run and every check tries again until the collection deadline), and a
+finished run whose report could not be delivered. A warning is owed from the
+moment the checker raises it (`alerts.owed` in the job directory), whatever
+becomes of the job's state, and every later check sends what is still owed;
+only a successful send moves it to `alerts.sent`. Each failed send adds a
+`warning undelivered` line to `deferred.log`; after 48 failed sends (about two
+days of hourly checks) the warning is dropped with a `dropped warning` line
+there. A failure `run-now` reports at the terminal raises no warning. That last job stays `pending`
 with its report saved, resends it at every check and never touches the Pi again:
 the report itself has the saved-report guarantee (at least once), while a
 failure warning is only retried until one send succeeds.
