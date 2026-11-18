@@ -21,7 +21,7 @@ from resources_adapter import SNAPSHOT_TTL, ResourcesAdapter, health
 from resources_fixtures import (PANEL_PID, PANEL_ROW, STARTED, ArgvRunner, FakeMetrics, FakeReader,
                                 make_table)
 from sampler import CADENCES, samples
-from signal_policy import SignalPolicy
+from signal_policy import TREE_TOO_LARGE, SignalPolicy
 from system_metrics import (DISK_PATH, PMSET, SYSCTL, VM_STAT, Pressure, Probe, SystemFacts,
                             SystemMetrics, Thermal, memory_split)
 
@@ -246,6 +246,22 @@ class AdapterReadTests(AdapterFixture):
         self.assertEqual((process['name'], process['group'], process['user']),
                          ('zsh', None, process['user']))
         self.assertIsNotNone(process['blocked'])
+
+    def test_a_session_over_the_size_cap_offers_no_tree_action_the_post_would_refuse(self):
+        # The root, its tool and 47 helpers: 49 processes, one over the cap.
+        helpers = [(1000 + index, 200, 'sleep 60') for index in range(47)]
+        self.reader = FakeReader(make_table(*WORLD, *helpers))
+        adapter = self.adapter()
+        group = next(g for g in adapter.read()['groups'] if g['id'] == 'claude:200')
+        self.assertEqual(group['count'], 49)
+        self.assertEqual(group['tree_blocked'], TREE_TOO_LARGE)
+        with self.assertRaises(ApiError) as caught:
+            adapter.mutate({'action': 'terminate', 'pid': 200, 'started': STARTED, 'scope': 'tree',
+                            'confirmed': True})
+        self.assertEqual((caught.exception.status, str(caught.exception)), (403, TREE_TOO_LARGE))
+        del self.reader.rows[1046]
+        self.assertIsNone(next(g for g in self.adapter().read()['groups']
+                               if g['id'] == 'claude:200')['tree_blocked'])
 
     def test_every_process_is_listed_busiest_first_so_an_idle_one_can_be_found_by_name(self):
         busy = [(1000 + n, 1, f'/usr/bin/busy{n}', {'cpu': 50.0 + n, 'rss_kb': 100000 + n}) for n in range(100)]

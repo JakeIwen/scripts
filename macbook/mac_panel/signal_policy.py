@@ -19,6 +19,13 @@ class Scope(str, Enum):
     TREE = 'tree'
 
 
+# A whole-tree action re-reads the full table once per target (about 80 ms each), so the
+# tree is capped; the same decision fills `tree_blocked` and authorizes the request.
+TREE_TARGET_LIMIT = 48
+TREE_TOO_LARGE = (f'More than {TREE_TARGET_LIMIT} processes in this session; '
+                  'end parts of it first')
+
+
 SYSTEM_PROTECTED = frozenset(('launchd', 'loginwindow', 'WindowServer', 'Dock', 'Finder',
                               'SystemUIServer', 'ControlCenter', 'NotificationCenter',
                               'coreaudiod', 'cfprefsd', 'runningboardd', 'tccd'))
@@ -132,14 +139,19 @@ def nested_reason(names) -> str:
     return f"Contains nested sessions ({', '.join(names)}); end those first"
 
 
+def tree_size_reason(group) -> str | None:
+    return TREE_TOO_LARGE if len(group.members) > TREE_TARGET_LIMIT else None
+
+
 def tree_blocked(policy: SignalPolicy, group, context: PolicyContext, names=None) -> str | None:
     """Why a group has no whole-tree action, or None for a session tree that may be ended.
 
     A session with another session nested inside it is refused as a whole, so the count a
-    confirmation shows is always the set of processes that would be signalled.
+    confirmation shows is always the set of processes that would be signalled. The snapshot,
+    the request and every re-check ask this one function.
     """
     reason = policy.blocked(group.root, group.kind, Scope.TREE, context)
     if reason or not group.nested:
-        return reason
+        return reason or tree_size_reason(group)
     names = names or {}
     return nested_reason([names.get(gid, gid) for gid in group.nested])

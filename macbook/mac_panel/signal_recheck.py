@@ -15,16 +15,13 @@ from process_table import TABLE_TIMEOUT, ProcessRow
 from resource_groups import SESSION_KINDS, build_grouping
 from signal_policy import Scope, tree_blocked
 
-# A whole-tree action re-reads the full table once per target (about 80 ms each), so the
-# tree is capped and the whole mutation has a time bound.
-TREE_TARGET_LIMIT = 48
+# Each target costs a full table read, so the whole mutation has a time bound.
 MUTATION_BUDGET = 8.0
 
 STOPPED_TIME = 'Stopped at the time limit before every process was handled; refresh and retry'
 STOPPED_UNREADABLE = 'The process table could not be read again; nothing more was signalled'
 STOPPED_ROOT = 'The session root exited or changed; nothing more was signalled'
 STOPPED_NESTED = 'A session started inside this one; nothing more was signalled'
-STOPPED_TOO_LARGE = 'The session grew past the size limit; nothing more was signalled'
 
 
 class Action(str, Enum):
@@ -109,8 +106,6 @@ def session_halt(policy, plan, fresh, grouping, context) -> Halt | None:
         return Halt(Outcome.CHANGED, STOPPED_ROOT)
     if group.nested:
         return Halt(Outcome.CHANGED, STOPPED_NESTED)
-    if len(group.members) > TREE_TARGET_LIMIT:
-        return Halt(Outcome.CHANGED, STOPPED_TOO_LARGE)
     reason = tree_blocked(policy, group, context)
     return Halt(Outcome.CHANGED, reason) if reason else None
 

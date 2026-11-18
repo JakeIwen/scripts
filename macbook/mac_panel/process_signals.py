@@ -15,7 +15,7 @@ import time
 from panel_contracts import ApiError, SignalResult
 from resource_groups import SESSION_KINDS, build_grouping
 from signal_policy import Scope, SignalPolicy, tree_blocked
-from signal_recheck import (MUTATION_BUDGET, TREE_TARGET_LIMIT, Action, Halt, Outcome, Plan,
+from signal_recheck import (MUTATION_BUDGET, Action, Halt, Outcome, Plan,
                             SignalRequest, Target, ordered, verify)
 from wire_validation import confirm, field, object_fields
 
@@ -26,8 +26,6 @@ NICE_FLOOR = 10
 ACTION_SIGNALS = {Action.TERMINATE: signal.SIGTERM, Action.KILL: signal.SIGKILL,
                   Action.PAUSE: signal.SIGSTOP, Action.RESUME: signal.SIGCONT}
 NOT_A_SESSION_ROOT = 'Whole-tree actions apply only to a session root process'
-TREE_TOO_LARGE = (f'More than {TREE_TARGET_LIMIT} processes in this session; '
-                  'end parts of it first')
 
 
 def parse_request(body) -> SignalRequest:
@@ -78,8 +76,6 @@ class ProcessSignaller:
         reason = tree_blocked(self.policy, group, context)
         if reason:
             raise ApiError(403, reason)
-        if len(group.members) > TREE_TARGET_LIMIT:
-            raise ApiError(403, TREE_TOO_LARGE)
         targets, skipped = [Target(row, 0)], 0
         for member in group.members[1:]:
             if self.policy.blocked(member.row, group.kind, Scope.TREE, context):

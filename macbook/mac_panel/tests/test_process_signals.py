@@ -11,11 +11,11 @@ from unittest import mock
 
 from cli_runner import CliRunner
 from panel_contracts import ApiError
-from process_signals import NICE_FLOOR, TREE_TOO_LARGE, ProcessSignaller
+from process_signals import NICE_FLOOR, ProcessSignaller
 from process_table import ProcessReader
 from resources_adapter import ResourcesAdapter
 from resources_fixtures import LATER, PANEL_PID, PANEL_ROW, STARTED, FakeReader, make_table
-from signal_policy import SHELL, SignalPolicy
+from signal_policy import SHELL, TREE_TOO_LARGE, SignalPolicy
 from signal_recheck import (MUTATION_BUDGET, STOPPED_NESTED, STOPPED_ROOT, STOPPED_TIME,
                             STOPPED_UNREADABLE)
 
@@ -241,7 +241,7 @@ class SignalTests(unittest.TestCase):
         self.assertEqual(result, counts(applied=1, skipped=3, stopped=STOPPED_TIME))
 
     def test_a_tree_above_the_size_cap_is_refused(self):
-        with mock.patch('process_signals.TREE_TARGET_LIMIT', 3):
+        with mock.patch('signal_policy.TREE_TARGET_LIMIT', 3):
             self.assertStatus(403, body(200, scope='tree'))
         self.assertIn('processes in this session', TREE_TOO_LARGE)
 
