@@ -77,8 +77,6 @@ def health(facts: SystemFacts, table: ProcessTable) -> ResourcesHealth:
     if disk and disk['total'] and disk['free'] / disk['total'] < DISK_WARN_FRACTION:
         levels.append(Level.WARN)
         reasons.append(f"Disk has {disk['free'] / disk['total']:.0%} free")
-    if table.malformed:
-        reasons.append(f'{table.malformed} process rows could not be read')
     unavailable = list(facts.unavailable)
     if pressure is None and Probe.PRESSURE.value not in unavailable:
         unavailable.append(Probe.PRESSURE.value)

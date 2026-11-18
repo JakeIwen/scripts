@@ -1,4 +1,5 @@
 """Resources reads: probes, memory estimate, health, shared snapshot, session names, history."""
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -161,6 +162,13 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(low['level'], 'warn')
         self.assertIn('9% free', low['reasons'][0])
         self.assertEqual(self.level({}, ['pressure'])['level'], 'unknown')
+
+    def test_rows_lost_between_ps_passes_are_not_a_health_reason(self):
+        # A table that passed the usable-table check has only the few rows that start or
+        # exit between passes missing; reporting them would be a permanent Overview item.
+        table = dataclasses.replace(make_table(), malformed=2)
+        ok = {Probe.PRESSURE: Pressure.NORMAL, Probe.DISK: {'total': 100, 'free': 50}}
+        self.assertEqual(health(SystemFacts(ok, []), table)['reasons'], [])
 
     def test_unknown_pressure_stays_visible_under_a_stronger_warning(self):
         # Precedence is error > warn > unknown > ok, and the unknown probe is still reported.
