@@ -343,9 +343,13 @@ handled, the reply's `stopped` is `{code, text}` with code `time-limit`, `sessio
 Command lines never leave the backend. A display name is the program's base name plus a
 script name or `-m module`, only when the arguments parse with confidence against that
 interpreter's own flag table (`process_invocation.py`; an interpreter without one, such as
-fish, shows the bare program), never an option or an argument value. argv[0] with spaces is
-shown only when the kernel's name begins it (`Google Chrome Helper (Renderer)`); otherwise
-the kernel's name stands in. Compute job rows are named `job · <program>`. A session's
+fish, shows the bare program), never an option or an argument value. argv[0] with
+whitespace may be a title carrying arguments, so none of it is shown: the program is the
+base name of the file the kernel says the process is running (`proc_pidpath`, in
+`executable_name.py`; `Google Chrome Helper (Renderer)`), believed only when the kernel's
+short name begins it, and otherwise the kernel's short name (16 characters). At most
+`EXECUTABLE_LOOKUP_LIMIT` (256) lookups run per table read; the full path never leaves the
+backend. Compute job rows are named `job · <program>`. A session's
 `name_source` (`registry`, `rollout-open`, `rollout-time` or `fallback`) says how its name
 was established: `rollout-open` needs exactly one rollout-like open file, an exact rollout
 file name inside `~/.codex/sessions`; a Codex name matched only by start time is a guess,

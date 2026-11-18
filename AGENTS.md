@@ -448,11 +448,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   and the declared actions by fixed argv. Its Logs section (`logs_adapter.py`,
   `static/section_logs.mjs`) relays `macbook/scripts/log_rotate.py` and reads sizes and paths only. Its Resources
   section runs without sudo: `resources_adapter.py` (single-flight snapshot, `GET`/`POST /api/resources`),
-  `process_table.py` (ps parse, `display_name`), `process_invocation.py` (script or `-m` module read from
+  `process_table.py` (ps parse, `display_name`), `executable_name.py` (`proc_pidpath` base name for a
+  process whose argv[0] is a title), `process_invocation.py` (script or `-m` module read from
   arguments only when they parse with confidence), `system_metrics.py`, `llm_sessions.py` (Claude registry
   `~/.claude/sessions/<pid>.json`, Codex rollout/index naming, `NameSource`), `resource_groups.py` (kinds and
-  membership), `process_roles.py` (session, Codex app-server, infra, compute and shell roles for safety:
-  liberal matching, an unsure parse protects), `signal_policy.py` (the one allow decision; protected by argv[0] and kernel name),
+  membership; every Codex process roots its own group), `process_roles.py` (session, Codex, infra, compute and shell
+  roles for safety: infra and compute by substring, an unsure parse protects), `signal_policy.py` (the one allow decision; protected by argv[0] and kernel name),
   `process_hosting.py` (outside processes with a terminal or LLM root beneath them are blocked),
   `signal_recheck.py` (before each signal, a fresh table and a fresh decision; `MUTATION_BUDGET`,
   `StopCode` and the reply's `stopped`; the tree-size cap is `signal_policy.TREE_TARGET_LIMIT`) and `process_signals.py` (the mutate executor), and the page modules

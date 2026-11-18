@@ -8,15 +8,18 @@ a script's base name or `-m module` when `process_invocation` can parse it with 
 The executable is never guessed from the flattened command line and nothing is looked up
 on disk. Two extra `ps` passes give argv[0] (`comm`, the real boundary of the first argument,
 spaces included) and the kernel's own short process name (`ucomm`, set at exec from the file
-that was run). Each pass carries `lstart`, so rows join only on the same (pid, start).
+that was run). Each pass carries `lstart`, so rows join only on the same (pid, start). When
+argv[0] contains whitespace it may be a title carrying arguments, so none of it is shown:
+the kernel is asked for the running file's base name instead (`executable_name`).
 """
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import cached_property
 import os
 import time
 
+from executable_name import executable_name
 from panel_contracts import ApiError
 from process_invocation import SAFE_NAME, SAFE_PATH, Invocation, invocation, invocation_detail
 
@@ -40,6 +43,9 @@ KERNEL_NAME_LIMIT = 16
 # table with more than this share (beyond the allowance) unreadable is a failed read.
 MALFORMED_SHARE = 0.05
 MALFORMED_ALLOWANCE = 10
+# Kernel executable-name lookups per table read (about 20 µs each); rows beyond the cap
+# show the kernel's short name. About 80 rows need one on this Mac (2026-11-18).
+EXECUTABLE_LOOKUP_LIMIT = 256
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,8 @@ class ProcessRow:
     executable: str = field(repr=False)
     # The kernel's process name (`ucomm`), at most KERNEL_NAME_LIMIT characters.
     kernel_name: str = ''
+    # The running file's base name from the kernel; looked up only when argv[0] has whitespace.
+    executable_file: str = ''
 
     @cached_property
     def arguments_text(self) -> str:
@@ -74,7 +82,7 @@ class ProcessRow:
 
     @cached_property
     def exe(self) -> str:
-        return program_name(self.executable, self.kernel_name)
+        return program_name(self.executable, self.kernel_name, self.executable_file)
 
     @cached_property
     def invocation(self) -> Invocation:
@@ -85,18 +93,25 @@ class ProcessRow:
         return display_name(self)
 
 
-def program_name(argv0, kernel_name) -> str:
-    """The executable's base name from argv[0], or the kernel's name when argv[0] is a title.
+def has_whitespace(text) -> bool:
+    return any(char.isspace() for char in text.strip())
+
+
+def program_name(argv0, kernel_name, executable_file='') -> str:
+    """The executable's base name from argv[0], or from the kernel when argv[0] is a title.
 
     Without whitespace, argv[0] names the program: a path's base name or a plain word (`-zsh`
-    for a login shell). With whitespace it is usually a title the process gave itself
-    (`tmux: server`, `/usr/bin/worker --note x`), which can carry arguments, so the kernel's
-    name stands in for it, unless that name begins it (see `kernel_named`).
+    for a login shell). With whitespace it may be a title the process gave itself (`tmux:
+    server`, `Google Chrome Helper private draft`), which can carry anything, so none of it
+    is used: the running file's base name from the kernel stands in when the kernel's short
+    name begins it (which also rejects a lookup that reached a reused pid), else the short
+    name itself.
     """
     text = argv0.strip()
-    if any(char.isspace() for char in text):
-        base = os.path.basename(text.rstrip('/'))
-        return base if kernel_named(base, kernel_name) else kernel_name or '?'
+    if has_whitespace(text):
+        if kernel_name and executable_file[:KERNEL_NAME_LIMIT] == kernel_name:
+            return executable_file
+        return kernel_name or '?'
     if text.startswith('/'):
         return os.path.basename(text.rstrip('/')) or kernel_name or '?'
     plain = text[1:] if text.startswith('-') else text
@@ -105,20 +120,6 @@ def program_name(argv0, kernel_name) -> str:
     if SAFE_PATH.fullmatch(plain):
         return os.path.basename(plain)
     return kernel_name or '?'
-
-
-def kernel_named(base, kernel_name) -> bool:
-    """True when a base name with spaces is the name of the file that was really run.
-
-    The kernel keeps the first KERNEL_NAME_LIMIT characters of that file's name, which is how
-    `Google Chrome Helper (Renderer)` stays readable: a shorter kernel name must be the whole
-    base name, a full-length one its start, and no later word may look like an option.
-    """
-    if not kernel_name or not base.startswith(kernel_name):
-        return False
-    if len(kernel_name) < KERNEL_NAME_LIMIT and base != kernel_name:
-        return False
-    return not any(word.startswith('-') or '=' in word for word in base.split()[1:])
 
 
 def display_name(row) -> str:
@@ -289,11 +290,25 @@ def normal_started(text) -> str | None:
     return joined
 
 
+def with_executable_files(table: ProcessTable, lookup) -> ProcessTable:
+    """The table with each titled row's running file name, up to EXECUTABLE_LOOKUP_LIMIT."""
+    rows, looked_up = dict(table.rows), 0
+    for pid, row in table.rows.items():
+        if row.zombie or not has_whitespace(row.executable):
+            continue
+        if looked_up >= EXECUTABLE_LOOKUP_LIMIT:
+            break
+        looked_up += 1
+        if name := lookup(pid):
+            rows[pid] = replace(row, executable_file=name)
+    return ProcessTable(rows, table.malformed)
+
+
 class ProcessReader:
     """Whole-table reads through the panel's subprocess boundary."""
 
-    def __init__(self, runner, clock=time.monotonic):
-        self.runner, self.clock = runner, clock
+    def __init__(self, runner, clock=time.monotonic, executable_name=executable_name):
+        self.runner, self.clock, self.executable_name = runner, clock, executable_name
 
     def table(self, timeout=TABLE_TIMEOUT) -> ProcessTable:
         deadline = self.clock() + timeout
@@ -313,4 +328,4 @@ class ProcessReader:
         table = parse_table(*outputs)
         if not usable(table):
             raise ApiError(502, f'Process table unreadable ({table.malformed} malformed rows)')
-        return table
+        return with_executable_files(table, self.executable_name)

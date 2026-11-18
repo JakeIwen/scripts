@@ -3,8 +3,11 @@ import unittest
 
 from cli_runner import CommandResult
 from panel_contracts import ApiError
+from unittest import mock
+
+import process_table
 from process_table import (ARGV0_COMMAND, KERNEL_NAME_COMMAND, PS_ENV, TABLE_COMMAND,
-                           ProcessReader, display_name, normal_started, parse_table)
+                           ProcessReader, display_name, normal_started, parse_table, program_name)
 from resources_fixtures import STARTED, ArgvRunner, make_table, make_texts, name_line, ps_line
 
 
@@ -12,12 +15,21 @@ def row_for(command, **overrides):
     return make_table((10, 1, command, overrides)).rows[10]
 
 
-def reader_for(*specs, answers=None):
+def reader_for(*specs, answers=None, files=None):
+    """A reader over fake ps output; `files` answers the kernel executable-name lookup."""
     texts = make_texts(*specs)
     runner = ArgvRunner({argv: text + '\n' for argv, text in
                          zip((TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND), texts)})
     runner.answers.update(answers or {})
-    return ProcessReader(runner), runner
+    files = files or {}
+    looked_up = []
+
+    def lookup(pid):
+        looked_up.append(pid)
+        return files.get(pid)
+    reader = ProcessReader(runner, executable_name=lookup)
+    reader.looked_up = looked_up
+    return reader, runner
 
 
 class PsParsingTests(unittest.TestCase):
@@ -171,16 +183,50 @@ class DisplayNameTests(unittest.TestCase):
         for command, expected in cases.items():
             self.assertName(command, expected)
 
-    def test_a_path_title_with_spaces_is_not_trusted_unless_the_kernel_name_begins_it(self):
+    def test_a_title_with_spaces_is_never_shown(self):
         # A rewritten title that starts with a path still carries arguments after it.
         self.assertName('/usr/bin/worker --note plain-example', 'node',
                         argv0='/usr/bin/worker --note plain-example', ucomm='node')
         self.assertName('node --secret value', 'node', argv0='node --secret value', ucomm='node')
-        # The kernel keeps 16 characters of the real file name, so a long name with spaces stays.
-        helper = '/Applications/Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)'
-        self.assertName(f'{helper} --type=renderer', 'Google Chrome Helper (Renderer)', argv0=helper)
         self.assertName('Google Chrome Helper --token X', 'Google Chrome He',
                         argv0='Google Chrome Helper --token X', ucomm='Google Chrome He')
+
+    def test_finding2_a_full_length_kernel_name_does_not_authenticate_the_title(self):
+        # The reviewer's reproduction: positional text after a matching kernel prefix.
+        self.assertEqual(program_name('Google Chrome Helper private draft', 'Google Chrome He'),
+                         'Google Chrome He')
+        self.assertName('Google Chrome Helper private draft', 'Google Chrome He',
+                        argv0='Google Chrome Helper private draft', ucomm='Google Chrome He')
+
+    def test_finding2_the_kernel_supplies_the_real_file_name_for_a_titled_process(self):
+        helper = '/Applications/Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)'
+        reader, _ = reader_for(
+            (10, 1, f'{helper} --type=renderer', {'argv0': helper}),
+            (11, 1, 'Google Chrome Helper private draft',
+             {'argv0': 'Google Chrome Helper private draft', 'ucomm': 'Google Chrome He'}),
+            (12, 1, 'tmux: server', {'argv0': 'tmux: server', 'ucomm': 'tmux'}),
+            # A lookup that reached a reused pid names another program: not believed.
+            (13, 1, 'ssh: /Users/me/.ssh/sock [mux]', {'argv0': 'ssh: /Users/me/.ssh/sock [mux]', 'ucomm': 'ssh'}),
+            (14, 1, '/usr/bin/plain --flag'),
+            files={10: 'Google Chrome Helper (Renderer)', 11: 'Google Chrome Helper (GPU)', 13: 'other'})
+        table = reader.table()
+        names = {pid: row.name for pid, row in table.rows.items()}
+        self.assertEqual(names, {10: 'Google Chrome Helper (Renderer)', 11: 'Google Chrome Helper (GPU)',
+                                 12: 'tmux', 13: 'ssh', 14: 'plain'})
+        # Only rows whose argv[0] has whitespace are looked up.
+        self.assertEqual(sorted(reader.looked_up), [10, 11, 12, 13])
+        for row in table.rows.values():
+            self.assertNotIn('private', row.name)
+            self.assertNotIn('/', row.name)
+
+    def test_executable_lookups_are_capped_per_table(self):
+        specs = [(20 + i, 1, f'title {i} words', {'argv0': f'title {i} words', 'ucomm': 'worker'})
+                 for i in range(5)]
+        reader, _ = reader_for(*specs, files={20 + i: 'worker' for i in range(5)})
+        with mock.patch.object(process_table, 'EXECUTABLE_LOOKUP_LIMIT', 3):
+            table = reader.table()
+        self.assertEqual(len(reader.looked_up), 3)
+        self.assertEqual({row.name for row in table.rows.values()}, {'worker'})
 
     def test_each_shell_parses_only_its_own_flags(self):
         # fish `-p` writes a profile to the path after it; fish has no table, so no detail.
