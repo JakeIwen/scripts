@@ -6,6 +6,8 @@ import {action, refresh} from './panel_sections.mjs';
 import {stageAction} from './search_actions.mjs';
 import {JOBS_COPY} from './section_copy.mjs';
 import {addJobForm} from './section_deferred_add.mjs';
+import {addAgentForm} from './section_deferred_agent.mjs';
+import {LAUNCH_UNKNOWN, agentTags, relaunchConfirm, remoteRows} from './deferred_agent_job.mjs';
 import {readyDetails, stateLabel} from './section_deferred_ready.mjs';
 import {Level, status, worst} from './status_cell.mjs';
 import {latestTask, resumeTasks, taskLine, watchTask} from './task_receipt.mjs';
@@ -16,6 +18,8 @@ const COPY = JOBS_COPY.deferred;
 const jobAnchor = job => `deferred-${job.id}`;
 const dueSeconds = job => parseStamp(job.due) / 1000;
 let scheduleRange = '7d';
+// Jobs whose cancel the CLI refused because a Pi run may be active; only they offer Abandon.
+const abandonable = new Set();
 
 function apply(job, kind, extra = {}, options = {}) {
   return action(SECTION, '/api/deferred', {action: kind, id: job.id, ...extra}, options);
@@ -33,7 +37,7 @@ function checkerLine(checker) {
 function jobDetails(job) {
   const body = node('div');
   body.append(kv([['Created', timeWithAbsolute(job.created)], ['Origin', job.origin],
-    ['Timeout', `${job.timeout} s`], ['Attempts', `${job.attempts}/${job.max_attempts}`], ['Id', job.id]]));
+    ['Timeout', `${job.timeout} s`], ['Attempts', `${job.attempts}/${job.max_attempts}`], ...remoteRows(job), ['Id', job.id]]));
   if (job.last_log) body.append(node('div', 'Last log', 'muted small'), node('pre', job.last_log));
   return details('Details', body, `job-${job.id}`);
 }
@@ -54,14 +58,28 @@ function rescheduleEditor(job, cell) {
   input.focus();
 }
 
+function cancelButtons(job) {
+  const refused = error => { if (error.code === 'remote-active') abandonable.add(job.id); };
+  const cancel = button('Cancel job', () => apply(job, 'cancel', {confirmed: true}, {onError: refused}),
+    {confirm: confirmText(`cancel ${job.name}`), key: `cancel-${job.id}`});
+  if (!abandonable.has(job.id)) return [cancel];
+  const abandon = button('Abandon job', () => apply(job, 'cancel', {confirmed: true, abandon: true}),
+    {confirm: confirmText(COPY.agent.abandon), key: `abandon-${job.id}`});
+  return [cancel, abandon, info(COPY.agent.abandonInfo)];
+}
+
 function jobActions(job) {
   const cell = node('div', null, 'actions');
   cell.append(button('Run now', () => apply(job, 'run-now', {confirmed: true}, {after: receipt => watchTask(SECTION, receipt, job.name)}),
-    {confirm: confirmText(`run ${job.name} now`), key: `run-${job.id}`}));
-  if (job.state === 'failed') cell.append(button('Retry', () => apply(job, 'retry'), {key: `retry-${job.id}`}));
+    {confirm: relaunchConfirm(job, `run ${job.name} now`), key: `run-${job.id}`}));
+  if (job.state === 'failed') {
+    // Only an unknown launch arms Retry: it may start a second Pi run.
+    const unknown = job.remote_state === LAUNCH_UNKNOWN;
+    cell.append(button('Retry', () => apply(job, 'retry', unknown ? {confirmed: true} : {}),
+      {confirm: relaunchConfirm(job), key: `retry-${job.id}`}));
+  }
   cell.append(button('Reschedule…', () => rescheduleEditor(job, cell), {key: `reschedule-${job.id}`}));
-  cell.append(button('Cancel job', () => apply(job, 'cancel', {confirmed: true}),
-    {confirm: confirmText(`cancel ${job.name}`), key: `cancel-${job.id}`}));
+  cell.append(...cancelButtons(job));
   return cell;
 }
 
@@ -73,6 +91,8 @@ function jobCard(job, tasks) {
   const failed = job.state === 'failed';
   const body = node('div');
   body.append(status(failed ? Level.ERROR : Level.IDLE, stateLabel(job), `${job.attempts}/${job.max_attempts} attempts`));
+  const tags = agentTags(job);
+  if (tags) body.append(tags);
   if (job.description) body.append(node('p', job.description));
   body.append(kv([['Due', timeWithAbsolute(job.due)]]));
   const task = latestTask(tasks, job.id);
@@ -112,7 +132,8 @@ function scheduleBlock(jobs) {
 export function render(data) {
   const root = node('div');
   const checker = checkerLine(data.checker);
-  root.append(checker.line, addJobForm());
+  root.append(checker.line, addJobForm(), addAgentForm());
+  [...abandonable].forEach(id => { if (!data.jobs.some(job => job.id === id)) abandonable.delete(id); });
   const valid = data.jobs.filter(job => job.valid);
   if (valid.length) root.append(scheduleBlock(valid));
   if (!data.jobs.length) root.append(emptyState(COPY.empty));
@@ -133,7 +154,9 @@ export function render(data) {
 export function searchItems(data) {
   const add = {title: 'Add a deferred job', subtitle: 'Queue a one-off future job', keywords: ['deferred', 'schedule', 'new', 'create'],
     anchor: 'add-job'};
-  return [add, ...data.jobs.filter(job => job.valid).map(job => ({
+  const addAgent = {title: 'Add an agent job', subtitle: 'Queue a headless agent prompt on this Mac or vanpi',
+    keywords: ['deferred', 'agent', 'claude', 'pi', 'vanpi', 'prompt', 'follow-up'], anchor: 'add-agent-job'};
+  return [add, addAgent, ...data.jobs.filter(job => job.valid).map(job => ({
     title: job.name, subtitle: `deferred · due ${job.due}`, keywords: ['deferred', 'job', job.description, job.id],
     anchor: jobAnchor(job),
     actions: [{label: 'Run now', run: () => stageAction(SECTION, jobAnchor(job), `run-${job.id}`, {arm: true})}],
@@ -147,6 +170,9 @@ export function attentionItems(data) {
   data.jobs.forEach(job => {
     if (!job.valid) items.push({level: Level.ERROR, text: `${job.id} is an invalid job`, anchor: jobAnchor(job)});
     else if (job.state === 'failed') items.push({level: Level.ERROR, text: `${job.name} failed`, anchor: jobAnchor(job)});
+    else if (job.remote_state === LAUNCH_UNKNOWN) {
+      items.push({level: Level.WARN, text: `${job.name}: its Pi launch could not be found`, anchor: jobAnchor(job)});
+    }
   });
   return items;
 }

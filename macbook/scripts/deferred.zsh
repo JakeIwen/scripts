@@ -43,15 +43,21 @@ not_ready_status=75     # a job's own "condition not met yet" exit status
 run_now_not_ready=4     # run-now's exit status for it (75 there means the lock is busy)
 default_give_up_seconds=$(( 7 * 86400 ))
 agent_template=$repo/macbook/scripts/deferred_agent_run.zsh
+agent_notify=$repo/macbook/scripts/deferred_agent_notify.zsh
+pi_template=$repo/macbook/scripts/deferred_pi_run.py
+agent_hosts=(mac vanpi)   # where an add-agent job runs its prompt
+pi_tiers=(astra sol luna) # pi_agent.py --agent values; a vanpi job's --model
+refused_status=6          # cancel: a vanpi run may still be active (--abandon overrides)
 typeset -A job          # the record load_job last read
 typeset run_job_status=0 run_job_not_ready=0
 
 usage() {
   print -u2 -- "usage: ${script:t} add [--attempts N] [--timeout SECONDS] [--give-up DUE] [--file PATH]... DUE NAME SCRIPT [DESCRIPTION]
-       ${script:t} add-agent [--ready CMD] [--model M] [--effort E] [--topic-var VAR] [--cwd DIR]
-                  [--attempts N] [--timeout SECONDS] [--give-up DUE] DUE NAME PROMPT_FILE [DESCRIPTION]
+       ${script:t} add-agent [--host mac|vanpi] [--ready CMD] [--model M] [--effort E] [--topic-var VAR]
+                  [--cwd DIR] [--run-timeout MINUTES] [--attempts N] [--timeout SECONDS] [--give-up DUE]
+                  DUE NAME PROMPT_FILE|vanpi:/PATH [DESCRIPTION]
        ${script:t} list [--json]
-       ${script:t} cancel JOB | retry JOB | run-now JOB | reschedule JOB DUE
+       ${script:t} cancel [--abandon] JOB | retry JOB | run-now JOB | reschedule JOB DUE
        ${script:t} status | run-due | watchdog | install | uninstall
 DUE is YYYY-MM-DD, 'YYYY-MM-DD HH:MM' (local time), +Nd or +Nh.
 A job exiting $not_ready_status means not ready yet (no attempt spent, no alert) until --give-up (default DUE+7d)."
@@ -86,12 +92,13 @@ record_not_ready() {  # the check just made exited not-ready: remember when and 
   job[not_ready_checks]=$(( ${job[not_ready_checks]:-0} + 1 ))
 }
 
-ready_command() {  # DIR: sets REPLY to the add-agent --ready command as typed; empty when none
+agent_setting() {  # DIR KEY: sets REPLY to an add-agent setting as typed; empty when none
+  # Read line by line, never sourced: listing a job must not run anything from it.
   local line
   REPLY=
   [[ -f $1/agent.env ]] || return 0
   while IFS= read -r line; do
-    [[ $line == agent_ready=* ]] && { REPLY=${(Q)${line#agent_ready=}}; return 0 }
+    [[ $line == $2=* ]] && { REPLY=${(Q)${line#$2=}}; return 0 }
   done < $1/agent.env
 }
 
@@ -197,32 +204,67 @@ cmd_add() {
   agent_loaded || print -u2 -- "warning: $label is not loaded, so nothing will run it; run: ${script:t} install"
 }
 
+one_line_path() {  # VALUE: non-empty, one line, at most 1024 characters
+  [[ -n $1 && $1 != *$'\n'* && ${#1} -le 1024 ]]
+}
+
 cmd_add_agent() {
-  local model=haiku effort=medium topic_var=NTFY_MACBOOK_URL ready= cwd=$PWD stage
+  local host= model= effort=medium topic_var=NTFY_MACBOOK_URL ready= cwd= run_timeout= prompt pi_prompt=
   local -a add_opts
   while [[ ${1-} == --* ]]; do
     case $1 in
+      --host) (( ${agent_hosts[(Ie)${2-}]} )) || die "--host needs ${(j: or :)agent_hosts}"; host=$2; shift 2 ;;
       --ready) [[ -n ${2-} ]] || die "--ready needs a command"; ready=$2; shift 2 ;;
       --model) [[ ${2-} == [A-Za-z0-9._\[\]-]## ]] || die "--model needs a model name"; model=$2; shift 2 ;;
       --effort) [[ ${2-} == (low|medium|high|xhigh|max) ]] || die "--effort needs low, medium, high, xhigh or max"; effort=$2; shift 2 ;;
       --topic-var) [[ ${2-} == [A-Z_][A-Z0-9_]# ]] || die "--topic-var needs a variable name"; topic_var=$2; shift 2 ;;
-      --cwd) [[ -d ${2-} ]] || die "--cwd needs an existing directory"; cwd=${2:A}; shift 2 ;;
+      --cwd) [[ -n ${2-} ]] || die "--cwd needs a directory"; cwd=$2; shift 2 ;;
+      --run-timeout) [[ ${2-} == <1-> ]] || die "--run-timeout needs minutes"; run_timeout=$2; shift 2 ;;
       --attempts|--timeout|--give-up) add_opts+=($1 ${2-}); shift 2 ;;
       *) usage ;;
     esac
   done
   (( $# >= 3 )) || usage
-  [[ -d $cwd ]] || die "working directory $cwd does not exist"
-  [[ -f $3 ]] || die "prompt file $3 does not exist"
+  prompt=$3
+  if [[ $prompt == vanpi:* ]]; then
+    [[ $host != mac ]] || die "a vanpi: prompt file runs on vanpi; it cannot be used with --host mac"
+    host=vanpi pi_prompt=${prompt#vanpi:}
+    [[ $pi_prompt == /* ]] && one_line_path $pi_prompt ||
+      die "a vanpi: prompt must be an absolute path on one line, at most 1024 characters"
+  fi
   valid_name $2 || die "name must be lowercase letters, digits and dashes"
+  host=${host:-mac}
+  if [[ $host == vanpi ]]; then
+    model=${model:-sol} cwd=${cwd:-'~'}   # the Pi's home; stored as typed, never resolved here
+    (( ${pi_tiers[(Ie)$model]} )) || die "--model for --host vanpi is the pi-agent tier: ${(j:, :)pi_tiers}"
+    one_line_path $cwd || die "--cwd for --host vanpi must be one line, at most 1024 characters"
+    add_opts=(--attempts 1 $add_opts)   # one Pi run per attempt unless asked; a later --attempts wins
+    run_timeout=${run_timeout:-120}
+  else
+    [[ -z $run_timeout ]] || die "--run-timeout applies only to --host vanpi"
+    model=${model:-haiku} cwd=${cwd:-$PWD}
+    [[ -d $cwd ]] || die "working directory $cwd does not exist"
+    cwd=${cwd:A}
+  fi
+  [[ -n $pi_prompt || -f $prompt ]] || die "prompt file $prompt does not exist"
+  stage_agent_job "$@"
+}
+
+stage_agent_job() {  # DUE NAME PROMPT [DESCRIPTION], with cmd_add_agent's settings in scope
+  local stage rc=0 template=$agent_template
+  local -a files
+  [[ $host == vanpi ]] && template=$pi_template
   stage=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/deferred-agent.XXXXXX")
-  /usr/bin/install -m 700 -- $agent_template $stage/run
-  /usr/bin/install -m 600 -- $3 $stage/prompt.txt
-  print -rl -- "agent_name=${(q)2}" "agent_cwd=${(q)cwd}" "agent_model=${(q)model}" "agent_effort=${(q)effort}" \
-    "agent_ready=${(q)ready}" "agent_topic_var=${(q)topic_var}" "agent_notifier=${(q)notifier}" \
-    "agent_secrets=${(q)secrets}" > $stage/agent.env
-  local rc=0
-  (cmd_add $add_opts --file $stage/prompt.txt --file $stage/agent.env $1 $2 $stage/run \
+  /usr/bin/install -m 700 -- $template $stage/run
+  if [[ -z $pi_prompt ]]; then
+    /usr/bin/install -m 600 -- $3 $stage/prompt.txt
+    files+=(--file $stage/prompt.txt)
+  fi
+  print -rl -- "agent_name=${(q)2}" "agent_host=${(q)host}" "agent_cwd=${(q)cwd}" "agent_model=${(q)model}" \
+    "agent_effort=${(q)effort}" "agent_ready=${(q)ready}" "agent_topic_var=${(q)topic_var}" \
+    "agent_notifier=${(q)notifier}" "agent_secrets=${(q)secrets}" "agent_notify=${(q)agent_notify}" \
+    "agent_pi_prompt=${(q)pi_prompt}" "agent_run_timeout=${(q)run_timeout}" > $stage/agent.env
+  (cmd_add $add_opts $files --file $stage/agent.env $1 $2 $stage/run \
     "${4:-agent follow-up: $2}") || rc=$?
   [[ -n $stage && $stage == */deferred-agent.* ]] && /bin/rm -rf -- $stage
   return $rc
@@ -261,11 +303,32 @@ emit_list_json_records() {
     emit_json_field "$dir/last.log"
     emit_json_field "$(give_up_stamp)"
     emit_json_field "$([[ -f $dir/agent.env ]] && print 1 || print 0)"
-    ready_command $dir   # not in $(...), which would strip trailing newlines
+    agent_setting $dir agent_ready   # not in $(...), which would strip trailing newlines
     emit_json_field "$REPLY"
     emit_json_field "$job[last_not_ready]"
     emit_json_field "${job[not_ready_checks]:-0}"
+    emit_agent_fields $dir
   done
+}
+
+emit_agent_fields() {  # DIR: host, model, effort, remote state and run id; empty for script jobs
+  local key host= state= run=
+  local -a remote
+  if [[ -f $1/agent.env ]]; then
+    agent_setting $1 agent_host; host=${REPLY:-mac}   # jobs queued before --host ran on the Mac
+  fi
+  emit_json_field "$host"
+  for key in agent_model agent_effort; do
+    REPLY=
+    [[ -z $host ]] || agent_setting $1 $key
+    emit_json_field "$REPLY"
+  done
+  if [[ $host == vanpi ]]; then
+    remote=("${(@f)$(/usr/bin/python3 -I -B $1/run describe 2>/dev/null)}")
+    state=${remote[1]-} run=${remote[2]-}
+  fi
+  emit_json_field "$state"
+  emit_json_field "$run"
 }
 
 print_list_json() {
@@ -326,6 +389,11 @@ for kind in fields:
         "ready": next(fields) or None,
         "last_not_ready": next(fields) or None,
         "not_ready_checks": int(next(fields)),
+        "host": next(fields) or None,
+        "model": next(fields) or None,
+        "effort": next(fields) or None,
+        "remote_state": next(fields) or None,
+        "remote_run": next(fields) or None,
     })
 json.dump(result, sys.stdout, ensure_ascii=False)
 sys.stdout.write("\n")
@@ -355,14 +423,33 @@ resolve_job() {  # JOB: set REPLY to the one exact id or exact name match
   REPLY=$matches[1]
 }
 
+vanpi_job() {  # DIR: an add-agent --host vanpi job whose own run script answers for its Pi run
+  agent_setting $1 agent_host
+  [[ $REPLY == vanpi ]] && private_path $1/run
+}
+
 cmd_cancel() {
+  local abandon=
+  [[ ${1-} == --abandon ]] && { abandon=--abandon; shift }
   (( $# == 1 )) || usage
   acquire_mutation_lock
   resolve_job $1
   local dir=$REPLY
+  if vanpi_job $dir; then
+    # A Pi run outlives the job directory, so it is stopped (or found finished) first.
+    /usr/bin/python3 -I -B $dir/run cancel $abandon || {
+      print -u2 -- "${script:t}: kept ${dir:t}"
+      exit $refused_status
+    }
+  fi
   /bin/rm -rf -- $dir
   log_line "cancelled ${dir:t}"
   print -r -- "cancelled ${dir:t}"
+}
+
+clear_launch_hold() {  # DIR: an explicit retry or run-now is the user saying "launch it again"
+  vanpi_job $1 || return 0
+  /usr/bin/python3 -I -B $1/run clear-hold || die "could not clear the unknown launch of ${1:t}"
 }
 
 require_runnable_job() {  # DIR: load it or fail with a user-facing error
@@ -377,6 +464,7 @@ cmd_retry() {
   require_runnable_job $dir
   [[ $job[state] != pending ]] || die "job ${dir:t} is already pending"
   [[ $job[state] == failed ]] || die "job ${dir:t} has invalid state: $job[state]"
+  clear_launch_hold $dir
   job[state]=pending
   job[attempts]=0
   clear_not_ready
@@ -500,6 +588,7 @@ cmd_run_now() {
   local dir=$REPLY id=${REPLY:t}
   require_runnable_job $dir
   [[ $job[state] == (pending|failed) ]] || die "job $id has invalid state: $job[state]"
+  clear_launch_hold $dir
   run_job $dir manual
   if (( run_job_not_ready )); then
     print -r -- "not ready $id; output in $dir/last.log"

@@ -206,6 +206,9 @@ span.log-source { display: inline-block; max-width: 20ch; overflow-wrap: anywher
 .log-policy .setting { grid-template-columns: minmax(110px, 1fr) minmax(110px, 160px); gap: var(--space-1) var(--space-2); }
 @media (max-width: 650px) { .log-policy .setting { grid-template-columns: 1fr; } }
 .add-job textarea { width: 100%; font: var(--text-small)/1.45 var(--mono); }
+.add-job .setting[hidden] { display: none; }
+.add-job .control-slot { display: contents; }
+.agent-tags { margin: var(--space-1) 0; }
 
 /* ---- LLM mode picker ---- */
 .mode-block { margin: var(--space-3) 0; }

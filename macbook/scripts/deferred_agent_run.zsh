@@ -59,5 +59,4 @@ print(f"{result}\n\n{tail}")
 PY
 ) || { print -u2 -- "claude reported an error or unreadable output"; /bin/mv -f $job/claude.json $job/claude.failed.json; exit 1 }
 
-print -r -- $body | /usr/bin/python3 -I -B $agent_notifier --secrets $agent_secrets \
-  --topic-var $agent_topic_var --title $agent_name --priority default --tags robot
+print -r -- $body | /bin/zsh $agent_notify $job
