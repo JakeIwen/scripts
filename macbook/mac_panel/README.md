@@ -315,9 +315,13 @@ and infrastructure when it contains `llm_switchboard`, `model-gateway.js`, `clau
 `usage-server.mjs` or `@playwright/mcp` (or its kernel name is one of them): plain substring
 matching with no option parsing, so no spelling of the options (`-Bmvan_compute.worker`)
 hides one, and a command that merely mentions one is read-only as a result. Inside a
-session, a process belongs to that session, with one exception: every Codex process roots a
-group of its own wherever it runs, even inside another session, because `ps` flattens its
-arguments and a prompt or an option value can look like a subcommand. Its role decides only how that group is shown and
+session, a process belongs to that session, with two exceptions that root a group of their
+own wherever they run. One is a compute or infra match that also runs as one of the
+programs those roles run under (argv[0] or kernel name `python*`/`Python`, `node` or
+`claude-code-proxy`): a worker or gateway started from a session is the real thing, while
+a session's own `grep model-gateway.js` (or an editor or shell naming it) stays a member.
+The other is every Codex process, because `ps` flattens its arguments and a prompt or an
+option value can look like a subcommand. Its role decides only how that group is shown and
 whether it may be ended, and a session needs positive evidence: every option before the
 first operand is one of Codex's global options from `codex --help` (with which take a
 value), and there is no operand (interactive) or the operand is `exec`, `e` or `resume`.

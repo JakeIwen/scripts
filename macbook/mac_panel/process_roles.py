@@ -4,7 +4,9 @@ The display parse (`process_invocation`) shows less when it is unsure. These cla
 decide what may be signalled, so they lean the other way. Infra and compute roots are found
 by substring of the whole command text (or the kernel's name), with no option parsing at
 all, so no spelling of the options can hide one; a false positive only makes a row
-read-only, and inside a session such a process is still that session's member. Every Codex
+read-only. Inside a session a mention alone does not count: a process there roots a group
+only when it also runs one of the programs these roles run under (`runs_role_program`), so a
+session's own `grep model-gateway.js` stays its member. Every Codex
 process roots a group of its own wherever it runs (`resource_groups`), so its role decides
 only how that group is shown and whether it may be ended as a session: a session only when
 `codex_role` reads the whole line and finds one, otherwise read-only infrastructure, with
@@ -71,6 +73,12 @@ INFRA_MARKERS = {'llm_switchboard': 'LLM switchboard', 'model-gateway.js': 'mode
                  'claude-code-proxy': 'model gateway proxy', 'usage-server.mjs': 'usage server',
                  '@playwright/mcp': 'Playwright MCP'}
 COMPUTE_MARKER = 'van_compute.worker'
+# The programs the infra and compute entries above really run as: their interpreters and the
+# proxy binary. A process inside a session that names a marker and runs one of these is the
+# worker or gateway itself; one running anything else (`grep`, an editor, a shell) mentions it.
+ROLE_INTERPRETER_PREFIXES = ('python', 'Python')
+ROLE_PROGRAMS = frozenset(('node', 'claude-code-proxy'))
+ROLE_PROGRAM_NAMES = ROLE_PROGRAMS | frozenset(name[:KERNEL_NAME_LIMIT] for name in ROLE_PROGRAMS)
 
 
 def program_names(row: ProcessRow) -> frozenset:
@@ -130,3 +138,9 @@ def infra_label(row: ProcessRow) -> str | None:
 
 def is_compute_root(row: ProcessRow) -> bool:
     return names_marker(row, COMPUTE_MARKER)
+
+
+def runs_role_program(row: ProcessRow) -> bool:
+    """argv[0]'s base name or the kernel's name is an interpreter or binary a role runs as."""
+    return any(name.startswith(ROLE_INTERPRETER_PREFIXES) or name in ROLE_PROGRAM_NAMES
+               for name in program_names(row))

@@ -6,8 +6,8 @@ from process_roles import CodexRole, codex_role, infra_label, is_compute_root, i
 from process_signals import ProcessSignaller
 from resource_groups import Kind, build_grouping
 from resources_fixtures import PANEL_PID, STARTED, FakeReader, make_table
-from signal_policy import (KIND_REASONS, ROLE_UNKNOWN, SHELL, Scope, SignalPolicy,
-                           tree_blocked)
+from signal_policy import (KIND_REASONS, ROLE_UNKNOWN, SHELL, TREE_ONLY_SESSIONS, Scope,
+                           SignalPolicy, tree_blocked)
 
 BASE = (
     (1, 0, '/sbin/launchd', {'uid': 0}),
@@ -266,6 +266,35 @@ class RoundFourTests(unittest.TestCase):
             (210, 205, 'codex --no-alt-screen --ask-for-approval never'))
         self.assertEqual(world.grouping.kind(210), Kind.CODEX)
         self.assertIsNone(world.tree_blocked('codex:210'))
+
+    def test_finding2_a_worker_or_gateway_inside_a_session_roots_its_own_group(self):
+        for parent in ('codex exec work', 'claude --permission-mode bypassPermissions'):
+            gid = 'codex:210' if parent.startswith('codex') else 'claude:210'
+            for child, kind, label in (
+                    ('python3 -Bmvan_compute.worker', Kind.COMPUTE, 'worker'),
+                    ('node /app/model-gateway.js serve', Kind.INFRA, 'model gateway')):
+                world = Harness((210, 101, parent), (211, 210, child), (212, 211, '/bin/sh job.sh'))
+                case = (parent, child)
+                inner = f'{kind.value}:211'
+                self.assertEqual(world.grouping.membership[211], inner, case)
+                self.assertEqual(world.grouping.groups[inner].label, label, case)
+                self.assertEqual(world.grouping.kind(212), kind, case)
+                self.assertEqual(world.reason(211), KIND_REASONS[kind], case)
+                self.assertEqual(world.reason(211, Scope.TREE), TREE_ONLY_SESSIONS, case)
+                # A compute worker's job is a group of its own, nested too.
+                self.assertIn(inner, world.grouping.groups[gid].nested, case)
+                self.assertIn(inner, world.tree_blocked(gid), case)
+                self.assertRefused(world, (211, 'process'), (211, 'tree'), (212, 'process'), (210, 'tree'))
+
+    def test_finding2_a_session_command_that_only_mentions_a_gateway_stays_a_member(self):
+        for parent, gid in (('codex exec work', 'codex:210'), ('claude', 'claude:210')):
+            world = Harness((210, 101, parent), (211, 210, 'grep -r model-gateway.js .'),
+                            (212, 210, 'rg van_compute.worker'))
+            self.assertEqual(world.grouping.membership[211], gid)
+            self.assertEqual(world.grouping.membership[212], gid)
+            self.assertIsNone(world.reason(211))
+            self.assertEqual(world.grouping.groups[gid].nested, [])
+            self.assertIsNone(world.tree_blocked(gid))
 
 
 class ShellTests(unittest.TestCase):

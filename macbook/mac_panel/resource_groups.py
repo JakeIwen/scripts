@@ -3,17 +3,18 @@
 Which processes root a group comes from `process_roles`, which errs toward protection: a
 command that merely mentions `model-gateway.js` outside any session is grouped as infra and
 so is read-only. Membership then decides: a process inside a session belongs to that
-session, so a session's own `grep model-gateway.js` stays an ordinary member. The one
-exception is Codex: `ps` flattens its arguments, so whether a Codex process is a session or
-a server can be misread, and every Codex process therefore roots its own group wherever it
-runs. A session with any other group's root beneath it lists that group in `nested`, and
-the signal policy refuses its whole-tree action.
+session, so a session's own `grep model-gateway.js` stays an ordinary member. Two kinds of
+process are boundaries instead, rooting their own group wherever they run: every Codex
+process (`ps` flattens its arguments, so a session and a server can be misread), and a
+compute or infra match that runs as the worker's or gateway's own program (`inner_roots`).
+A session with any other group's root beneath it lists that group in `nested`, and the
+signal policy refuses its whole-tree action.
 """
 from dataclasses import dataclass, field
 from enum import Enum
 
 from process_roles import (CLAUDE, CODEX_LABELS, CodexRole, codex_operand, codex_role,
-                           infra_label, is_codex, is_compute_root)
+                           infra_label, is_codex, is_compute_root, runs_role_program)
 from process_table import ProcessRow, ProcessTable
 
 
@@ -138,9 +139,10 @@ def build_grouping(table: ProcessTable) -> Grouping:
     # Every other Codex process: a read-only infra root of its own, never another's member.
     services = {pid: codex_role(row) for pid, row in live.items()
                 if is_codex(row) and pid not in sessions}
-    boundaries = {**sessions, **dict.fromkeys(services, Kind.INFRA)}
     computes = {pid for pid, row in live.items() if is_compute_root(row)}
     infras = {pid: label for pid, row in live.items() if (label := infra_label(row))}
+    boundaries = {**sessions, **dict.fromkeys(services, Kind.INFRA),
+                  **inner_roots(table, sessions, services, computes, infras)}
     owner: dict[int, tuple[Kind, int]] = {}
     for pid in table.rows:
         chain = [pid, *table.ancestors(pid)]
@@ -168,6 +170,20 @@ def build_grouping(table: ProcessTable) -> Grouping:
         group.members = ordered_members(table, group, membership)
     link_nested(table, groups, membership, sessions)
     return Grouping(groups, membership)
+
+
+def inner_roots(table, sessions, services, computes, infras) -> dict[int, Kind]:
+    """Compute and infra matches inside a session that run as the worker's or gateway's own
+    program: each roots its own read-only group instead of joining the session, so the
+    session's tree is refused while it runs. Only the outermost one under a session counts;
+    one beneath it joins its group. Outside a session the text match alone decides."""
+    candidates = {pid: Kind.COMPUTE if pid in computes else Kind.INFRA
+                  for pid in computes | infras.keys()
+                  if pid not in sessions and pid not in services
+                  and runs_role_program(table.rows[pid])}
+    stops = {**candidates, **dict.fromkeys(sessions), **dict.fromkeys(services)}
+    return {pid: kind for pid, kind in candidates.items()
+            if nearest(table.ancestors(pid), stops) in sessions}
 
 
 def group_label(kind, root, services, infras, computes, table) -> str | None:
