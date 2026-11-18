@@ -388,10 +388,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   (no attempt, no alert, retried until `give_up`, default due+7d; `run-now`
   reports it as 4), and `add-agent` queues a headless Claude follow-up from
   `macbook/scripts/deferred_agent_run.zsh` that ntfys the result and a resume
-  command. Usage is in `macbook/README.md`.
-  Its `list --json` (with `ready`, `give_up`, `last_not_ready`) feeds the Mac Panel's
-  "Ready condition" disclosure (`mac_panel/static/section_deferred_ready.mjs`);
-  its `retry`, `run-now` and `reschedule` serve the Mac Panel too;
+  command, through `macbook/scripts/deferred_agent_notify.zsh` (shared with the
+  vanpi path). `add-agent --host vanpi` (or a `vanpi:/path` prompt) instead copies
+  in `macbook/scripts/deferred_pi_run.py`, a durable-state machine that starts the
+  run through `~/.claude/skills/pi-agent/pi_agent.py`, collects it at later checks,
+  and answers the `describe`, `cancel [--abandon]` and `clear-hold` verbs that
+  `list --json`, `cancel` (exit 6 when a Pi run may still be active) and
+  `retry`/`run-now` call. Usage and the run states are in `macbook/README.md`.
+  Its `list --json` (with `ready`, `give_up`, `last_not_ready`, and for agent jobs
+  `host`, `model`, `effort`, `remote_state`, `remote_run`) feeds the Mac Panel's
+  "Ready condition" disclosure (`mac_panel/static/section_deferred_ready.mjs`)
+  and agent-job tags (`mac_panel/static/deferred_agent_job.mjs`);
+  its `add-agent`, `cancel [--abandon]`, `retry`, `run-now` and `reschedule` serve
+  the Mac Panel too (`mac_panel/deferred_adapter.py`);
   every mutation (and `cancel`) takes the checker's own flock and exits 75 when
   it is busy, and `run-now` never sends a failure alert.
   LaunchAgent plists name `/usr/bin/python3`, a versioned Homebrew interpreter
@@ -416,7 +425,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   armed POST needs `confirmed: true`, else 400), the only subprocess boundary in
   `cli_runner.py`, display redaction in `log_redaction.py`. It changes tools only
   through their own CLIs or `tool_settings` (crontab edits and run-now go
-  through `crontab_sync.py`, deferred add through `deferred.zsh add`); ntfy
+  through `crontab_sync.py`, deferred add and add-agent through `deferred.zsh`); ntfy
   config is read-only there, BTT repair is never exposed, and it never reads
   pi/secrets. Controls: `services_adapter.py` starts, stops and restarts
   LaunchAgents and restarts `com.jacobr.*` daemons through `sudo -n

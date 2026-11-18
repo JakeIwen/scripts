@@ -60,7 +60,7 @@ module that holds the section's state: the panel only relays validated requests 
 | --- | --- |
 | Overview (`#overview`) | Reads no source of its own: it draws from the state registry the other sections fill. Needs attention, quick controls (Low Data Mode, network verdict, llm-restore), one card per section, a settings finder. |
 | Jobs & services, Services (`#services`) | `/bin/launchctl list` plus user `com.jacobr.*` plists; installed system daemons use `launchctl print system/<label>`. A job `launchctl print-disabled` lists as disabled shows grey "disabled". The inventory carries each log's path, stream and modification time; `GET /api/services/logs/<label>` returns bounded, redacted tails when a disclosure opens. Confirmed `POST /api/services {action: restart / start / stop, label, confirmed: true}` for user agents (restart `launchctl kickstart -k`; stop disables then boots out, so KeepAlive cannot undo it; start enables then bootstraps or kicks). Stop and start are refused for `com.jacobr.mac-panel` itself; the header's restart stays. Daemons: restart only, through `sudo -n /bin/launchctl kickstart -k system/<label>`, offered when the sudoers rule below is present. |
-| Jobs & services, Deferred jobs (`#deferred`) | `/bin/zsh macbook/scripts/deferred.zsh list --json`; `cancel`, `retry`, `reschedule`, `run-now` and `add` stay owned by that CLI. Run-now returns an asynchronous task receipt shown in the row; receipts are bounded and reset when the panel restarts. The add form takes a name, a due time, a description and a script (must start with `#!`), plus optional `attempts` and `timeout`; the adapter writes it to a private temporary file for `deferred.zsh add` and deletes it. |
+| Jobs & services, Deferred jobs (`#deferred`) | `/bin/zsh macbook/scripts/deferred.zsh list --json`; `cancel`, `retry`, `reschedule`, `run-now`, `add` and `add-agent` stay owned by that CLI. Run-now returns an asynchronous task receipt shown in the row; receipts are bounded and reset when the panel restarts. The add form takes a name, a due time, a description and a script (must start with `#!`), plus optional `attempts` and `timeout`; the adapter writes it to a private temporary file for `deferred.zsh add` and deletes it. The Add agent job form (`add-agent` action) takes a name, due time, description, where it runs (this Mac or vanpi), the prompt as pasted text or, for vanpi, an absolute path on the Pi, and optional model, effort, working folder, Ready condition, attempts, timeout and (vanpi) run timeout; the adapter validates every field first, writes pasted text to a private temporary file for `deferred.zsh add-agent --host ...` and deletes it. Agent jobs show host, model and effort tags and, for vanpi, the Pi run's state (`remote_state`) and id. A cancel the CLI refuses because a Pi run may still be active answers 409 `remote-active` and the row then offers **Abandon job** (`cancel --abandon`). |
 | Jobs & services, Crontab (`#crontab`) | `/usr/bin/python3 -B macbook/scripts/crontab_sync.py status --json` reads the tracked and live crontabs. Pause, resume, install and run-now use the same CLI with the displayed revision. Each job carries its next runs for the schedule chart. Log modification times are hints, not proof a job succeeded. |
 | Jobs & services, Automations (`#automations`) | `shared/python/tool_automation.py` loads declarations from `shared/automations/`. Each status command prints one validated `status_record`; declared actions run through the tool's fixed argv and timeout, confirmed when declared. An action declared `async` (the Codex/Claude "Check for updates now") runs through a background task and the card shows its receipt. |
 | Jobs & services, llm-restore (`#llm-restore`) | `/usr/bin/python3 -I -B shared/sh/llm_restore.py --cron --json`; on/off adds `on` or `off`. That CLI owns its crontab block. The same CLI lists the saved sets (`--saved --json`, shown with the automatic restore list). Selecting a row runs its dry run (`--dry-run`, plus `-- NAME` for a saved set); **Restore** (armed, `confirmed: true`, 120 s timeout) runs the same command without `--dry-run`; **Take snapshot** runs `--save=NAME` (blank name: timestamp; an existing name is a 409, never overwritten). `POST /api/llm-restore/snapshots` takes `{action: preview\|restore\|save\|delete\|overwrite, target: {kind: "auto"} \| {kind: "saved", name}, name?, confirmed?}`; a saved target must be in the CLI's current list. Selecting a saved set also offers **Delete** and **Overwrite** (both armed, `confirmed: true`, saved targets only). The CLI has no delete, so Delete renames the set's file into `~/.local/state/llm-restore/saved/.deleted/<name>-<YYYYmmdd-HHMMSS>.sh` (an exclusively created 0600 placeholder is replaced by the atomic rename; folder 0700, never a symlink; the CLI lists only `saved/*.sh`, so the set leaves the listing). Overwrite renames the old version into `.deleted/` the same way, then runs `--save=NAME` without `--force`; if the CLI says the name exists (a save landed meanwhile) the answer is 409 and both files stay, on any other failure the old version is linked back, except after a timeout, when the save may still finish, so it stays in `.deleted/`. Overwrite refuses a set whose name ends in `.sh` (the CLI strips that suffix, so it cannot address the set); Delete still works for it. The panel refuses a set whose listed path is not a regular `.sh` file directly in that folder. Nothing is erased: recover a set with `mv ~/.local/state/llm-restore/saved/.deleted/NAME-STAMP.sh ~/.local/state/llm-restore/saved/NAME.sh`. Backups are never pruned. The automatic preview regenerates the restore plan, as the CLI itself does. |
@@ -137,7 +137,8 @@ Every armed action is two-click, worded `Confirm: <verb phrase>`: the first clic
 Escape, blur or 8 seconds disarm it, and the second click sends the request with
 `confirmed: true`. The server refuses these requests with HTTP 400 without it: service
 start, stop and restart, crontab pause, resume, install and run-now, deferred run-now,
-cancel and add, metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
+cancel (and Abandon job after a refused cancel), add, add-agent and Retry on a job whose Pi launch
+is unknown (a second Pi run may start), metered SSID removal and Low Data Mode, the BTT guard checkpoint, the ntfy
 test, settings reset, log rotation, llm-restore restore, delete and overwrite and confirmed automation actions. Reschedule opens an inline editor
 whose Apply is enabled only once the time differs.
 
@@ -227,6 +228,11 @@ properties set from JS.
 - `task_receipt.mjs`: watch/resume async receipts, show outcomes and request edit-safe refreshes.
 - `deferred_form.mjs`: pure deferred-add validation and request-body conversion.
 - `section_deferred_add.mjs`: the deferred-job add form and inline errors.
+- `deferred_agent_form.mjs`: pure Add agent job validation and request-body conversion
+  (the same limits as `deferred_adapter.py`).
+- `section_deferred_agent.mjs`: the Add agent job form; Runs on swaps the model control
+  and shows the vanpi-only Pi prompt path and Run timeout rows.
+- `deferred_agent_job.mjs`: an agent job's tags, Pi run state and the retry wording.
 - `section_services_history.mjs`: cached service history, range controls and cadence-aware strips.
 - `panel_api.mjs`: the only `fetch`; token header, JSON bodies, token renewal.
 - `dom_core.mjs` (element factory, `armed`, idempotent `arm`, `button`), `components.mjs` (`info`, `toggle`,
@@ -273,7 +279,10 @@ sudoers --print` shows it and `sudoers --script` prints a zsh installer that che
 `visudo -cf` before installing `/etc/sudoers.d/mac-panel-daemons` (mode 440, root:wheel). It
 allows only `launchctl kickstart -k system/com.jacobr.<name>`, and the panel never installs
 it. The history store is private (700/600) and holds levels, counts and state words, never
-log text or network names beyond what the sections already show. Local processes running as
+log text or network names beyond what the sections already show. The Add agent job form's Ready condition is shell text the job runs unattended with
+`/bin/zsh -c` on this Mac, the same trust the script form already extends to a pasted
+script. The prompt is pasted text or an absolute path on the Pi; the form never accepts
+a Mac file path, so the panel cannot be made to read or send a local file. Local processes running as
 Jacob can access the page and token; this is a browser-origin boundary, not isolation from
 other processes in the same account.
 
