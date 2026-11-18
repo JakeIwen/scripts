@@ -209,9 +209,9 @@ sends one ntfy titled NAME to the topic in `--topic-var` (default
 `NTFY_MACBOOK_URL`, from the same secrets file as `NTFY_WARNING_URL`) through
 `scripts/deferred_agent_notify.zsh`, with the result (about 600 characters).
 Example: `deferred.zsh add-agent --ready 'test -e /tmp/build.done' +1d check-build prompt.md`.
-Names of new jobs (`add` and `add-agent`) stop at 49 characters, so the job id
-`YYYY-MM-DD-NAME` stays within the 60 characters every other verb accepts; jobs
-queued earlier with longer names stay manageable by their full id.
+Job names (`add` and `add-agent`) are lower-case letters, digits and hyphens, at
+most 60 characters; the job id is `YYYY-MM-DD-NAME`, and every verb takes the name
+or the full id.
 
 On the Mac (`--host mac`, the default) the job copies in
 `scripts/deferred_agent_run.zsh` and the prompt and runs
@@ -229,11 +229,14 @@ job copies in `scripts/deferred_pi_run.py` as `run`, with
 starts the run through `~/.claude/skills/pi-agent/pi_agent.py`, whose own headless
 preamble replaces the Mac one. Defaults: model `sol` (`--model` is a pi-agent tier:
 `astra`, `sol` or `luna`), effort `medium`, `--cwd` `~` (the Pi's home, stored as
-typed), `--attempts` 1 and `--run-timeout` 120 minutes (the longest a run may last
-before the job stops it). `--cwd` must not be under this Mac's home folder
+typed), `--run-timeout` 120 minutes (the longest a run may last before the job stops it)
+and one attempt: a vanpi job starts at most one Pi run by itself, so `--attempts`
+other than 1 is refused. Another run starts only when a person runs `retry` or
+`run-now` (below). `--cwd` must not be under this Mac's home folder
 (pi_agent.py would silently rewrite such a path to the Pi's home): write `~/...`
 or a real Pi path. `--timeout` (one pass) must be at least 390 seconds, enough to
-launch and read the run once. `--run-timeout` with `--host mac` is refused, as is
+launch and read the run once, and 420 (the floor plus `READY_ALLOWANCE`, 30 s) with
+a `--ready` command, which runs in the same pass before the launch. `--run-timeout` with `--host mac` is refused, as is
 a `vanpi:` prompt with `--host mac`; like the other option checks of `add` and
 `add-agent` these exit 1, and only a malformed command line exits 2. The job
 record says `kind=agent` and `host=vanpi`; nothing a `--file` attachment supplies
@@ -245,8 +248,9 @@ finish in time is not ready). Every call to the Pi is capped by the time left in
 the pass; a pass that runs out with a launch on record exits 75, never a failure.
 Each pass dispatches on state files in the job directory (versioned JSON), shown
 by `list --json` as `remote_state` (with `remote_run`, the Pi run id, and
-`remote_token`, the launch token, once they exist; the list also reports `host`,
-`model` and `effort`):
+`remote_token`, the launch token, once they exist, and `relaunch_id`, set only
+while the attempt may still be active and nothing is left to collect; the list also
+reports `host`, `model` and `effort`):
 
 - `unlaunched`: nothing started yet. A pass reads the prompt, requires vanpi to
   answer over ssh (else exit 75, retried at the next check), records a launch
@@ -258,12 +262,9 @@ by `list --json` as `remote_state` (with `remote_run`, the Pi run id, and
   cannot be listed is exit 75.
 - `launch-unknown`: a complete list holds no run with the token, several runs
   carry it, or the list could not reach back far enough ("search incomplete",
-  with a command that searches farther). The job is held: each pass fails at once
-  without contacting the Pi, printing the `pi_agent.py` commands for looking the
-  run up. Only `retry JOB --relaunch TOKEN` or `run-now JOB --relaunch TOKEN`,
-  naming that hold's token, clears it; without the flag, or with another token,
-  they exit 7 and print the command. The next attempt then starts a new run, which
-  can run beside the earlier one if that is still active.
+  with a command that searches farther). The job is held and fails; nothing
+  contacts the Pi again, and the `pi_agent.py` commands for looking the run up
+  are printed. The held token is the job's `relaunch_id` (below).
 - `running`: a run id is saved. Each pass polls its status for up to about four
   minutes (less under a short `--timeout`), then exits 75, so the result is
   collected at the first check after the Pi run ends. A run past its
@@ -274,18 +275,44 @@ by `list --json` as `remote_state` (with `remote_run`, the Pi run id, and
   characters plus the run id and the command for the full report). Delivery is
   at-least-once: a send whose answer is lost can arrive twice, and a failed send
   keeps the report and resends it at each check.
-- `failed`: the run died, exited nonzero, reported an error or was stopped at its
-  `--run-timeout`, or was not collected by its collection deadline. The failure
-  names the run and the attempt it ended; a later attempt (automatic only with
-  `--attempts` above 1) starts a new run and keeps the old id in the job's
-  `runs.log` and in `deferred.log`. A run that finished cleanly but whose final
-  message is blank is read again at the next two checks (exit 75), then fails as
-  "finished without a report", which is never relaunched automatically; only
-  `retry`, `run-now` or `reschedule` start another run.
+- `failed`: the run died, exited nonzero, reported an error, was stopped at its
+  `--run-timeout`, finished without a report, or was not collected by its
+  collection deadline. The failure names the run and its kind; the job waits for
+  a person, and the old id stays in the job's `runs.log` and in `deferred.log`.
+  A run that finished cleanly but whose final message is blank is read again at
+  the next two checks (exit 75), then fails as "finished without a report".
+  `timed-out`, `remote` and `no-report` failures prove the run is over; a
+  `collection-deadline` failure does not, since the run may still be active.
 
-Launching and collecting are separate. A job may launch only while it is pending,
-due and inside its give-up window, and the launch pass that starts a run keeps its
-attempt. A job that owns a run (a launch in flight, a run with no terminal state,
+Another run, by a person only: a job never starts a second Pi run by itself, in
+any state. `retry JOB` (resets a failed job for the next check) and `run-now JOB`
+start another run by clearing the previous attempt, and what they need depends
+on whether it is known to be over:
+
+- An attempt confirmed over (`failed` with kind `remote`, `timed-out` or
+  `no-report`) is cleared by plain `retry` or `run-now`.
+- An attempt that may still be active (`launch-unknown`, or `failed` with kind
+  `collection-deadline`) needs `--relaunch ID`: its run id or launch token, which
+  `list --json` shows as the job's `relaunch_id` (Mac Panel shows it in the
+  confirmation) and which the refusal message prints. The new run can then run
+  beside the old one. Without the flag, or with another id, they exit 7 and print
+  the command; an id given when nothing is unresolved, or one a later attempt
+  already replaced, is refused the same way (exit 7).
+- A run the job still owns (`launching`, `running`, or `finished` with an
+  undelivered report) is not an attempt to replace: `run-now` without
+  `--relaunch` collects it, and `retry` refuses a job that is not failed.
+  `run-now JOB --relaunch ID` naming that run's id or token abandons it and
+  launches another.
+
+`reschedule JOB DUE` of a vanpi job that has ever launched (any `remote_state`
+but `unlaunched`) is refused with exit 8, so moving a due time can never start a
+second run; use `retry` or `run-now`. An unlaunched job reschedules as usual.
+
+Launching and collecting are separate. A job launches by itself only from
+`unlaunched`, while it is pending, due and inside its give-up window; an
+unlaunched job past `--give-up` (default due + 7 days) fails without launching
+and alerts once, and collection of a run it already owns continues past that
+time. A job that owns a run (a launch in flight, a run with no terminal state,
 or a report not yet delivered) gets a collect-only pass at every check whatever
 its state (`pending` or `failed`), due time or give-up time: a `run-now` before
 the due time, a `run-now` on a failed job and a reschedule into the future all
@@ -293,10 +320,25 @@ leave the run collected. A collect-only pass never launches and spends no attemp
 `run-now` on such a job collects it; when the run is still going it exits 4 and
 prints `running JOB: ...`. Collection lasts until the run is terminal or its
 `--run-timeout` stop is confirmed, up to its collection deadline (launch time +
-`--run-timeout` + 7 days); past it the job fails with the commands to find and
+`--run-timeout` + 7 days). The scheduler owns that deadline: past it the checker
+records a `collection-deadline` failure from the state file alone, so it holds
+even when the job's copied `run` cannot start, and alerts with the commands to find and
 stop the run by hand. A failure the run recorded before the scheduler could save
 it (a crash between the two) is accounted at the next check instead of
 launching again.
+
+The scheduler also owns the alerts, one per kind and attempt (`alerts.sent` in
+the job directory): a failed or held run, a job that gave up before launching,
+a collector pass that exited abnormally without settling a run it owns (it keeps
+the run and every check tries again until the collection deadline), and a
+finished run whose report could not be delivered. That last job stays `pending`
+with its report saved, resends it at every check and never touches the Pi again.
+
+Exit statuses: every verb exits 75 when the checker lock is busy, 1 for another
+error and 2 for usage. `cancel` exits 6 when a Pi run may still be active,
+`retry` and `run-now` exit 7 when `--relaunch` is needed or wrong, `reschedule`
+exits 8 for a launched vanpi job, and `run-now` exits 0 after success, 3 after a
+failed attempt and 4 when the job was not ready or its Pi run is still going.
 
 `list --json`, `cancel`, `retry` and `run-now` read this state with the
 repository's `scripts/deferred_pi_control.py`, never by running the job's own
