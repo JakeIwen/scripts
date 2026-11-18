@@ -317,10 +317,11 @@ command that merely mentions one outside a session is read-only as a result. Ins
 session, a process belongs to that session, with one exception: every Codex process roots a
 group of its own wherever it runs, even inside another session, because `ps` flattens its
 arguments and a prompt or an option value can look like a subcommand. Its role decides only
-how that group is shown: a Codex session when its subcommand is certain (a known subcommand
-reached through flags alone, such as `exec` or `resume`, whatever its prompt says),
-otherwise read-only infrastructure (`Codex app server`, or `Codex (role unread)` when the role
-cannot be established, where nothing at all may be signalled). A session with any other
+how that group is shown and whether it may be ended: a Codex session only when it is
+certainly an interactive run (with or without a prompt), `exec` or `resume`; otherwise
+read-only infrastructure: `Codex app server`, `Codex service` (`exec-server`,
+`remote-control`), `Codex command` (any other subcommand), or `Codex (role unread)` when an
+option value could have shifted the words, where nothing at all may be signalled. A session with any other
 group's root (a session, a Codex process, infra or compute) beneath any of its processes has
 no whole-tree action, and the reason names those groups.
 

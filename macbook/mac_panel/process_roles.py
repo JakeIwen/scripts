@@ -18,13 +18,17 @@ from process_table import ProcessRow
 SHELLS = frozenset(('zsh', 'bash', 'sh', 'dash', 'fish', 'ksh', 'tcsh', 'csh'))
 CLAUDE = 'claude'
 CODEX = 'codex'
-APP_SERVER = 'app-server'
 
 
 class CodexRole(str, Enum):
-    APP_SERVER = 'app-server'
+    # Interactive (with or without a prompt), `exec` or `resume`: may be ended as a session.
     SESSION = 'session'
-    # The subcommand cannot be read from the flattened text: read-only, never a session.
+    APP_SERVER = 'app-server'
+    # A running service or its supervisor: `exec-server`, `remote-control`.
+    SERVICE = 'service'
+    # Any other subcommand (`login`, `mcp`, `review`, ...): not confidently a session.
+    COMMAND = 'command'
+    # The subcommand cannot be read from the flattened text.
     UNCERTAIN = 'uncertain'
 
 
@@ -39,15 +43,18 @@ CODEX_FLAGS = frozenset(('--oss', '--search', '--no-alt-screen', '--no-daemon', 
                          '--strict-config', '--approve-for-me', '--full-auto',
                          '--dangerously-bypass-approvals-and-sandbox',
                          '--dangerously-bypass-hook-trust', '-h', '--help', '-V', '--version'))
-# `codex --help` subcommands other than app-server (2026-11-17).
-CODEX_SUBCOMMANDS = frozenset((
-    'agents', 'exec', 'e', 'review', 'login', 'logout', 'mcp', 'plugin', 'remote-control', 'app',
-    'completion', 'update', 'doctor', 'sandbox', 'debug', 'apply', 'a', 'resume', 'queue',
-    'archive', 'delete', 'migrate-rollouts', 'migrate-nfs-db', 'unarchive', 'fork', 'cloud',
-    'exec-server', 'features', 'help'))
+# `codex --help` subcommands (2026-11-17), by the role each gives.
+SESSION_SUBCOMMANDS = frozenset(('exec', 'e', 'resume'))
+SERVICE_SUBCOMMANDS = {'app-server': CodexRole.APP_SERVER, 'exec-server': CodexRole.SERVICE,
+                       'remote-control': CodexRole.SERVICE}
+OTHER_SUBCOMMANDS = frozenset((
+    'agents', 'review', 'login', 'logout', 'mcp', 'plugin', 'app', 'completion', 'update',
+    'doctor', 'sandbox', 'debug', 'apply', 'a', 'queue', 'archive', 'delete', 'migrate-rollouts',
+    'migrate-nfs-db', 'unarchive', 'fork', 'cloud', 'features', 'help'))
+NON_SESSION_SUBCOMMANDS = frozenset(SERVICE_SUBCOMMANDS) | OTHER_SUBCOMMANDS
 
-# The infra label of a Codex group that is not a session.
-CODEX_LABELS = {CodexRole.APP_SERVER: 'Codex app server', CodexRole.UNCERTAIN: 'Codex (role unread)'}
+CODEX_LABELS = {CodexRole.APP_SERVER: 'Codex app server', CodexRole.SERVICE: 'Codex service',
+                CodexRole.COMMAND: 'Codex command', CodexRole.UNCERTAIN: 'Codex (role unread)'}
 # Base names of a program or of any argument that make a process shared infrastructure.
 INFRA_NAMES = {'claude-code-proxy': 'model gateway proxy', 'model-gateway.js': 'model gateway',
                'usage-server.mjs': 'usage server', 'llm_switchboard': 'LLM switchboard',
@@ -77,33 +84,47 @@ def is_codex(row: ProcessRow) -> bool:
     return CODEX in program_names(row)
 
 
-def first_operand_role(token, valued, mentioned_later) -> CodexRole:
-    if token == APP_SERVER:
-        return CodexRole.APP_SERVER
-    # A known subcommand reached through flags alone is certain; a prompt or a value shifted
-    # by a space is not, when `app-server` appears further on.
-    if mentioned_later and (valued or token not in CODEX_SUBCOMMANDS):
-        return CodexRole.UNCERTAIN
-    return CodexRole.SESSION
+def operand_role(token) -> CodexRole:
+    """The role a first operand gives: a subcommand's, or a session for a prompt."""
+    if token in SERVICE_SUBCOMMANDS:
+        return SERVICE_SUBCOMMANDS[token]
+    return CodexRole.COMMAND if token in OTHER_SUBCOMMANDS else CodexRole.SESSION
 
 
 def codex_role(row: ProcessRow) -> CodexRole:
-    """A Codex process's role from its subcommand (the first operand after global options)."""
-    tokens, index, valued = row.arguments, 0, False
+    """A Codex process's role from its subcommand (the first operand after global options).
+
+    It is a session only when that is certain. After a value option or an unknown option,
+    a value with a space shifts every later word, so any non-session subcommand named later
+    makes the role uncertain; a prompt that names a service subcommand does too.
+    """
+    tokens, index, shifted = row.arguments, 0, False
     while index < len(tokens):
         token = tokens[index]
         if token.split('=', 1)[0] in CODEX_VALUE_OPTIONS:
-            valued = True
+            shifted = True
             index += 1 if '=' in token else 2
         elif token in CODEX_FLAGS:
             index += 1
         elif token.startswith('-'):
-            # An unknown option may take a value, so the subcommand's position is unknown.
-            return CodexRole.UNCERTAIN if APP_SERVER in tokens else CodexRole.SESSION
+            # An unknown option may take a value, so no later position is certain.
+            later = frozenset(tokens[index:])
+            return CodexRole.SESSION if later.isdisjoint(NON_SESSION_SUBCOMMANDS) else CodexRole.UNCERTAIN
         else:
-            return first_operand_role(token, valued, APP_SERVER in tokens[index + 1:])
-    # No operand: `app-server` can only have been read as an option's value.
-    return CodexRole.UNCERTAIN if APP_SERVER in tokens else CodexRole.SESSION
+            break
+    if index >= len(tokens):
+        # No operand: a subcommand can only have been read as an option's value.
+        return (CodexRole.UNCERTAIN if shifted and not NON_SESSION_SUBCOMMANDS.isdisjoint(tokens)
+                else CodexRole.SESSION)
+    operand, later = tokens[index], frozenset(tokens[index + 1:])
+    role = operand_role(operand)
+    if role is not CodexRole.SESSION:
+        return role
+    if shifted and not later.isdisjoint(NON_SESSION_SUBCOMMANDS):
+        return CodexRole.UNCERTAIN
+    if operand not in SESSION_SUBCOMMANDS and not later.isdisjoint(SERVICE_SUBCOMMANDS):
+        return CodexRole.UNCERTAIN
+    return CodexRole.SESSION
 
 
 def modules(tokens):

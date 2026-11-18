@@ -50,6 +50,18 @@ class CodexRoleTests(unittest.TestCase):
             'codex resume --last': CodexRole.SESSION,
             'codex': CodexRole.SESSION,
             'codex -c a=1 app-server --remote-control': CodexRole.APP_SERVER,
+            'codex exec-server --listen 1': CodexRole.SERVICE,
+            'codex remote-control start': CodexRole.SERVICE,
+            'codex -a never exec-server': CodexRole.SERVICE,
+            # Not an interactive, exec or resume run: never offered as a session.
+            'codex review': CodexRole.COMMAND,
+            'codex fork --last': CodexRole.COMMAND,
+            'codex login': CodexRole.COMMAND,
+            # A value with a space, or an option value that swallowed the subcommand.
+            'codex -c x=1 y exec-server': CodexRole.UNCERTAIN,
+            'codex -c a -m exec-server': CodexRole.UNCERTAIN,
+            'codex -m gpt fix the login page': CodexRole.UNCERTAIN,
+            'codex fix the exec-server tests': CodexRole.UNCERTAIN,
             '/x/codex app-server daemon pid-update-loop': CodexRole.APP_SERVER,
             'codex --config=a=1 app-server': CodexRole.APP_SERVER,
             # A value with a space shifts every later word: `b` is not a known subcommand.
@@ -173,6 +185,15 @@ class RoundThreeTests(unittest.TestCase):
                               {'infra:210': 'Codex app server'})
         self.assertIn('Codex app server', reason)
         self.assertRefused(world, (200, 'tree'))
+
+    def test_finding4_codex_service_subcommands_are_read_only_infra(self):
+        for command in ('codex exec-server --listen 1', 'codex remote-control start',
+                        '/x/codex -c a=1 exec-server'):
+            world = Harness((300, 101, command), (301, 300, 'node child.js'))
+            self.assertEqual(world.grouping.kind(300), Kind.INFRA, command)
+            self.assertEqual(world.grouping.kind(301), Kind.INFRA, command)
+            self.assertEqual(world.reason(300), KIND_REASONS[Kind.INFRA], command)
+            self.assertRefused(world, (300, 'tree'), (300, 'process'), (301, 'process'))
 
 
 class ShellTests(unittest.TestCase):

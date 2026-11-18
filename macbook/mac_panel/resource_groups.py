@@ -31,7 +31,7 @@ TOTAL_KINDS = (Kind.CLAUDE, Kind.CODEX, Kind.INFRA, Kind.COMPUTE)
 
 # Subcommands worth naming in a session's detail; anything else (including a prompt
 # operand, which must never be shown) reads as an interactive session.
-CODEX_DETAILS = {'exec': 'exec', 'e': 'exec', 'resume': 'resumed', 'review': 'review'}
+CODEX_DETAILS = {'exec': 'exec', 'e': 'exec', 'resume': 'resumed'}
 
 COMPUTE_WORKER_LABEL = 'worker'
 # ssh options that consume the next token; a control master runs with -N and -M.
