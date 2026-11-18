@@ -82,7 +82,7 @@ export function card({title, level, summary, body, actions, anchor: id}) {
   return id ? anchor(result, id) : result;
 }
 
-// ---- info icon: one fixed-position popover, shown on hover and pinned by a click, which also serves touch and keyboard ----
+// ---- info icon: one fixed-position popover, shown on hover or keyboard focus and pinned by a click, which also serves touch ----
 
 const openInfos = new Set();
 let infoListeners = false;
@@ -104,13 +104,23 @@ function positionOpenInfos() {
   });
 }
 
-function closeInfos(except) {
-  openInfos.forEach(item => {
-    if (item === except) return;
-    item.button.setAttribute('aria-expanded', 'false');
-    item.pop.hidden = true;
-    item.hover = false;
+// A note is visible while it is hovered, focused or pinned by a click; aria-expanded follows that one rule.
+function syncInfo(item) {
+  const shown = item.pinned || item.hover || item.focus;
+  item.pop.hidden = !shown;
+  item.button.setAttribute('aria-expanded', String(shown));
+  if (shown) {
+    openInfos.add(item);
+    positionInfo(item);
+  } else {
     openInfos.delete(item);
+  }
+}
+
+function closeInfos(except) {
+  [...openInfos].filter(item => item !== except).forEach(item => {
+    Object.assign(item, {pinned: false, hover: false, focus: false});
+    syncInfo(item);
   });
 }
 
@@ -141,38 +151,24 @@ export function info(text) {
   const pop = node('span', text, 'info-pop');
   pop.setAttribute('role', 'note');
   pop.hidden = true;
-  const item = {root, button: trigger, pop, hover: false};
-  // The popover stands in for a CSS tooltip, which a table's overflow would clip at the card edge.
-  root.addEventListener('mouseenter', () => {
-    if (!pop.hidden) return;
+  const item = {root, button: trigger, pop, hover: false, focus: false, pinned: false};
+  const show = reason => {
     closeInfos(item);
-    pop.hidden = false;
-    item.hover = true;
-    openInfos.add(item);
-    positionInfo(item);
-  });
-  root.addEventListener('mouseleave', () => {
-    if (!item.hover) return;
-    pop.hidden = true;
-    item.hover = false;
-    openInfos.delete(item);
-  });
+    item[reason] = true;
+    syncInfo(item);
+  };
+  // The popover stands in for a CSS tooltip, which a table's overflow would clip at the card edge. Keyboard focus shows
+  // it as hover does; a click (or Enter) pins it, which also serves touch.
+  root.addEventListener('mouseenter', () => show('hover'));
+  root.addEventListener('mouseleave', () => { item.hover = false; syncInfo(item); });
+  trigger.addEventListener('focus', () => show('focus'));
+  trigger.addEventListener('blur', () => { item.focus = false; syncInfo(item); });
   trigger.addEventListener('click', () => {
-    if (item.hover) {
-      // A click on a popover the hover opened pins it.
-      item.hover = false;
-      trigger.setAttribute('aria-expanded', 'true');
-      return;
-    }
-    const opening = pop.hidden;
-    closeInfos(item);
-    pop.hidden = !opening;
-    trigger.setAttribute('aria-expanded', String(opening));
-    if (opening) {
-      openInfos.add(item);
-      positionInfo(item);
+    if (item.pinned) {
+      Object.assign(item, {pinned: false, hover: false, focus: false});
+      syncInfo(item);
     } else {
-      openInfos.delete(item);
+      show('pinned');
     }
   });
   root.append(trigger, pop);
