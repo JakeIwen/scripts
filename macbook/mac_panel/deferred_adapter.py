@@ -171,10 +171,9 @@ class DeferredAdapter:
             confirm(body)
         if action == 'reschedule':
             argv += (validate_due(body.get('due')),)
+        if action in ('retry', 'run-now'):
+            job = self.listed_relaunch(job_id, relaunch)
         if action == 'run-now':
-            job = self.valid_job(job_id)
-            if relaunch != job['relaunch_id']:
-                raise relaunch_refused(job['relaunch_id'], relaunch)
             timeout = job['timeout'] + 30
             task = self.tasks.start(Section.DEFERRED, job_id, lambda: self.runner.run(argv, timeout=timeout))
             return Reply(task, 202)
@@ -189,6 +188,17 @@ class DeferredAdapter:
             raise ApiError(409, redact((result.stderr or result.stdout).strip()), code='reschedule-launched')
         checked(result)
         return Reply({'message': result.stdout.strip() or 'Updated'})
+
+    def listed_relaunch(self, job_id, relaunch):
+        """Retry and Run now: the job, when RELAUNCH is exactly the listing's current relaunch_id.
+
+        The listing names one only for an attempt that may still be active with
+        nothing left to collect, so the panel never abandons a run it still shows
+        running. The CLI checks again under the checker lock and has the last word."""
+        job = self.valid_job(job_id)
+        if relaunch != job['relaunch_id']:
+            raise relaunch_refused(job['relaunch_id'], relaunch)
+        return job
 
     def valid_job(self, job_id):
         job = next((j for j in self.read()['jobs'] if j['id'] == job_id and j['valid']), None)
@@ -260,8 +270,9 @@ class DeferredAdapter:
 def relaunch_token(body, action):
     """The unresolved Pi attempt (token or run id) the user confirmed starting another run over, or None.
 
-    The CLI checks it under the checker lock against the attempt it finds; a
-    missing, different or stale id is refused there (exit 7), whatever the page saw."""
+    It must equal the listing's relaunch_id (DeferredAdapter.listed_relaunch), and
+    the CLI checks it again under the checker lock against the attempt it finds;
+    a missing, different or stale id is refused there too (exit 7)."""
     if 'relaunch' not in body:
         return None
     value = field(body, 'relaunch', str, status=400)
@@ -273,7 +284,8 @@ def relaunch_token(body, action):
 
 def relaunch_refused(expected, given):
     if expected is None:
-        message = f'Nothing on vanpi is unresolved for this job, so relaunch {given} no longer applies; reload'
+        message = (f'The listing names no Pi attempt to start another run over for this job, so relaunch {given} '
+                   'no longer applies (a run it shows running is collected, not replaced); reload')
     else:
         message = (f'The Pi attempt {expected} may still be active; confirm starting another run over it')
     return ApiError(409, message, code='relaunch-unconfirmed')

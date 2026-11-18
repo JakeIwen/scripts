@@ -55,7 +55,7 @@ class DeferredTests(unittest.TestCase):
         for invalid in ('2026-02-30 00:00', '2026-01-01T01:00', 'tomorrow', '2026-10-19 25:00'):
             with self.assertRaises(ApiError):
                 validate_due(invalid)
-        runner = FakeRunner([CommandResult(75)])
+        runner = FakeRunner([json_command(inventory()), CommandResult(75)])
         adapter = DeferredAdapter(runner)
         try:
             with self.assertRaises(ApiError) as raised:
@@ -210,8 +210,11 @@ class DeferredTests(unittest.TestCase):
             adapter.tasks.close()
 
     def test_retry_relays_the_relaunch_consent_check_as_its_own_conflict(self):
+        # The listing showed nothing to replace, but the CLI, under the lock, found an attempt that may be active.
         refusal = f'its Pi launch with token {TOKEN} is unknown. To start another run anyway: ...'
-        runner = FakeRunner([CommandResult(7, stderr=refusal), CommandResult(0, 'retrying')])
+        held = pi_job(remote_state='launch-unknown', remote_token=TOKEN, relaunch_id=TOKEN, state='failed')
+        runner = FakeRunner([json_command(pi_job(state='failed')), CommandResult(7, stderr=refusal),
+                             json_command(held), CommandResult(0, 'retrying')])
         adapter = DeferredAdapter(runner)
         try:
             with self.assertRaises(ApiError) as raised:
@@ -226,9 +229,41 @@ class DeferredTests(unittest.TestCase):
                          {'action': 'cancel', 'id': 'test-job', 'relaunch': TOKEN, 'confirmed': True}):
                 with self.subTest(body=body), self.assertRaises(ApiError):
                     adapter.mutate(body)
-            self.assertEqual(len(runner.calls), 2)
+            self.assertEqual(len(runner.calls), 4)
         finally:
             adapter.tasks.close()
+
+    def test_retry_and_run_now_accept_only_the_listed_relaunch_id(self):
+        # Run now on a failed job started a run that is still going: the job is failed, its Pi run running.
+        running = pi_job(remote_state='running', remote_run=RUN_ID, remote_token=TOKEN, relaunch_id=None,
+                         state='failed')
+        for action in ('retry', 'run-now'):
+            for given in (RUN_ID, TOKEN):
+                with self.subTest(action=action, given=given):
+                    runner = FakeRunner([json_command(running)])
+                    adapter = DeferredAdapter(runner)
+                    try:
+                        with self.assertRaises(ApiError) as raised:
+                            adapter.mutate({'action': action, 'id': 'test-job', 'confirmed': True, 'relaunch': given})
+                        self.assertEqual((raised.exception.status, raised.exception.code),
+                                         (409, 'relaunch-unconfirmed'))
+                        self.assertEqual(len(runner.calls), 1)  # only the listing ran
+                    finally:
+                        adapter.tasks.close()
+        held = pi_job(remote_state='failed', remote_run=RUN_ID, remote_token=TOKEN, relaunch_id=RUN_ID, state='failed')
+        for action in ('retry', 'run-now'):
+            for extra in ({}, {'relaunch': TOKEN}):
+                with self.subTest(action=action, extra=extra):
+                    runner = FakeRunner([json_command(held)])
+                    adapter = DeferredAdapter(runner)
+                    try:
+                        with self.assertRaises(ApiError) as raised:
+                            adapter.mutate({'action': action, 'id': 'test-job', 'confirmed': True, **extra})
+                        self.assertEqual(raised.exception.code, 'relaunch-unconfirmed')
+                        self.assertIn(RUN_ID, str(raised.exception))
+                        self.assertEqual(len(runner.calls), 1)
+                    finally:
+                        adapter.tasks.close()
 
     def test_run_now_of_a_held_launch_needs_its_token(self):
         held = pi_job(remote_state='launch-unknown', remote_token=TOKEN, relaunch_id=TOKEN, state='failed')
@@ -272,7 +307,9 @@ class DeferredTests(unittest.TestCase):
         self.assertEqual(deferred_adapter.NAME_LIMIT, 60)
 
     def test_a_run_id_names_the_attempt_to_start_another_over(self):
-        runner = FakeRunner([CommandResult(0, 'retrying')])
+        expired = pi_job(remote_state='failed', remote_run=RUN_ID, remote_token=TOKEN, relaunch_id=RUN_ID,
+                         state='failed')
+        runner = FakeRunner([json_command(expired), CommandResult(0, 'retrying')])
         adapter = DeferredAdapter(runner)
         try:
             adapter.mutate({'action': 'retry', 'id': 'test-job', 'relaunch': RUN_ID, 'confirmed': True})
@@ -281,7 +318,7 @@ class DeferredTests(unittest.TestCase):
                 with self.subTest(bad=bad), self.assertRaises(ApiError) as raised:
                     adapter.mutate({'action': 'retry', 'id': 'test-job', 'relaunch': bad, 'confirmed': True})
                 self.assertEqual(raised.exception.status, 400)
-            self.assertEqual(len(runner.calls), 1)
+            self.assertEqual(len(runner.calls), 2)
         finally:
             adapter.tasks.close()
 
