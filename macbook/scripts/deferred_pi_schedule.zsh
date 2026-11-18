@@ -119,7 +119,6 @@ pi_owned() {  # DIR MODE RC: the job still owns a Pi run after this pass
     [[ $mode != scheduled ]] || pi_alert_once $dir collector "Deferred job collector failed: ${dir:t}" \
       "Its vanpi pass exited $rc without settling Pi run $(pi_attempt) (see $dir/last.log). The job keeps the run and every check tries again until the collection deadline. $(pi_recovery)"
   fi
-  if pi_expire $dir; then pi_ended $dir $mode; return 0; fi
   (( rc == not_ready_status )) || return 0
   run_job_collecting=1
   clear_not_ready
@@ -127,7 +126,7 @@ pi_owned() {  # DIR MODE RC: the job still owns a Pi run after this pass
   log_line "${${mode:#scheduled}:+manual }collecting ${dir:t}: Pi run $(pi_attempt) is checked again at the next check"
 }
 
-pi_expire() {  # DIR: records the collection deadline's failure once it has passed; refreshes $pi then
+pi_expire() {  # DIR: records the collection deadline's failure once it has passed (true then); refreshes $pi
   agent_setting $1 agent_run_timeout
   pi_control_run expire $1 ${${REPLY:#^<1->}:-} >> $1/last.log 2>&1 || return 1
   pi_snapshot $1 || true
@@ -165,18 +164,42 @@ pi_window_closed() {  # DIR: an unlaunched job past its give-up time fails witho
     "Its give-up time ${give_up/T/ } passed before it could launch on vanpi, so nothing was started. Job kept at $1; retry or run-now it in Mac Panel (macpanel)."
 }
 
-pi_run_due() {  # DIR NOW: the checker's turn for a vanpi job whose $pi is fresh
+pi_check() {  # DIR NOW: the checker's turn for a vanpi job whose record is trusted
+  local dir=$1
+  if ! pi_snapshot $dir; then
+    flag_invalid $dir "Its vanpi run state cannot be read (cancel --abandon removes it)"
+    return 0
+  fi
+  # The collection deadline needs only the record and the state, never the job's run file.
+  if (( pi[owes] )) && pi_expire $dir; then pi_ended $dir scheduled; return 0; fi
+  ! run_executable $dir || /bin/rm -f -- $flagged_dir/${dir:t}
+  pi_run_due $dir $2
+}
+
+pi_run_due() {  # DIR NOW: what the checker does for a vanpi job whose $pi is fresh
   local dir=$1 now=$2
   case $pi[state] in
-    running|launching|finished) pi_collect $dir scheduled ;;
+    running|launching|finished) pi_passable $dir && pi_collect $dir scheduled ;;
     # Ended before the scheduler saved it (a crash between the two writes): account it once, start nothing.
     failed|launch-unknown) [[ $job[state] == failed ]] || pi_ended $dir scheduled ;;
     unlaunched)
       [[ $job[state] == pending && ! $job[due] > $now ]] || return 0
       if [[ ! $now < $(give_up_stamp) ]]; then pi_window_closed $dir; return 0; fi
-      run_job $dir ;;
+      pi_passable $dir && run_job $dir ;;
   esac
   return 0
+}
+
+pi_passable() {  # DIR: its run file can make a pass; otherwise warns once and fails
+  run_executable $1 && return 0
+  if (( pi[owes] )); then
+    log_line "collector failed ${1:t}: its run file is missing or not executable, so Pi run $(pi_attempt) is not collected"
+    pi_alert_once $1 collector "Deferred job collector failed: ${1:t}" \
+      "Its run file is missing or not executable, so vanpi run $(pi_attempt) is not collected; the collection deadline still holds. $(pi_recovery) Job kept at $1; review it in Mac Panel (macpanel)."
+  else
+    flag_invalid $1
+  fi
+  return 1
 }
 
 pi_rearm() {  # DIR VERB ID: retry/run-now may go ahead; relays the control script's refusal (exit 7)

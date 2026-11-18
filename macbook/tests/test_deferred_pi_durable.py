@@ -90,3 +90,22 @@ class IdentityTests(PiHarness):
         self.assertEqual(len(self.calls("run")), 1)
         self.deferred("cancel", "--abandon", job.name)
         self.assertFalse(job.exists())
+
+
+class DeadlineWithoutRunTests(PiHarness):
+    def test_the_collection_deadline_is_recorded_when_the_run_file_is_gone(self):
+        job = self.add_pi()
+        self.deferred("run-due")
+        run_id = self.listed(job)["remote_run"]
+        (job / "run").unlink()
+        self.deferred("run-due")
+        self.deferred("run-due")
+        self.assertEqual(self.alerts(), [f"Deferred job collector failed: {job.name}"])
+        self.age_launch(job, PAST_DEADLINE)
+        self.deferred("run-due")
+        self.assertEqual(self.record(job, "remote-failed.json")["kind"], "collection-deadline")
+        self.assertEqual(self.meta(job)["state"], "failed")
+        self.assertEqual(self.alerts()[-1], f"Deferred job failed: {job.name}")
+        self.assertIn(f"stop {run_id}", WarningTopic.received[-1][2])
+        self.deferred("run-due")
+        self.assertEqual(len(self.alerts()), 2)

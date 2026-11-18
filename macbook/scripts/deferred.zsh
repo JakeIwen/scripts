@@ -575,9 +575,14 @@ job_record_valid() {  # DIR: validate fields that later become paths, numbers or
   [[ ${dir:t} == ${job[due]%%T*}-$job[name] ]]
 }
 
-job_runnable() {  # DIR: private folder, executable run, valid complete record (now in $job)
-  private_path $1 && private_path $1/job && private_path $1/run && [[ -x $1/run ]] &&
-    load_job $1 && job_record_valid $1
+job_trusted() {  # DIR: private folder and a valid complete record (now in $job); the run file is not checked
+  private_path $1 && private_path $1/job && load_job $1 && job_record_valid $1
+}
+
+run_executable() { private_path $1/run && [[ -x $1/run ]] }  # DIR: its run file can be started
+
+job_runnable() {  # DIR: a trusted job whose run file can be started
+  job_trusted $1 && run_executable $1
 }
 
 cmd_run_now() {
@@ -625,13 +630,10 @@ cmd_run_due() {
   now=$(strftime $stamp_format $EPOCHSECONDS)
   strftime '%F %T' $EPOCHSECONDS > $heartbeat
   for dir in $jobs_dir/*(N/); do
-    if ! job_runnable $dir; then flag_invalid $dir; continue; fi
-    if pi_job && ! pi_snapshot $dir; then
-      flag_invalid $dir "Its vanpi run state cannot be read (cancel --abandon removes it)"
-      continue
-    fi
+    if ! job_trusted $dir; then flag_invalid $dir; continue; fi
+    if pi_job; then pi_check $dir $now; continue; fi   # its deadline does not need the run file
+    if ! run_executable $dir; then flag_invalid $dir; continue; fi
     /bin/rm -f -- $flagged_dir/${dir:t}
-    if pi_job; then pi_run_due $dir $now; continue; fi
     [[ $job[state] == pending && ! $job[due] > $now ]] || continue
     run_job $dir
   done
