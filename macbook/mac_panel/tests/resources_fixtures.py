@@ -52,9 +52,14 @@ def make_texts(*specs):
     return '\n'.join(main), '\n'.join(argv0s), '\n'.join(kernel)
 
 
+def identity_text(names):
+    return '\n'.join(' '.join(line.split()[:6]) for line in names.splitlines())
+
+
 def make_table(*specs):
     """specs: (pid, ppid, command) or (pid, ppid, command, {overrides}); see make_texts."""
-    return parse_table(*make_texts(*specs))
+    texts = make_texts(*specs)
+    return parse_table(*texts, identity_text(texts[2]))
 
 
 class FakeReader:

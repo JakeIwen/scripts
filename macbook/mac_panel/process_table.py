@@ -27,10 +27,11 @@ FIELDS = 'pid=,ppid=,pgid=,uid=,nice=,state=,pcpu=,rss=,tty=,lstart=,command='
 TABLE_COMMAND = ('/bin/ps', '-axww', '-o', FIELDS)
 ARGV0_COMMAND = ('/bin/ps', '-axww', '-o', 'pid=,lstart=,comm=')
 KERNEL_NAME_COMMAND = ('/bin/ps', '-axww', '-o', 'pid=,lstart=,ucomm=')
-TABLE_COMMANDS = (TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND)
+IDENTITY_COMMAND = ('/bin/ps', '-axww', '-o', 'pid=,lstart=')
+TABLE_COMMANDS = (TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND, IDENTITY_COMMAND)
 # Fixed locale and zone make lstart a stable identity token across reads.
 PS_ENV = {'LC_ALL': 'C', 'TZ': 'UTC'}
-# All three passes together.
+# All passes share one deadline.
 TABLE_TIMEOUT = 5
 LSTART_FORMAT = '%a %b %d %H:%M:%S %Y'
 LEADING_FIELDS = 9
@@ -40,7 +41,7 @@ NO_TTY = frozenset(('??', '-'))
 # The kernel keeps at most this many characters of a process name (MAXCOMLEN).
 KERNEL_NAME_LIMIT = 16
 # A table with more than this share (beyond the allowance) of unreadable rows is a failed
-# read. Rows that merely lack a name-pass match are churn, not unreadable (see VANISHED).
+# read. A missing name is churn only if the identity stays absent in later passes.
 MALFORMED_SHARE = 0.05
 MALFORMED_ALLOWANCE = 10
 # Churn under a parallel test run reached about 7% of rows; a name pass that misses most of
@@ -220,20 +221,26 @@ def split_identity(line, extra):
     return pid, started, parts[1:1 + extra], parts[-1]
 
 
-def parse_names(text) -> dict[tuple[int, str], str]:
-    """A `pid=,lstart=,<name>=` pass: name by (pid, start)."""
-    names = {}
+def parse_names(text, identity_only=False):
+    """Parse a name or identity pass, counting nonblank unreadable lines."""
+    names, malformed = {}, 0
     for line in text.splitlines():
-        parsed = split_identity(line, 0)
-        if parsed is not None:
+        if not line.strip():
+            continue
+        if identity_only:
+            parts = line.split()
+            parsed = split_identity(line + ' identity', 0) if len(parts) == 1 + LSTART_TOKENS else None
+        else:
+            parsed = split_identity(line, 0)
+        if parsed is None:
+            malformed += 1
+        else:
             pid, started, _, name = parsed
-            names[(pid, started)] = name.rstrip('\n')
-    return names
+            names[(pid, started)] = name.rstrip()
+    return names, malformed
 
 
-# Returned by parse_row for a well-formed row with no match in a name pass: the process
-# started or exited between the three reads (heavy under a parallel test run), so it is
-# left out without counting against the table's readability.
+# Missing identities that never reappear can represent processes that exited between reads.
 class Vanished:
     """The type of VANISHED, parse_row's marker for a churned row."""
 
@@ -241,7 +248,7 @@ class Vanished:
 VANISHED = Vanished()
 
 
-def parse_row(line, argv0s, kernel_names) -> ProcessRow | Vanished | None:
+def parse_row(line, argv0s, kernel_names, identities) -> ProcessRow | Vanished | None:
     # The main pass prints lstart after the other fixed fields; reorder to share the splitter.
     parts = line.split(None, LEADING_FIELDS)
     if len(parts) != LEADING_FIELDS + 1:
@@ -258,8 +265,10 @@ def parse_row(line, argv0s, kernel_names) -> ProcessRow | Vanished | None:
     argv0, kernel_name = argv0s.get((pid, started)), kernel_names.get((pid, started))
     if pid < 0 or rss < 0 or not cpu >= 0:
         return None
-    if argv0 is None or kernel_name is None:
-        return VANISHED
+    if argv0 is None:
+        return None if (pid, started) in kernel_names or (pid, started) in identities else VANISHED
+    if kernel_name is None:
+        return None if (pid, started) in identities else VANISHED
     argv_text, argv0 = argv_text.rstrip(), argv0.rstrip()
     # The command is argv joined by spaces, so it must begin with this argv[0].
     if not argv0 or not (argv_text == argv0 or argv_text.startswith(argv0 + ' ')):
@@ -271,13 +280,16 @@ def parse_row(line, argv0s, kernel_names) -> ProcessRow | Vanished | None:
                       executable=argv0, kernel_name=kernel_name.strip()[:KERNEL_NAME_LIMIT])
 
 
-def parse_table(text, argv0_text, kernel_text) -> ProcessTable:
-    argv0s, kernel_names = parse_names(argv0_text), parse_names(kernel_text)
-    rows, malformed, vanished = {}, 0, 0
+def parse_table(text, argv0_text, kernel_text, identity_text) -> ProcessTable:
+    argv0s, argv_errors = parse_names(argv0_text)
+    kernel_names, kernel_errors = parse_names(kernel_text)
+    identity_names, identity_errors = parse_names(identity_text, identity_only=True)
+    identities = set(identity_names)
+    rows, malformed, vanished = {}, argv_errors + kernel_errors + identity_errors, 0
     for line in text.splitlines():
         if not line.strip():
             continue
-        row = parse_row(line, argv0s, kernel_names)
+        row = parse_row(line, argv0s, kernel_names, identities)
         if row is VANISHED:
             vanished += 1
             continue

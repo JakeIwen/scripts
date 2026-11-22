@@ -6,9 +6,9 @@ from panel_contracts import ApiError
 from unittest import mock
 
 import process_table
-from process_table import (ARGV0_COMMAND, KERNEL_NAME_COMMAND, PS_ENV, TABLE_COMMAND,
+from process_table import (ARGV0_COMMAND, IDENTITY_COMMAND, KERNEL_NAME_COMMAND, PS_ENV, TABLE_COMMAND,
                            ProcessReader, display_name, normal_started, parse_table, program_name)
-from resources_fixtures import STARTED, ArgvRunner, make_table, make_texts, name_line, ps_line
+from resources_fixtures import STARTED, ArgvRunner, make_table, identity_text, make_texts, name_line, ps_line
 
 
 def row_for(command, **overrides):
@@ -19,7 +19,8 @@ def reader_for(*specs, answers=None, files=None):
     """A reader over fake ps output; `files` answers the kernel executable-name lookup."""
     texts = make_texts(*specs)
     runner = ArgvRunner({argv: text + '\n' for argv, text in
-                         zip((TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND), texts)})
+                         zip((TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND, IDENTITY_COMMAND),
+                             (*texts, identity_text(texts[2])))})
     runner.answers.update(answers or {})
     files = files or {}
     looked_up = []
@@ -62,11 +63,12 @@ class PsParsingTests(unittest.TestCase):
         main, argv0s, kernel = make_texts((5, 1, 'ok'), (6, 1, 'sleep 9'), (7, 1, 'other'))
         # pid 6's argv[0] row is from a different process (another start); pid 7 has none.
         argv0s = '\n'.join([name_line(5, 'ok'), name_line(6, 'sleep', 'Wed Nov 18 04:11:36 2026')])
-        table = parse_table(main, argv0s, kernel)
-        self.assertEqual((sorted(table.rows), table.malformed), ([5], 0))
+        kernel = name_line(5, 'ok')
+        table = parse_table(main, argv0s, kernel, identity_text(kernel))
+        self.assertEqual((sorted(table.rows), table.malformed, table.vanished), ([5], 0, 2))
         # A command that does not begin with its argv[0] is a reused pid between passes.
         main, argv0s, kernel = make_texts((8, 1, 'vim notes', {'argv0': 'emacs'}))
-        self.assertEqual(parse_table(main, argv0s, kernel).malformed, 1)
+        self.assertEqual(parse_table(main, argv0s, kernel, identity_text(kernel)).malformed, 1)
 
     def test_malformed_rows_are_dropped_and_counted(self):
         main, argv0s, kernel = make_texts((5, 1, 'ok'), (11, 1, 'later'))
@@ -74,7 +76,7 @@ class PsParsingTests(unittest.TestCase):
         text = '\n'.join([lines[0], 'garbage', '  7 1 7 501 0 S 0.0 12 ?? Tue Nov 17 22:19:53',
                           ps_line(8, 1, 'x').replace('Tue', 'Xyz'), ps_line(9, 1, 'y').replace(' 0.0 ', ' -1 '),
                           lines[0], '', lines[1]])
-        table = parse_table(text, argv0s, kernel)
+        table = parse_table(text, argv0s, kernel, identity_text(kernel))
         self.assertEqual(sorted(table.rows), [5, 11])
         # A duplicate pid is malformed too: the first row wins.
         self.assertEqual(table.malformed, 5)
@@ -102,7 +104,7 @@ class PsParsingTests(unittest.TestCase):
     def test_reader_uses_fixed_argv_and_environment(self):
         reader, runner = reader_for((5, 1, 'ok'))
         self.assertEqual(list(reader.table().rows), [5])
-        self.assertEqual(runner.calls, [TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND])
+        self.assertEqual(runner.calls, [TABLE_COMMAND, ARGV0_COMMAND, KERNEL_NAME_COMMAND, IDENTITY_COMMAND])
         self.assertEqual(PS_ENV, {'LC_ALL': 'C', 'TZ': 'UTC'})
 
     def assertFails(self, reader):
@@ -129,16 +131,41 @@ class PsParsingTests(unittest.TestCase):
     def test_churned_rows_leave_the_table_without_making_it_unreadable(self):
         good = [(100 + n, 1, f'tool{n}') for n in range(100)]
         main, argv0s, kernel = make_texts(*good)
-        # 30 rows are missing from the argv[0] pass and 10 others from the kernel-name pass.
-        argv0_lines, kernel_lines = argv0s.splitlines(), kernel.splitlines()
-        table = parse_table(main, '\n'.join(argv0_lines[30:]), '\n'.join(kernel_lines[:50] + kernel_lines[60:]))
+        argv = '\n'.join(argv0s.splitlines()[20:])
+        kern = '\n'.join(kernel.splitlines()[40:])
+        identity = identity_text(kern)
+        table = parse_table(main, argv, kern, identity)
+        self.assertTrue(process_table.usable(table))
         self.assertEqual((len(table.rows), table.malformed, table.vanished), (60, 0, 40))
-        reader = reader_for(*good, answers={ARGV0_COMMAND: '\n'.join(argv0_lines[30:]) + '\n'})[0]
-        self.assertEqual(len(reader.table().rows), 70)
-        # A name pass that misses most of the table is a failed read, not churn.
-        self.assertFails(reader_for(*good, answers={ARGV0_COMMAND: '\n'.join(argv0_lines[60:]) + '\n'})[0])
-        # A table where nothing joined has no rows and stays a failed read.
-        self.assertFails(reader_for(*good, answers={ARGV0_COMMAND: argv0_lines[0].replace('100', '999')})[0])
+        reader = reader_for(*good, answers={ARGV0_COMMAND: argv, KERNEL_NAME_COMMAND: kern,
+                                           IDENTITY_COMMAND: identity})[0]
+        enriched = reader.table()
+        self.assertEqual((len(enriched.rows), enriched.malformed, enriched.vanished), (60, 0, 40))
+        # Excessive confirmed churn remains a failed read.
+        argv = '\n'.join(argv0s.splitlines()[60:])
+        kern = '\n'.join(kernel.splitlines()[60:])
+        self.assertFails(reader_for(*good, answers={ARGV0_COMMAND: argv, KERNEL_NAME_COMMAND: kern,
+                                                    IDENTITY_COMMAND: identity_text(kern)})[0])
+
+    def test_truncated_name_passes_are_failed_reads(self):
+        good = [(100 + n, 1, f'tool{n}') for n in range(100)]
+        _, argv, kernel = make_texts(*good)
+        for command, text in ((ARGV0_COMMAND, argv), (KERNEL_NAME_COMMAND, kernel)):
+            with self.subTest(command=command):
+                self.assertFails(reader_for(*good, answers={command: '\n'.join(text.splitlines()[20:])})[0])
+
+    def test_garbled_name_and_identity_lines_count_as_malformed(self):
+        good = [(100 + n, 1, f'tool{n}') for n in range(100)]
+        _, argv, kernel = make_texts(*good)
+        for command, text in ((ARGV0_COMMAND, argv), (KERNEL_NAME_COMMAND, kernel),
+                              (IDENTITY_COMMAND, identity_text(kernel))):
+            with self.subTest(command=command):
+                lines = text.splitlines()
+                def garbled(count):
+                    return '\n'.join(['garbage'] * count + lines[count:])
+                self.assertFails(reader_for(*good, answers={command: garbled(20)})[0])
+                table = reader_for(*good, answers={command: garbled(3)})[0].table()
+                self.assertGreaterEqual(table.malformed, 3)
 
     def test_start_times_normalise_day_padding(self):
         self.assertEqual(normal_started('Mon Nov  2 01:00:00 2026'), 'Mon Nov 2 01:00:00 2026')
