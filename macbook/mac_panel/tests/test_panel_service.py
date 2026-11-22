@@ -21,6 +21,7 @@ class ServiceConfigurationTests(unittest.TestCase):
         config = configuration()
         self.assertEqual(config['Label'], LABEL)
         self.assertEqual(config['Umask'], 63)
+        self.assertEqual(config['ProcessType'], 'Standard')
         self.assertNotIn('UserName', config)
         self.assertEqual(config['EnvironmentVariables'], {'PATH': CHILD_PATH, 'PYTHONPATH': str(ROOT / 'shared/python')})
         self.assertTrue(all(Path(arg).is_absolute() for arg in config['ProgramArguments']))

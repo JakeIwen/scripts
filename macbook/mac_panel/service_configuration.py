@@ -15,7 +15,9 @@ def configuration(root=ROOT, python=PYTHON):
         'WorkingDirectory': str(root),
         'EnvironmentVariables': {'PATH': CHILD_PATH, 'PYTHONPATH': str(root / 'shared/python')},
         'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 10,
-        'ExitTimeOut': 20, 'ProcessType': 'Background', 'Umask': 63,
+        # Standard, not Background: Run now starts deferred jobs as the panel's children,
+        # which inherit its class (at Background an agent job's suite ran ~6x slower).
+        'ExitTimeOut': 20, 'ProcessType': 'Standard', 'Umask': 63,
         'StandardOutPath': str(data / 'panel.log'), 'StandardErrorPath': str(data / 'panel.log'),
     }
 
