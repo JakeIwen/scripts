@@ -153,6 +153,7 @@ ROOTFS_PATH_BUDGETS_MIB=(
   /home/pi/youtube-cast/releases:512
   /home/pi/Documents/agent-shared:2048
   /home/pi/.claude/delegation-nudge:16
+  /home/pi/.local/state/llm-switchboard/desk:1
   /var/lib/vanresearch.img:232
   /var/lib/van-telemetry-advisor:160
   /opt/van-research-cli:1024
