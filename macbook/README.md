@@ -174,7 +174,12 @@ stdout and stderr to the ignored `log/` directory.
 deletes it. Queue one with
 `deferred.zsh add 2026-11-16 tor-unexclude ./undo.zsh "description"` (also
 `'YYYY-MM-DD HH:MM'`, `+30d`, `+12h`; `--file` copies extra material in, and
-`--attempts`/`--timeout` default to 3 and 900 s). `list` shows the human-readable
+`--attempts`/`--timeout` default to 3 and 900 s). Mac jobs launched by the
+hourly checker inherit its LaunchAgent's priority, `ProcessType` `Standard`: at
+`Background` an `add-agent` job's test suite ran about six times slower, and its
+timing tests failed. A Mac Panel `run-now` runs at the panel's own priority
+(`Background`), and vanpi jobs run on the Pi.
+`list` shows the human-readable
 queue, while `list --json` supplies Mac Panel's machine-readable checker and job
 state. Commands that take `JOB` accept either its exact name or directory id.
 

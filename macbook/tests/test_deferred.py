@@ -293,6 +293,11 @@ class DeferredLaunchAgentTests(unittest.TestCase):
         self.assertTrue(plist["RunAtLoad"])
         self.assertEqual(plist["StartInterval"], 3600)
 
+    def test_plist_runs_jobs_unthrottled(self):
+        # Jobs inherit this priority; at Background an agent job's suite outran its timeout.
+        plist = plistlib.loads(PLIST.read_bytes())
+        self.assertEqual(plist["ProcessType"], "Standard")
+
 
 if __name__ == "__main__":
     unittest.main()

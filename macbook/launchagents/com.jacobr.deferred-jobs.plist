@@ -14,8 +14,11 @@
     <true/>
     <key>StartInterval</key>
     <integer>3600</integer>
+    <!-- Not Background: jobs inherit the checker's priority, and add-agent jobs
+         run whole claude -p sessions and test suites. At Background the
+         ~/config suite took 16 min instead of 2 and its timing tests failed. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Standard</string>
     <key>StandardOutPath</key>
     <string>/Users/jacobr/.agent/deferred/launchd.log</string>
     <key>StandardErrorPath</key>
