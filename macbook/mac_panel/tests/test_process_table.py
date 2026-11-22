@@ -58,12 +58,12 @@ class PsParsingTests(unittest.TestCase):
         self.assertEqual((row.exe, row.arguments_text), ('Google Chrome', ' --type=renderer --secret value'))
         self.assertEqual(display_name(row), 'Google Chrome')
 
-    def test_rows_that_do_not_join_on_pid_and_start_are_malformed(self):
+    def test_rows_that_do_not_join_on_pid_and_start_are_churn_not_malformed(self):
         main, argv0s, kernel = make_texts((5, 1, 'ok'), (6, 1, 'sleep 9'), (7, 1, 'other'))
         # pid 6's argv[0] row is from a different process (another start); pid 7 has none.
         argv0s = '\n'.join([name_line(5, 'ok'), name_line(6, 'sleep', 'Wed Nov 18 04:11:36 2026')])
         table = parse_table(main, argv0s, kernel)
-        self.assertEqual((sorted(table.rows), table.malformed), ([5], 2))
+        self.assertEqual((sorted(table.rows), table.malformed), ([5], 0))
         # A command that does not begin with its argv[0] is a reused pid between passes.
         main, argv0s, kernel = make_texts((8, 1, 'vim notes', {'argv0': 'emacs'}))
         self.assertEqual(parse_table(main, argv0s, kernel).malformed, 1)
@@ -119,11 +119,26 @@ class PsParsingTests(unittest.TestCase):
         self.assertFails(reader_for((5, 1, 'ok'), answers={TABLE_COMMAND: 'garbage\nmore garbage\n'})[0])
         good = [(100 + n, 1, f'tool{n}') for n in range(100)]
         main, argv0s, kernel = make_texts(*good)
-        broken = '\n'.join(argv0s.splitlines()[:80])
-        reader = reader_for(*good, answers={ARGV0_COMMAND: broken + '\n'})[0]
-        self.assertFails(reader)
-        tolerable = '\n'.join(argv0s.splitlines()[:95])
-        self.assertEqual(len(reader_for(*good, answers={ARGV0_COMMAND: tolerable})[0].table().rows), 95)
+        lines = main.splitlines()
+
+        def garbled(count):
+            return '\n'.join(['garbage'] * count + lines[count:]) + '\n'
+        self.assertFails(reader_for(*good, answers={TABLE_COMMAND: garbled(20)})[0])
+        self.assertEqual(len(reader_for(*good, answers={TABLE_COMMAND: garbled(5)})[0].table().rows), 95)
+
+    def test_churned_rows_leave_the_table_without_making_it_unreadable(self):
+        good = [(100 + n, 1, f'tool{n}') for n in range(100)]
+        main, argv0s, kernel = make_texts(*good)
+        # 30 rows are missing from the argv[0] pass and 10 others from the kernel-name pass.
+        argv0_lines, kernel_lines = argv0s.splitlines(), kernel.splitlines()
+        table = parse_table(main, '\n'.join(argv0_lines[30:]), '\n'.join(kernel_lines[:50] + kernel_lines[60:]))
+        self.assertEqual((len(table.rows), table.malformed, table.vanished), (60, 0, 40))
+        reader = reader_for(*good, answers={ARGV0_COMMAND: '\n'.join(argv0_lines[30:]) + '\n'})[0]
+        self.assertEqual(len(reader.table().rows), 70)
+        # A name pass that misses most of the table is a failed read, not churn.
+        self.assertFails(reader_for(*good, answers={ARGV0_COMMAND: '\n'.join(argv0_lines[60:]) + '\n'})[0])
+        # A table where nothing joined has no rows and stays a failed read.
+        self.assertFails(reader_for(*good, answers={ARGV0_COMMAND: argv0_lines[0].replace('100', '999')})[0])
 
     def test_start_times_normalise_day_padding(self):
         self.assertEqual(normal_started('Mon Nov  2 01:00:00 2026'), 'Mon Nov 2 01:00:00 2026')

@@ -39,10 +39,13 @@ RSS_UNIT = 1024
 NO_TTY = frozenset(('??', '-'))
 # The kernel keeps at most this many characters of a process name (MAXCOMLEN).
 KERNEL_NAME_LIMIT = 16
-# Processes start and exit between the three passes, so a few unjoined rows are normal; a
-# table with more than this share (beyond the allowance) unreadable is a failed read.
+# A table with more than this share (beyond the allowance) of unreadable rows is a failed
+# read. Rows that merely lack a name-pass match are churn, not unreadable (see VANISHED).
 MALFORMED_SHARE = 0.05
 MALFORMED_ALLOWANCE = 10
+# Churn under a parallel test run reached about 7% of rows; a name pass that misses most of
+# the table is a failed read (truncated or mismatched output), not churn.
+VANISHED_SHARE = 0.5
 # Kernel executable-name lookups per table read (about 20 µs each); rows beyond the cap
 # show the kernel's short name. About 80 rows need one on this Mac (2026-11-18).
 EXECUTABLE_LOOKUP_LIMIT = 256
@@ -136,6 +139,7 @@ def display_name(row) -> str:
 class ProcessTable:
     rows: dict[int, ProcessRow]
     malformed: int = 0
+    vanished: int = 0
 
     @cached_property
     def children(self) -> dict[int, list[int]]:
@@ -227,7 +231,17 @@ def parse_names(text) -> dict[tuple[int, str], str]:
     return names
 
 
-def parse_row(line, argv0s, kernel_names) -> ProcessRow | None:
+# Returned by parse_row for a well-formed row with no match in a name pass: the process
+# started or exited between the three reads (heavy under a parallel test run), so it is
+# left out without counting against the table's readability.
+class Vanished:
+    """The type of VANISHED, parse_row's marker for a churned row."""
+
+
+VANISHED = Vanished()
+
+
+def parse_row(line, argv0s, kernel_names) -> ProcessRow | Vanished | None:
     # The main pass prints lstart after the other fixed fields; reorder to share the splitter.
     parts = line.split(None, LEADING_FIELDS)
     if len(parts) != LEADING_FIELDS + 1:
@@ -242,8 +256,10 @@ def parse_row(line, argv0s, kernel_names) -> ProcessRow | None:
     except ValueError:
         return None
     argv0, kernel_name = argv0s.get((pid, started)), kernel_names.get((pid, started))
-    if pid < 0 or rss < 0 or not cpu >= 0 or argv0 is None or kernel_name is None:
+    if pid < 0 or rss < 0 or not cpu >= 0:
         return None
+    if argv0 is None or kernel_name is None:
+        return VANISHED
     argv_text, argv0 = argv_text.rstrip(), argv0.rstrip()
     # The command is argv joined by spaces, so it must begin with this argv[0].
     if not argv0 or not (argv_text == argv0 or argv_text.startswith(argv0 + ' ')):
@@ -257,22 +273,26 @@ def parse_row(line, argv0s, kernel_names) -> ProcessRow | None:
 
 def parse_table(text, argv0_text, kernel_text) -> ProcessTable:
     argv0s, kernel_names = parse_names(argv0_text), parse_names(kernel_text)
-    rows, malformed = {}, 0
+    rows, malformed, vanished = {}, 0, 0
     for line in text.splitlines():
         if not line.strip():
             continue
         row = parse_row(line, argv0s, kernel_names)
+        if row is VANISHED:
+            vanished += 1
+            continue
         if row is None or row.pid in rows:
             malformed += 1
             continue
         rows[row.pid] = row
-    return ProcessTable(rows, malformed)
+    return ProcessTable(rows, malformed, vanished)
 
 
 def usable(table: ProcessTable) -> bool:
     """A table with no rows, or mostly unreadable rows, is a failed read, not an idle machine."""
-    total = len(table.rows) + table.malformed
-    return bool(table.rows) and table.malformed <= max(MALFORMED_ALLOWANCE, MALFORMED_SHARE * total)
+    total = len(table.rows) + table.malformed + table.vanished
+    return (bool(table.rows) and table.malformed <= max(MALFORMED_ALLOWANCE, MALFORMED_SHARE * total)
+            and table.vanished <= VANISHED_SHARE * total)
 
 
 def started_epoch(started) -> float | None:
@@ -305,7 +325,7 @@ def with_executable_files(table: ProcessTable, lookup) -> ProcessTable:
         looked_up += 1
         if name := lookup(pid):
             rows[pid] = replace(row, executable_file=name)
-    return ProcessTable(rows, table.malformed)
+    return ProcessTable(rows, table.malformed, table.vanished)
 
 
 class ProcessReader:
@@ -331,5 +351,6 @@ class ProcessReader:
             outputs.append(result.stdout)
         table = parse_table(*outputs)
         if not usable(table):
-            raise ApiError(502, f'Process table unreadable ({table.malformed} malformed rows)')
+            raise ApiError(502, f'Process table unreadable ({table.malformed} malformed, '
+                                f'{table.vanished} unmatched rows)')
         return with_executable_files(table, self.executable_name)
