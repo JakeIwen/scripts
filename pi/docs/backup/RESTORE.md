@@ -269,6 +269,7 @@ MiB so fractional-GiB limits are exact:
 | `/var/cache/apt` | 1GiB |
 | `/home/pi/youtube-cast/releases` | 0.5GiB |
 | `/home/pi/Documents/agent-shared` | 2GiB |
+| `/home/pi/.cache/dep-install-guard` | 4MiB |
 | `/home/pi/.claude/delegation-nudge` | 16MiB |
 | `/var/lib/vanresearch.img` | 232MiB |
 | `/var/lib/van-telemetry-advisor` | 160MiB |

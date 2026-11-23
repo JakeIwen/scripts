@@ -16,6 +16,53 @@ compute installer to `/home/pi/van_compute/`; the general Pi sync invokes the
 coupled installer after package deployment and does not copy compute files through
 its generic staging paths.
 
+## Dependency install guard
+
+`sh/dep_install_guard.py` checks explicit public package operands in Bash tool
+calls: npm, pnpm, yarn and bun installs and package runners; pip, pipx, uv and
+Poetry additions. No packages are installed by the hook. Unknown names stop at
+one authoritative registry probe: they are never sent to downloads or malware
+services. Private or uncertain source configuration and offline installs skip
+public checks, including cached facts. An unversioned `npx`/`npm exec` command
+that selects an existing local executable is not an install.
+
+| Evidence | Action |
+|---|---|
+| Public registry 404 | Block; override only for a private package known to exist |
+| OSV malware advisory for the entire package or pinned version | Block, no inline override |
+| Version-specific malware advisory, no exact pin | Block; pin an exact version outside every affected set |
+| Exact pin outside the reported versions | Warn; if the version check was incomplete, say so |
+| First release under 90 days old and fewer than 1,000 measured weekly downloads | Block unless the operator explicitly confirms the new, little-used package |
+| First release under 14 days old and no download statistics | Same override; 14–89 days with no statistics only warns |
+
+When a deny permits it, put `DEP_GUARD_ALLOW=<canonical-name>` (or comma-separated
+names) on that install command. Inline text cannot disable the hook or override
+malware. An operator can run a deliberate exception themselves, or disable the
+hook via `DEP_INSTALL_GUARD=off` in its *own* environment.
+
+The PyPI cutoffs are provisional. Low use alone does not block. Registries can
+be wrong or unavailable, and age and popularity do not establish trust. At
+50,000+ weekly downloads, the hook does not fetch release metadata: a young,
+popular package will not get an age warning. Otherwise, it warns about new
+packages and npm packages with at most two versions and just one maintainer.
+A failed check adds context without erasing an independently established deny.
+
+**Not checked:** bare installs (including `npm ci`, `uv sync` and
+`poetry install`), requirements/constraint files, manifest edits followed by
+bare installs, package names inside scripts, remote commands over SSH, and
+non-registry specs. Check those names yourself, including the project's own
+documentation. This is a best-effort tool-call check, not a package-manager or
+shell security boundary.
+
+The per-user cache (`~/.cache/dep-install-guard/lookups.json`) is capped at
+1 MiB and 2,000 entries. Per call: 20 distinct names, 40 requests, 8 MiB, six
+concurrent requests and a five-second network deadline. The hook must run with
+its lexical reader and all `dep_guard_*.py` siblings beside it. On an isolated
+check only, `DEP_INSTALL_GUARD_TRACE` in the hook environment can point to a
+private temporary trace of destination host, operation class and byte count.
+Remove the trace afterwards. For a repo-level release-age gate, consider pnpm
+`minimumReleaseAge` or npm's `--before <date>`.
+
 ## Session search
 
 `claudesearch`, `codexsearch`, and `llmsearch` search newest sessions first.

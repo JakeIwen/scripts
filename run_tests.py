@@ -40,7 +40,7 @@ PYTHON_IMPORT_ROOTS = {
     'pi/tests/test_update_services.py': ('pi/scripts/backup',),
     'pi/tests/price_check': ('pi/scripts/price_check',),
     'pi/projects/phone-drop': ('pi/projects/phone-drop',),
-    'shared/tests': ('shared/python',),
+    'shared/tests': ('shared/python', 'shared/sh'),
 }
 
 

@@ -971,6 +971,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   alias left is `sudo='sudo '`; `sudo <function>` can't work), and put a name
   that shadows a command or builtin below the line.
   `pi/tests/test_bashrc_codex.sh` loads the file in Codex mode and checks it.
+- `shared/sh/dep_install_guard.py`: Claude/Codex PreToolUse Bash hook (Python 3.9+).
+  Deploy it, `dep_guard_*.py` and `destructive_guard_shell.py` as one flat cohort.
+  `dep_guard_shell` adapts the lexical reader, `dep_guard_options` describes manager
+  options, and `dep_guard_commands` and `dep_guard_specs` extract direct operands.
+  `dep_guard_sources` gates public requests, `dep_guard_run` coordinates lookup,
+  `dep_guard_lookup` owns registry facts, `dep_guard_osv` and `dep_guard_versions`
+  interpret malware advisories, `dep_guard_verdict` the policy, `dep_guard_network` the shared I/O budget, and
+  `dep_guard_cache` the limited per-host cache. Coverage: [shared README](shared/README.md#dependency-install-guard).
 - `shared/sh/destructive_command_guard.py`: PreToolUse hook for Claude/Codex on Mac/Pi
   (Python 3.9+, flat `/home/pi/scripts/` on Pi); blocks protected-path recursive rm,
   forced and `--mirror` pushes, and Mac-only destructive find/disk commands (with
