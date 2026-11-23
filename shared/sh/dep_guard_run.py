@@ -1,23 +1,23 @@
-"""Coordinate package checks without letting one unavailable source erase another's evidence."""
+"""Route eligibility, per-invocation decisions and the Bash hook's structured response."""
 import time
-from threading import Thread
 
 from dep_guard_cache import Cache
 from dep_guard_commands import parse_commands
-from dep_guard_lookup import existence_facts, reputation_facts
-from dep_guard_network import DEADLINE_SECONDS, Network
-from dep_guard_osv import lookup_advisories
+from dep_guard_deadline import DEADLINE_NOTE
+from dep_guard_network import Network
+from dep_guard_osv import cached_advisories, lookup_advisories
+from dep_guard_schedule import PackageChecks
 from dep_guard_sources import public_source
-from dep_guard_verdict import Downloads, Existence, Metadata, verdict
+from dep_guard_verdict import Downloads, verdict
 
 MAX_NAMES = 20
 
 
-def select_requests(command, cwd, env, home, deadline):
+def select_requests(command, cwd, env, home, budget):
     requests, notes = {}, set()
-    for inv in parse_commands(command, cwd):
-        if time.monotonic() >= deadline:
-            notes.add('not checked: install check deadline reached')
+    for inv in parse_commands(command, cwd, env=env, home=home):
+        if not budget.remaining():
+            notes.add(DEADLINE_NOTE)
             break
         if inv.local:
             continue  # Running a local executable is not a package lookup.
@@ -32,33 +32,6 @@ def select_requests(command, cwd, env, home, deadline):
     return requests, sorted(notes)
 
 
-def advisory_results(out, keys, net, cache, pins):
-    try:
-        out.update(lookup_advisories(keys, net, cache, pins=pins))
-    except Exception:
-        # A registry verdict still applies when a separate advisory source fails.
-        pass
-
-
-def combined_evidence(requests, net, cache):
-    overrides = {k for k, invs in requests.items() if any(i.override for i in invs)}
-    presence = existence_facts(requests, overrides, net, cache)
-    public = [k for k in requests if presence.get(k) is Existence.FOUND]
-    advisories, stats, metadata = {}, {}, {}
-    if public:
-        pins = {k: {i.pin for i in requests[k] if i.pin} for k in public}
-        # Independent destinations start together. Only Network runs transport
-        # workers; its bounded map lets coordinators finish at the shared deadline.
-        osv = Thread(target=advisory_results, args=(advisories, public, net, cache, pins), daemon=True)
-        osv.start()
-        try:
-            stats, metadata = reputation_facts(public, overrides, net, cache)
-        except Exception:
-            pass
-        osv.join()
-    return presence, stats, metadata, advisories
-
-
 def hook_result(blocks, notes):
     if blocks:
         text = 'Dependency install blocked:\n' + '\n'.join(dict.fromkeys(blocks + notes))
@@ -68,29 +41,42 @@ def hook_result(blocks, notes):
     return None
 
 
-def check_command(command, cwd, env, home, transport):
-    deadline = time.monotonic() + DEADLINE_SECONDS
-    requests, notes = select_requests(command, cwd, env, home, deadline)
-    if not requests:
-        return hook_result([], notes)
-    cache = Cache(home)
-    net = Network(cache, transport=transport, trace=env.get('DEP_INSTALL_GUARD_TRACE'),
-                  seconds=max(0, deadline - time.monotonic()))
-    presence, stats, meta, advisories = combined_evidence(requests, net, cache)
-    blocks = []
+def decision(requests, checks, notes):
+    blocks, notes = [], list(notes)
     now = time.time()
     for key, invs in requests.items():
         for inv in invs:
-            deny, warn = verdict(inv, presence.get(key, Existence.UNKNOWN), stats.get(key, Downloads()),
-                                 meta.get(key, Metadata()), advisories.get(key), now)
+            facts = checks.facts[key][inv.override]
+            deny, warn = verdict(inv, facts.existence, facts.stats or Downloads(), facts.meta,
+                                 checks.advisories.get(key), now)
             label = '%s%s: ' % (inv.name, '@' + inv.pin if inv.pin else '')
             blocks.extend(label + d.replace('=<name>', '=' + inv.name) for d in deny)
             notes.extend(label + w for w in warn)
+    return hook_result(blocks, notes)
+
+
+def check_command(command, cwd, env, home, transport, budget):
+    requests, notes = select_requests(command, cwd, env, home, budget)
+    if not requests or not budget.remaining():
+        return hook_result([], notes if budget.remaining() else notes + [DEADLINE_NOTE])
+    cache = Cache(home, env=env)
+    if not budget.remaining():
+        return hook_result([], notes + [DEADLINE_NOTE])
+    # Give the coordinator time to publish and persist completed checks after a
+    # socket times out. The enclosing deadline also covers both local operations.
+    remaining = budget.remaining()
+    net = Network(cache, transport=transport, trace=env.get('DEP_INSTALL_GUARD_TRACE'),
+                  seconds=remaining - min(0.05, remaining / 10))
+    checks = PackageChecks(requests, net, cache, cached_advisories, lookup_advisories)
+    budget.publish(decision(requests, checks, notes))
+    if not checks.run(lambda: budget.publish(decision(requests, checks, notes))):
+        notes.append(DEADLINE_NOTE)
     if net.cooldown_hosts:
         notes.append('Network check skipped during cooldown: ' + ', '.join(net.cooldown_hosts))
-    result = hook_result(blocks, notes)
+    result = decision(requests, checks, notes)
+    budget.publish(result)
     try:
-        cache.save(max_wait=min(0.5, net.remaining()))
+        cache.save(max_wait=min(0.5, budget.remaining()))
     except OSError:
         pass  # Persistence must never alter a decision already made.
     return result

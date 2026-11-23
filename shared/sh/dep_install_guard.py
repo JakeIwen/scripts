@@ -15,20 +15,23 @@ def candidate(command, env):
     return env.get('DEP_INSTALL_GUARD') != 'off' and CANDIDATE.search(re.sub(r'''[\\'"\n]''', '', command))
 
 
-def evaluate(command, cwd, *, env, home, transport=None):
+def evaluate(command, cwd, *, env, home, transport=None, seconds=None):
     if not candidate(command, env):
         return None
-    return check_candidate(command, cwd, env, home, transport)
+    return check_candidate(command, cwd, env, home, transport, seconds)
 
 
-def check_candidate(command, cwd, env, home, transport=None):
+def check_candidate(command, cwd, env, home, transport=None, seconds=None):
     try:
-        from dep_guard_run import check_command
-        return check_command(command, cwd, env, home, transport)
+        from dep_guard_deadline import Deadline
     except ImportError:
-        return context('Dependency install guard is broken (required hook module missing); check names manually.')
-    except Exception:
-        return context('Dependency install guard unavailable; check package names manually.')
+        return context('Dependency install guard is broken (deadline module missing); check names manually.')
+
+    def check(budget):
+        from dep_guard_run import check_command
+        return check_command(command, cwd, env, home, transport, budget)
+
+    return Deadline(seconds).run(check)
 
 
 def main():

@@ -1,10 +1,9 @@
 """Public registry and download lookups; no telemetry before a positive existence probe."""
-from dataclasses import asdict
 from datetime import datetime
 from urllib.parse import quote
 
 from dep_guard_specs import NPM
-from dep_guard_verdict import DAY, LOW_USE, POPULAR, Downloads, Existence, Metadata, Stat
+from dep_guard_verdict import Downloads, Existence, Metadata, Stat
 NPM_REGISTRY = 'https://registry.npmjs.org/'
 PYPI_BASE = 'https://pypi.org/pypi/'
 NPM_STATS = 'https://api.npmjs.org/downloads/point/last-week/'
@@ -29,21 +28,6 @@ def presence(key, net):
     if status == 404:
         return Existence.MISSING
     return Existence.FOUND if status == 200 and valid else Existence.UNKNOWN
-
-
-def existence_facts(keys, overrides, net, cache):
-    facts, tasks = {}, {}
-    for key in keys:
-        cached = cache.get(fact_key(key, 'exists'))
-        if cached == Existence.FOUND or (cached == Existence.MISSING and key not in overrides):
-            facts[key] = Existence(cached)
-        else:
-            tasks[key] = lambda k=key: presence(k, net)
-    for key, answer in net.map(tasks).items():
-        facts[key] = answer
-        if answer is not Existence.UNKNOWN:
-            cache.put(fact_key(key, 'exists'), answer.value, 7 * DAY if answer is Existence.FOUND else 3600)
-    return facts
 
 
 def count(value):
@@ -81,25 +65,15 @@ def stats_batch(keys, net):
             for k in keys if k[1] in data}
 
 
-def download_facts(keys, overrides, net, cache):
-    facts, groups, unscoped = {}, [], []
+def statistics_groups(keys):
+    unscoped = []
     for key in keys:
-        value = cache.get(fact_key(key, 'downloads'))
-        if count(value) and not (key in overrides and value < LOW_USE):
-            facts[key] = Downloads(Stat.MEASURED, value)
-        elif key[0] == NPM and not key[1].startswith('@'):
+        if key[0] == NPM and not key[1].startswith('@'):
             unscoped.append(key)
         else:
-            groups.append([key])
+            yield [key]
     if unscoped:
-        groups.append(unscoped)
-    fetched = net.map({i: lambda g=g: stats_batch(g, net) for i, g in enumerate(groups)})
-    for batch in fetched.values():
-        for key, fact in batch.items():
-            facts[key] = fact
-            if fact.state is Stat.MEASURED:
-                cache.put(fact_key(key, 'downloads'), fact.count, 7 * DAY)
-    return facts
+        yield unscoped
 
 
 def upload_time(s):
@@ -132,20 +106,9 @@ def metadata(key, net):
     return Metadata(min((d for d in dates if d is not None), default=None))
 
 
-def reputation_facts(keys, overrides, net, cache):
-    stats = download_facts(keys, overrides, net, cache)
-    facts, tasks = {}, {}
-    for key in keys:
-        if (stats.get(key, Downloads()).count or 0) >= POPULAR:
-            continue
-        record = cache.get(fact_key(key, 'metadata'))
-        if (isinstance(record, dict) and type(record.get('first')) in (int, float)
-                and all(record.get(k) is None or count(record[k]) for k in ('versions', 'maintainers'))):
-            facts[key] = Metadata(record['first'], record.get('versions'), record.get('maintainers'))
-        else:
-            tasks[key] = lambda k=key: metadata(k, net)
-    for key, fact in net.map(tasks).items():
-        facts[key] = fact
-        if fact.first is not None:
-            cache.put(fact_key(key, 'metadata'), asdict(fact), 30 * DAY)
-    return stats, facts
+def cached_metadata(cache, key):
+    record = cache.get(fact_key(key, 'metadata'))
+    if (isinstance(record, dict) and type(record.get('first')) in (int, float)
+            and all(record.get(k) is None or count(record[k]) for k in ('versions', 'maintainers'))):
+        return Metadata(record['first'], record.get('versions'), record.get('maintainers'))
+    return None

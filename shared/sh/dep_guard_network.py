@@ -12,13 +12,15 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 
+from dep_guard_deadline import DEADLINE_SECONDS
+
+
 HOSTS = {'registry.npmjs.org', 'api.npmjs.org', 'pypi.org', 'pypistats.org', 'api.osv.dev'}
 SMALL = 256 * 1024
 METADATA = 2 * 1024 * 1024
 TOTAL = 8 * 1024 * 1024
 MAX_REQUESTS = 40
 CONCURRENT = 6
-DEADLINE_SECONDS = 5
 COOLDOWN = 120
 CHUNK = 64 * 1024
 

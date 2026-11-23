@@ -44,16 +44,22 @@ def overrideable(reason, instruction, override):
 
 def verdict(inv, existence, stats, meta, advisory, now):
     """Return (blocks, notes) for one actual operand, not for its alias."""
-    if existence is Existence.MISSING:
-        return overrideable('not found on the public registry',
-                            'only for a private package you know exists on this registry', inv.override)
     if existence is not Existence.FOUND:
-        return [], ['public registry existence check unavailable (offline or unfinished); not checked']
+        # The registry gates outbound disclosure, not an unexpired confirmed
+        # malware finding obtained on a previous eligible lookup of this name.
+        blocks = advisory.decision(inv.pin)[0] if advisory is not None else []
+        if existence is Existence.MISSING:
+            deny, warn = overrideable('not found on the public registry',
+                                      'only for a private package you know exists on this registry', inv.override)
+            return blocks + deny, warn
+        return blocks, ['public registry existence check unavailable (offline or unfinished); not checked']
     blocks, notes = advisory.decision(inv.pin) if advisory is not None else ([], ['OSV malware check unavailable'])
     if stats.state is Stat.MEASURED and stats.count >= POPULAR:
         return blocks, notes
     if stats.state is Stat.UNKNOWN:
         notes.append('weekly downloads unavailable')
+    if meta is None:
+        return blocks, notes + ['metadata check unfinished']
     if meta.first is None:
         notes.append('age not checked (metadata unavailable)')
     else:

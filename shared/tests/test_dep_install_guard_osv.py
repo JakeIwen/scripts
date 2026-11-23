@@ -2,8 +2,12 @@
 import json
 import unittest
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from types import MappingProxyType
 
-from dep_guard_osv import lookup_advisories
+from dep_guard_network import Network
+from dep_guard_osv import cached_advisories, lookup_advisories
 
 A = ('npm', 'alpha')
 B = ('PyPI', 'beta-tool')
@@ -256,6 +260,87 @@ class AdvisoryTest(unittest.TestCase):
         self.assertIncomplete(e.decision('3.0.0'))
         self.w.expired = True
         self.assertTrue(self.evidence(A, pins={A: {pin}})[A].decision(pin)[0])
+
+    def test_cache_only_preserves_confirmed_facts_from_a_partial_name_search(self):
+        self.w.pages[A, None] = page(M1, M2)
+        self.w.details[M1] = detail(M1, entry(versions=['1.2.3']))
+        self.w.details[M2] = None
+        self.evidence(A)
+        # The only permitted operation on this cache is a read; there is no transport.
+        facts = cached_advisories([A, B], MappingProxyType(self.c), pins={A: {'1.2.3'}})
+        self.assertIn(M1, ' '.join(facts[A].decision('1.2.3')[0]))
+        self.assertIncomplete(facts[A].decision('1.2.4'))
+        self.assertIncomplete(facts[B].decision(None))
+
+    def test_cache_only_finds_exact_positive_even_after_name_detail_eviction(self):
+        self.long_list()
+        pin = '1.0.200'
+        self.w.exact[A, pin, None] = 200, {'vulns': [self.w.details[M1]]}
+        self.assertTrue(self.evidence(A, pins={A: {pin}})[A].decision(pin)[0])
+        for k in list(self.c):
+            if not k.endswith('@' + pin):
+                del self.c[k]
+        cache = MappingProxyType(self.c)
+        e = cached_advisories([A], cache, pins={A: {pin}})[A]
+        self.assertIn(M1, ' '.join(e.decision(pin)[0]))
+        self.assertIncomplete(e.decision('2.0.0'))
+        # The discovery index is not itself a fact once the individual hit expires.
+        del self.c[next(k for k in self.c if M1 in k)]
+        self.assertFalse(cached_advisories([A], cache, pins={A: {pin}})[A].decision(pin)[0])
+
+    def test_cached_pin_outranks_conflicting_snapshot_until_fresh_complete_search(self):
+        self.long_list()
+        pin = '1.0.200'
+        self.w.exact[A, pin, None] = 200, {'vulns': [self.w.details[M1]]}
+        self.evidence(A, pins={A: {pin}})
+        for k in list(self.c):
+            if k.endswith(':complete'):
+                self.c[k] = []
+            elif not k.endswith('@' + pin):
+                del self.c[k]
+        self.assertTrue(cached_advisories([A], self.c, pins={A: {pin}})[A].decision(pin)[0])
+        self.w.pages[A, None] = {}
+        self.assertEqual(self.evidence(A, pins={A: {pin}})[A].decision(pin), ([], []))
+        self.assertEqual(cached_advisories([A], self.c, pins={A: {pin}})[A].decision(pin), ([], []))
+
+    def test_publishes_immutable_positive_before_sibling_detail_finishes(self):
+        blocked, release, published = Event(), Event(), Event()
+        snapshots = []
+
+        def transport(method, url, body, timeout, limit):
+            if url.endswith('querybatch'):
+                result = {'results': [page(M1, M2)]}
+            elif url.endswith(M1):
+                self.assertTrue(blocked.wait(3))
+                result = detail(M1, entry(versions=['1.0.0']))
+            else:
+                blocked.set()
+                release.wait(5)
+                result = detail(M2, entry(versions=['2.0.0']))
+            return 200, json.dumps(result).encode()
+
+        def report(key, snapshot):
+            snapshots.append((key, snapshot))
+            if snapshot.decision('1.0.0')[0]:
+                published.set()
+
+        with ThreadPoolExecutor(1) as pool:
+            net = Network(self.c, transport=transport)
+            job = pool.submit(lookup_advisories, [A], net, self.c, publish=report)
+            try:
+                self.assertTrue(published.wait(3), 'positive result waited for a blocked sibling')
+                self.assertFalse(job.done())
+                key, before = snapshots[0]
+                self.assertEqual(key, A)
+                self.assertTrue(before.decision('1.0.0')[0])
+                self.assertIncomplete(before.decision('2.0.0'))
+            finally:
+                release.set()
+            after = job.result(3)[A]
+        self.assertTrue(after.decision('2.0.0')[0])
+        self.assertFalse(before.decision('2.0.0')[0])
+        with self.assertRaises(TypeError):
+            before.rules[M2] = None
 
     def test_withdrawal_is_not_active_malware(self):
         self.w.pages[A, None] = page(M1)

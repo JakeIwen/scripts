@@ -86,8 +86,10 @@ def _replace(path, data):
 
 
 class Cache:
-    def __init__(self, home: Path):
-        self.path = Path(home) / '.cache' / 'dep-install-guard' / 'lookups.json'
+    def __init__(self, home: Path, env=None):
+        configured = Path((os.environ if env is None else env).get('XDG_CACHE_HOME') or '.')
+        root = configured if configured.is_absolute() else Path(home) / '.cache'
+        self.path = root / 'dep-install-guard' / 'lookups.json'
         self._data = _load(self.path)
         self._pending = {}
         self._mutex = threading.Lock()

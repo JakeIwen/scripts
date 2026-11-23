@@ -1,9 +1,11 @@
-"""OSV malware evidence for names already confirmed on their public registry."""
-from dataclasses import dataclass, field
+"""Read cached OSV malware evidence; query only registry-confirmed public names."""
+from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 import re
-from typing import Optional
+from threading import Lock
+from types import MappingProxyType
+from typing import Mapping, Optional
 
 from dep_guard_specs import canonical_name
 from dep_guard_versions import contains, git_range, intervals, version_key
@@ -18,26 +20,30 @@ def _id(value):
     return isinstance(value, str) and _ID.fullmatch(value) is not None
 
 
-@dataclass
+def _add_version(versions, value):
+    """Keep previously retained versions; return False only on overflow."""
+    if value in versions:
+        return True
+    if len(versions) == _MAX_VERSIONS:
+        return False
+    versions.add(value)
+    return True
+
+
+@dataclass(frozen=True)
 class _Rule:
-    versions: set = field(default_factory=set)
-    spans: set = field(default_factory=set)
+    versions: frozenset = frozenset()
+    spans: frozenset = frozenset()
     # A bounded projection of a valid advisory, not a claim that all versions are bad.
     needs_probe: bool = False
     incomplete: bool = False
 
-    def add_versions(self, versions):
-        for version in versions:
-            if len(self.versions) < _MAX_VERSIONS:
-                self.versions.add(version)
-            elif version not in self.versions:
-                self.needs_probe = True
-
     def merge(self, other):
-        self.add_versions(sorted(other.versions))
-        self.spans.update(other.spans)
-        self.needs_probe |= other.needs_probe
-        self.incomplete |= other.incomplete
+        versions = set(self.versions)
+        overflow = not all(_add_version(versions, v) for v in sorted(other.versions))
+        return _Rule(frozenset(versions), self.spans | other.spans,
+                     self.needs_probe or other.needs_probe or overflow,
+                     self.incomplete or other.incomplete)
 
     def known(self):
         return bool(self.versions or self.spans or self.needs_probe)
@@ -67,16 +73,16 @@ class _Rule:
                 return None
             if any(v is not None and (not isinstance(v, str) or version_key(eco, v) is None) for v in span[:2]):
                 return None
-        rule = cls(set(vs), set(map(tuple, spans)), data['needs_probe'], data['incomplete'])
+        rule = cls(frozenset(vs), frozenset(map(tuple, spans)), data['needs_probe'], data['incomplete'])
         return rule if rule.known() else None
 
 
-@dataclass
+@dataclass(frozen=True)
 class OSVEvidence:
     ecosystem: str
-    rules: dict = field(default_factory=dict)
-    complete: bool = False  # the name search AND every required detail were checked
-    exact: dict = field(default_factory=dict)  # pin -> (confirmed matches, search complete)
+    rules: Mapping
+    complete: bool  # the name search AND every required detail were checked
+    exact: Mapping  # pin -> (confirmed matches, search complete)
 
     def decision(self, pin: Optional[str]):
         deny, notes = [], []
@@ -115,46 +121,48 @@ def _detail(key, aid, data, probe=None):
     entries = data.get('affected')
     if not isinstance(entries, list):
         return None, False
-    rule = _Rule()
+    versions, spans_seen = set(), set()
+    incomplete = needs_probe = False
     for entry in entries:
         pkg = entry.get('package') if isinstance(entry, dict) else None
         if (not isinstance(pkg, dict) or not isinstance(pkg.get('ecosystem'), str)
                 or not isinstance(pkg.get('name'), str)):
-            rule.incomplete = True
+            incomplete = True
             continue
         if pkg['ecosystem'] != eco:
             continue
         affected_name = canonical_name(eco, pkg['name'])
         if affected_name is None:
-            rule.incomplete = True
+            incomplete = True
         if affected_name != name:
             continue
         vs, ranges = entry.get('versions', []), entry.get('ranges', [])
         if not (vs or ranges):
-            rule.incomplete = True
+            incomplete = True
         if isinstance(vs, list):
             for v in vs:
                 value = version_key(eco, v) if isinstance(v, str) else None
                 if value is None:
-                    rule.incomplete = True
-                elif probe is None or not rule.versions or probe == value:
+                    incomplete = True
+                elif probe is None or not versions or probe == value:
                     # For /query compare against the full wire list, even past the stored cap.
-                    rule.add_versions((v,))
+                    needs_probe |= not _add_version(versions, v)
         else:
-            rule.incomplete = True
+            incomplete = True
         if isinstance(ranges, list):
             for record in ranges:
                 if git_range(record):
-                    rule.needs_probe = True
+                    needs_probe = True
                     continue
                 spans = intervals(eco, record)
                 if spans is None:
-                    rule.incomplete = True
+                    incomplete = True
                 else:
-                    rule.spans.update(spans)
+                    spans_seen.update(spans)
         else:
-            rule.incomplete = True
-    return (rule, not rule.incomplete) if rule.known() else (None, False)
+            incomplete = True
+    rule = _Rule(frozenset(versions), frozenset(spans_seen), needs_probe, incomplete)
+    return (rule, not incomplete) if rule.known() else (None, False)
 
 
 def _page(data):
@@ -202,8 +210,24 @@ def _write(cache, key, value, ttl):
         pass  # Persistence is optional; the caller retains its in-memory decision.
 
 
-def _map(network, jobs):
-    return network.map(jobs) if jobs and network.remaining() > 0 else {}
+def _stream_map(network, jobs, receive):
+    """Deliver completed replies before a stalled sibling; late workers cannot mutate a closed batch."""
+    lock = Lock()
+    waiting = set(jobs)
+
+    def run(key, request):
+        reply = request()
+        with lock:
+            if key in waiting and network.remaining() > 0:
+                receive(key, _data(reply))
+                waiting.remove(key)
+
+    if jobs and network.remaining() > 0:
+        network.map({k: partial(run, k, request) for k, request in jobs.items()})
+    with lock:
+        for key in waiting:
+            receive(key, None)
+        waiting.clear()
 
 
 def _cache_ids(value):
@@ -213,12 +237,13 @@ def _cache_ids(value):
 
 
 class _Search:
-    def __init__(self, key, cache):
+    def __init__(self, key, cache, pins=(), publish=None):
         self.key = key
+        self.publish = publish
         eco, name = key
         self.cache = cache
         self.prefix = f'{eco}:osv:{name}:'
-        self.evidence = OSVEvidence(eco)
+        self.rules, self.exact, self.complete = {}, {}, False
         self.ids = set()
         self.tried = set()
         self.seen_tokens = set()
@@ -229,11 +254,37 @@ class _Search:
         for aid in self.previous.union(complete or ()):
             rule = _Rule.restore(eco, _read(cache, self.prefix + aid))
             if rule:
-                self.evidence.rules[aid] = rule
+                self.rules[aid] = rule
         # Independently observed positives can be newer than an incomplete/evicted snapshot.
-        if complete is not None and not self.evidence.rules.keys() - complete:
-            self.evidence.complete = all(i in self.evidence.rules and not self.evidence.rules[i].incomplete
-                                         for i in complete)
+        if complete is not None and not self.rules.keys() - complete:
+            self.complete = all(i in self.rules and not self.rules[i].incomplete for i in complete)
+        for pin in pins:
+            if version_key(eco, pin) is not None:
+                self.load_pin(pin, complete)
+
+    def load_pin(self, pin, manifest):
+        indexed = _cache_ids(_read(self.cache, self.prefix + 'pin@' + pin)) or set()
+        candidates = indexed | self.previous | (manifest or set())
+        hits = {i for i in candidates if _read(self.cache, self.prefix + i + '@' + pin) is True}
+        if hits:
+            if manifest is None or hits - manifest:
+                # Only a fresh exhaustive scan can resolve disagreeing cached facts.
+                self.complete = False
+            for aid in hits - self.rules.keys():
+                # The independently expiring detail may be evicted before the pin fact.
+                self.rules[aid] = _Rule(versions=frozenset([pin]), incomplete=True)
+            v = version_key(self.key[0], pin)
+            unresolved = any(i not in hits and (r.incomplete or r.needs_probe) and
+                             not r.matches(self.key[0], v) for i, r in self.rules.items())
+            self.exact[pin] = hits, not unresolved
+
+    def snapshot(self):
+        exact = {p: (frozenset(ids), checked) for p, (ids, checked) in self.exact.items()}
+        return OSVEvidence(self.key[0], MappingProxyType(self.rules.copy()), self.complete, MappingProxyType(exact))
+
+    def emit(self):
+        if self.publish:
+            self.publish(self.key, self.snapshot())
 
     def page(self, data):
         ids, token, ok = _page(data)
@@ -246,7 +297,7 @@ class _Search:
         return token
 
     def details(self):
-        rules = self.evidence.rules
+        rules = self.rules
         needed = {i for i in self.ids - self.tried if i not in rules or rules[i].incomplete}
         self.tried.update(needed)
         return needed
@@ -256,24 +307,32 @@ class _Search:
         if not ok:
             self.page_ok = False
         if rule:
-            old = self.evidence.rules.get(aid)
+            old = self.rules.get(aid)
             if not ok and old:
                 # Admit new positive facts without evicting old ones from the bounded list.
-                old.merge(rule)
-                rule = old
-            self.evidence.rules[aid] = rule
+                rule = old.merge(rule)
+            self.rules[aid] = rule
+            self.emit()
             self.refreshed = True
-            # On malformed details cache only validated positive facts, never negative coverage.
+            # Persist independently complete positive facts, not the unfinished name scan.
             _write(self.cache, self.prefix + aid, rule.serialize(), 7 * _DAY)
+            _write(self.cache, self.prefix + 'known', sorted(self.previous.union(self.rules)), 7 * _DAY)
         elif ok:  # an explicit withdrawal
             self.ids.discard(aid)
-            self.evidence.rules.pop(aid, None)
+            self.rules.pop(aid, None)
 
     def finish(self):
-        rules = self.evidence.rules
+        rules = self.rules
         if self.page_ok and all(i in rules and not rules[i].incomplete for i in self.ids):
-            self.evidence.complete = True
-            self.evidence.rules = {i: rules[i] for i in self.ids}
+            self.complete = True
+            self.rules = {i: rules[i] for i in self.ids}
+            for pin, (hits, _) in list(self.exact.items()):
+                for aid in hits - self.ids:
+                    _write(self.cache, self.prefix + aid + '@' + pin, None, 7 * _DAY)
+                if hits & self.ids:
+                    self.exact[pin] = hits & self.ids, False
+                else:
+                    del self.exact[pin]
             _write(self.cache, self.prefix + 'complete', sorted(self.ids), _DAY)
             known = self.ids
         else:
@@ -282,35 +341,47 @@ class _Search:
             _write(self.cache, self.prefix + 'known', sorted(known), 7 * _DAY)
 
 
+def _batch_pages(searches, tokens, batch):
+    rows = batch.get('results') if isinstance(batch, dict) and set(batch) == {'results'} else None
+    if not isinstance(rows, list) or len(rows) != len(tokens):
+        rows = [None] * len(tokens)  # positional association cannot be trusted
+    more = {}
+    for key, row in zip(tokens, rows):
+        token = searches[key].page(row)
+        if token:
+            more[key] = token
+    return more
+
+
 def _search_names(searches, network):
     tokens = {k: None for k in searches}
-    details = set()
-    while tokens or details:
-        jobs = {i: partial(network.get_json, _API + 'vulns/' + i) for i in details}
+    owners = {}
+    while tokens or owners:
+        jobs = {i: partial(network.get_json, _API + 'vulns/' + i) for i in owners}
         if tokens:
             jobs[None] = partial(_batch, network, tokens.copy())
-        responses = _map(network, jobs)
-        batch = _data(responses.get(None))
-        rows = batch.get('results') if isinstance(batch, dict) and set(batch) == {'results'} else None
-        if not isinstance(rows, list) or len(rows) != len(tokens):
-            rows = [None] * len(tokens)  # positional association cannot be trusted
-        more, needed = {}, set()
-        for (key, _), row in zip(tokens.items(), rows):
-            token = searches[key].page(row)
-            if token:
-                more[key] = token
+        more = {}
+
+        def receive(aid, data):
+            if aid is None:
+                more.update(_batch_pages(searches, tokens, data))
+            else:
+                for search in owners[aid]:
+                    search.accept(aid, data)
+
+        _stream_map(network, jobs, receive)
+        tokens, owners = more, {}
         for s in searches.values():
-            for aid in details.intersection(s.ids, s.tried):
-                s.accept(aid, _data(responses.get(aid)))
-            needed.update(s.details())
-        tokens, details = more, needed
+            for aid in s.details():
+                owners.setdefault(aid, []).append(s)
     for s in searches.values():
         s.finish()
+        s.emit()
 
 
 def _pin_page(search, pin, body):
     ids, token, ok = _page(body)
-    hits, _ = search.evidence.exact[pin]
+    hits, _ = search.exact[pin]
     records = body.get('vulns') if isinstance(body, dict) else None
     for record in records if isinstance(records, list) else ():
         if not isinstance(record, dict) or not _id(record.get('id')) or record['id'] not in ids:
@@ -325,13 +396,15 @@ def _pin_page(search, pin, body):
             ok = False  # the returned detail contradicts its inclusion in this pin's result
             continue
         hits.add(aid)
-        _write(search.cache, search.prefix + aid + '@' + pin, True, 7 * _DAY)
-        if aid not in search.evidence.rules:
+        if aid not in search.rules:
             # A name scan missing this advisory cannot certify negative coverage.
-            search.evidence.complete = search.page_ok = False
+            search.complete = search.page_ok = False
             _write(search.cache, search.prefix + 'complete', None, _DAY)
             search.accept(aid, record)
             search.finish()
+        search.emit()
+        _write(search.cache, search.prefix + aid + '@' + pin, True, 7 * _DAY)
+        _write(search.cache, search.prefix + 'pin@' + pin, sorted(hits), 7 * _DAY)
     return token, ok
 
 
@@ -345,10 +418,10 @@ def _probe_pins(searches, network, pins):
             v = version_key(key[0], pin)
             if v is None:
                 continue
-            unknown = {i for i, r in s.evidence.rules.items() if r.needs_probe and not r.matches(key[0], v)}
+            unknown = {i for i, r in s.rules.items() if r.needs_probe and not r.matches(key[0], v)}
             if unknown:
-                hits = {i for i in unknown if _read(s.cache, s.prefix + i + '@' + pin) is True}
-                s.evidence.exact[pin] = hits, unknown == hits
+                hits, _ = s.exact.get(pin, (set(), False))
+                s.exact[pin] = hits, not unknown - hits
                 if unknown - hits:
                     pending[key, pin] = None
                     seen[key, pin] = set()
@@ -359,25 +432,35 @@ def _probe_pins(searches, network, pins):
             if token:
                 query['page_token'] = token
             jobs[key, pin] = partial(network.get_json, _API + 'query', method='POST', body=query)
-        responses = _map(network, jobs)
         more = {}
-        for pair in jobs:
+
+        def receive(pair, data):
             key, pin = pair
             s = searches[key]
-            token, ok = _pin_page(s, pin, _data(responses.get(pair)))
-            hits, _ = s.evidence.exact[pin]
+            token, ok = _pin_page(s, pin, data)
+            hits, _ = s.exact[pin]
             if not ok:
                 seen[pair].add(False)
             if token and token not in seen[pair]:
                 seen[pair].add(token)
                 more[pair] = token
-            s.evidence.exact[pin] = hits, ok and not token and False not in seen[pair]
+            s.exact[pin] = hits, ok and not token and False not in seen[pair]
+            s.emit()
+
+        _stream_map(network, jobs, receive)
         pending = more
 
 
-def lookup_advisories(keys, network, cache, pins=None):
-    """Only call for registry-confirmed names. Positive facts survive unrelated failures."""
-    searches = {k: _Search(k, cache) for k in keys}
-    _search_names({k: s for k, s in searches.items() if not s.evidence.complete}, network)
-    _probe_pins(searches, network, pins or {})
-    return {k: s.evidence for k, s in searches.items()}
+def cached_advisories(keys, cache, pins=None):
+    """Read only existing facts for source-eligible names. Never write or make requests."""
+    pins = pins or {}
+    return {k: _Search(k, cache, pins.get(k, ())).snapshot() for k in keys}
+
+
+def lookup_advisories(keys, network, cache, pins=None, publish=None):
+    """Registry-confirmed names only. publish(key, immutable evidence) runs on response delivery."""
+    pins = pins or {}
+    searches = {k: _Search(k, cache, pins.get(k, ()), publish) for k in keys}
+    _search_names({k: s for k, s in searches.items() if not s.complete}, network)
+    _probe_pins(searches, network, pins)
+    return {k: s.snapshot() for k, s in searches.items()}

@@ -143,7 +143,7 @@ class InstallGuardTests(unittest.TestCase):
 
     def test_pypi_earliest_upload_and_only_matching_host_cools_down(self):
         self.api.rows['tiny-project'] = {'age': 10, 'count': 400}
-        reason = self.denied(self.hook('pip install Tiny_Project'))
+        reason = self.denied(self.hook('python3 -m pip install Tiny_Project'))
         self.assertIn('tiny-project: new package', reason)
         self.assertEqual(('HEAD', 'pypi.org', '/pypi/tiny-project/json'), self.api.requests[0])
         def timed_out_stats(*args):
@@ -152,7 +152,7 @@ class InstallGuardTests(unittest.TestCase):
             return self.api(*args)
         def check(cmd):
             return evaluate(cmd, self.cwd, env={'PATH': '/usr/bin'}, home=self.home, transport=timed_out_stats)
-        self.assertIn('downloads unavailable', check('pip install another')['additionalContext'])
+        self.assertIn('downloads unavailable', check('python3 -m pip install another')['additionalContext'])
         self.assertIsNone(check('npm install npm-public'))
 
     def test_unavailable_existence_gate_and_local_bin_make_no_telemetry_calls(self):

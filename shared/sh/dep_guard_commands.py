@@ -1,11 +1,13 @@
 """Turn direct manager invocations into explicit, canonical requests. No resolver or network."""
 
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
 from dep_guard_options import scan
+from dep_guard_targets import local_execution, uv_script_route
 from dep_guard_shell import simple_commands
 from dep_guard_specs import NPM, PYPI, canonical_name, npm_spec, pypi_spec, with_requirements
 
@@ -86,6 +88,8 @@ def _operation(argv, tool, start, direct):
     if not mode:
         return None
     style = {'dlx': 'yarn-dlx'}.get(verb, tool) if tool == 'yarn' else tool
+    if tool == 'uv' and verb == 'run':
+        style = 'uv-run'
     if tool == 'bun' and verb == 'x':
         style = 'bunx'
     return mode, style, start, options, uncertain
@@ -105,7 +109,7 @@ def _operands(argv, start, mode, style):
 
 
 def _requests(tool, style, mode, operands, options):
-    with_specs = [value for key, value in options if key in ('--with', '--with-executables-from') and value]
+    with_specs = [value for key, value in options if key in ('--with', '-w', '--with-executables-from') and value]
     if tool == 'uv':
         for value in with_specs:
             for spec in with_requirements(value):
@@ -123,7 +127,7 @@ def _requests(tool, style, mode, operands, options):
         elif operands and not any(k in ('-c', '--call') for k, _ in options):
             global_mode = any(k == '--global' or k.startswith('-') and not k.startswith('--') and 'g' in k[1:]
                               for k, _ in options)
-            yield operands[0], tool == 'npm' and not global_mode
+            yield operands[0], tool == 'pipx' or tool == 'npm' and not global_mode
         return
     if mode in ('tool-add', 'create'):
         operands = operands[:1]
@@ -137,16 +141,9 @@ def _requests(tool, style, mode, operands, options):
         yield spec, False
 
 
-def _local_bin(cwd, name):
-    if cwd is None or '/' in name:
-        return False
-    try:
-        return any((p / 'node_modules' / '.bin' / name).is_file() for p in (cwd, *cwd.parents))
-    except (OSError, ValueError):
-        return False
-
-
-def parse_commands(command: str, cwd: Path):
+def parse_commands(command: str, cwd: Path, env=None, home=None):
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else home
     for simple in simple_commands(command, cwd):
         argv = simple.argv
         parsed = _package_command(argv)
@@ -162,12 +159,22 @@ def parse_commands(command: str, cwd: Path):
         manager_argv = argv[:start+result.consumed]
         dynamic_route = any('$' in a or '`' in a for a in manager_argv)
         directory = None if uncertain or result.uncertain or dynamic_route else simple.cwd
+        if tool == 'uv':
+            directory = uv_script_route(directory, mode, result.operands, options)
         ecosystem = NPM if tool in _NODE else PYPI
         overrides = {canonical_name(ecosystem, n.strip()) for n in simple.marker.split(',')}
         for raw, maybe_local in _requests(tool, style, mode, result.operands, options):
             spec = (npm_spec(raw, initializer=mode == 'create') if ecosystem == NPM else
                     pypi_spec(raw, poetry=tool == 'poetry', tool_version=tool == 'uv' and mode in ('exec', 'tool-add')))
-            if spec:
-                local = maybe_local and raw == spec.name and _local_bin(directory, spec.name)
-                yield Invocation(ecosystem, tool, spec.name, spec.pin, directory,
-                                 manager_argv, simple.env, argv[0], spec.name in overrides, local)
+            if not spec:
+                continue
+            # Markers depend on the install target's environment, not the hook's.
+            inv = Invocation(ecosystem, tool, spec.name, spec.pin, None if spec.conditional else directory,
+                             manager_argv, simple.env, argv[0], spec.name in overrides, False)
+            if maybe_local:
+                local = local_execution(inv, raw, env, home)
+                if local is None:
+                    inv = replace(inv, cwd=None)
+                elif local:
+                    inv = replace(inv, local=True)
+            yield inv

@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import sys
 from typing import Mapping
 
 from dep_guard_specs import NPM, PYPI
@@ -18,6 +19,9 @@ from dep_guard_specs import NPM, PYPI
 
 _ETC = Path('/etc')
 _MAC_LIBRARY = Path('/Library')
+_SYSTEM_BIN = Path('/usr/bin')
+_XCODE_SELECTION = Path('/var/db/xcode_select_link')
+_DARWIN = sys.platform == 'darwin'
 _PIP_SHARE_DIRS = (Path('/usr/share'), Path('/usr/local/share'))
 _MAX_CONFIG = 256 * 1024
 _PUBLIC = {
@@ -49,7 +53,7 @@ _UV_ROUTING = re.compile(r'(?<![\w-])(?:index(?:-url|-strategy)?|default-index|e
 _POETRY_ROUTING = re.compile(r'(?<![\w-])(?:source|sources|repositories)(?![\w-])', re.I)
 
 
-def _content(path):
+def read_source_text(path):
     """Absent = ordinary default. Oversized or special = indeterminate.
 
     O_NONBLOCK prevents a project-controlled FIFO from hanging the hook;
@@ -83,7 +87,7 @@ def _registry_key(key, name):
     return key == 'registry' or (scope.startswith('@') and key == scope + ':registry')
 
 
-def _npmrc(text, name, indirect):
+def _npmrc(text, name, indirect, prefixes):
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith(('#', ';')):
@@ -98,7 +102,10 @@ def _npmrc(text, name, indirect):
             if not re.fullmatch(r'/[A-Za-z0-9_./+-]+', value.strip()):
                 return False
             path = _absolute(value.strip())
-            indirect.add(path / 'etc/npmrc' if key == 'prefix' else path)
+            if key == 'prefix':
+                prefixes.add(path)
+                path /= 'etc/npmrc'
+            indirect.add(path)
             continue
         if key in _NPM_REDIRECT or key in {'offline', 'prefer-offline'}:
             return False
@@ -112,9 +119,12 @@ def _pip_conf(text):
         return True
     conf = configparser.RawConfigParser()
     conf.read_string(text)
-    return all(key.replace('_', '-') not in _PIP_ENV_OPTIONS and
-               (key.replace('_', '-') not in _INDEX or _explicit_public(PYPI, value))
-               for section in conf for key, value in conf[section].items())
+    for section in conf:
+        for raw, value in conf[section].items():
+            key = raw.replace('_', '-').removeprefix('--')  # pip's _normalize_name
+            if key in _PIP_ENV_OPTIONS or (key in _INDEX and not _explicit_public(PYPI, value)):
+                return False
+    return True
 
 
 def _no_markers(text, pattern):
@@ -214,7 +224,8 @@ def _present(path):
     return True
 
 
-def _js_files(inv, env, home, roots, xdg):
+def _npm_files(inv, env, home, roots, xdg):
+    prefixes = set()
     npmrc = {r / '.npmrc' for r in roots | {home}}
     npmrc.add(_ETC / 'npmrc')
     yarnrc = {_ETC / 'yarnrc', xdg / 'yarn/config'}
@@ -235,8 +246,21 @@ def _js_files(inv, env, home, roots, xdg):
         if p in seen:
             continue
         seen.add(p)
-        if len(seen) > 128 or not _npmrc(_content(p), inv.name, npmrc):
-            return False
+        if len(seen) > 128 or not _npmrc(read_source_text(p), inv.name, npmrc, prefixes):
+            raise ValueError('indeterminate npm configuration')
+    return prefixes, yarnrc
+
+
+def npm_config_prefixes(inv, env, home):
+    """Possible literal npmrc prefixes for implicit local bins. Unproved routes raise."""
+    effective = dict(env, **inv.env)
+    xdg = _absolute(effective['XDG_CONFIG_HOME']) if 'XDG_CONFIG_HOME' in effective else home / '.config'
+    prefixes, _ = _npm_files(inv, effective, home, _roots(inv.cwd), xdg)
+    return prefixes
+
+
+def _js_files(inv, env, home, roots, xdg):
+    _, yarnrc = _npm_files(inv, env, home, roots, xdg)
     tool = inv.tool
     if tool == 'yarn':
         files = yarnrc | {r / f for r in roots | {home} for f in ('.yarnrc.yml', '.yarnrc')}
@@ -252,7 +276,103 @@ def _js_files(inv, env, home, roots, xdg):
                  home / 'Library/Preferences/pnpm/config.yaml']
     else:
         return True
-    return all(_no_markers(_content(p), _JS_ROUTING[tool]) for p in files)
+    return all(_no_markers(read_source_text(p), _JS_ROUTING[tool]) for p in files)
+
+
+def _apple_python_prefix(env):
+    # /usr/bin/python3 and pip3 are xcrun launchers, not the interpreter.
+    # Resolve the selected developer tree without invoking xcrun (which can
+    # prompt to install developer tools) or executing a project interpreter.
+    developer = (_absolute(env['DEVELOPER_DIR']) if 'DEVELOPER_DIR' in env else _XCODE_SELECTION).resolve(strict=True)
+    if developer.suffix == '.app':
+        developer /= 'Contents/Developer'
+    if developer != _MAC_LIBRARY / 'Developer/CommandLineTools' and not (
+            developer.name == 'Developer' and developer.parent.name == 'Contents'
+            and developer.parent.parent.suffix == '.app'):
+        raise ValueError('unknown developer tree')
+    python = (developer / 'usr/bin/python3').resolve(strict=True)
+    prefix = python.parent.parent
+    versions = developer / 'Library/Frameworks/Python3.framework/Versions'
+    if (prefix.parent != versions or not re.fullmatch(r'3\.\d+', prefix.name)
+            or python.parent.name != 'bin' or not python.is_file()):
+        raise ValueError('unknown Apple interpreter layout')
+    return prefix
+
+
+def _known_prefix(executable, env):
+    """Only trusted system launchers with a known prefix; never infer it from a shim's shebang."""
+    actual = executable.resolve(strict=True)
+    system = _SYSTEM_BIN.resolve(strict=True)
+    if not actual.is_file() or not os.access(actual, os.X_OK):
+        raise ValueError('unresolved interpreter')
+    if _DARWIN:
+        prefix = _apple_python_prefix(env)
+        if (actual in {system / 'python3', system / 'pip3'} or
+                (actual.parent == prefix / 'bin' and re.fullmatch(r'python3(?:\.\d+)?', actual.name))):
+            return prefix
+    elif actual.parent == system:
+        if re.fullmatch(r'pip3(?:\.\d+)?', actual.name):
+            # Distribution pip launchers are scripts. A different shebang can
+            # select a different prefix even when pip itself is in /usr/bin.
+            line = read_source_text(actual).partition('\n')[0]
+            target = Path(line[2:]) if line.startswith('#!') else None
+            if target is None or target.parent != system:
+                raise ValueError('unproved pip interpreter')
+            actual = target.resolve(strict=True)
+        if actual.parent == system and re.fullmatch(r'python3(?:\.\d+)?', actual.name):
+            return system.parent
+    raise ValueError('unproved launcher prefix')
+
+
+def _pipx_target(inv, env, home):
+    # Limit proof to the simple literal form. Don't guess which operand is the
+    # venv after pipx options, a normalized alias, or multiple possible homes.
+    if (len(inv.argv) < 4 or inv.argv[1] != 'inject' or '--global' in inv.argv or
+            not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', inv.argv[2])):
+        raise ValueError('unproved pipx target')
+    bases = ([_absolute(env['PIPX_HOME'])] if 'PIPX_HOME' in env else
+             [home / '.local/pipx', home / '.local/share/pipx', home / 'Library/Application Support/pipx'])
+    existing = [p for p in bases if _present(p)]
+    if len(existing) != 1:
+        raise ValueError('unproved pipx home')
+    return existing[0] / 'venvs' / inv.argv[2]
+
+
+def _uv_venv(inv, env, roots):
+    if '--system' in inv.argv or 'UV_SYSTEM_PYTHON' in env or 'CONDA_PREFIX' in env:
+        raise ValueError('unproved uv environment')
+    candidates = {(r / '.venv').resolve(strict=True) for r in roots if _present(r / '.venv')}
+    if 'VIRTUAL_ENV' in env:
+        candidates.add(_absolute(env['VIRTUAL_ENV']).resolve(strict=True))
+    if len(candidates) != 1:
+        raise ValueError('unproved uv environment')
+    return candidates.pop()
+
+
+def _pip_prefixes_ok(inv, env, home, roots):
+    uv_pip = inv.tool == 'uv' and 'pip' in inv.argv
+    inject = inv.tool == 'pipx' and 'inject' in inv.argv
+    if inv.tool != 'pip' and not uv_pip and not inject:
+        return True
+    if {'PYTHONHOME', 'PYTHONPATH', '__PYVENV_LAUNCHER__', 'PYTHONEXECUTABLE',
+            'SDKROOT', 'TOOLCHAINS', 'XCRUN_TOOLCHAIN_NAME'} & env.keys():
+        return False
+    if inv.tool == 'pip':
+        candidates = list(_tool_paths(inv, env, ()))
+    else:
+        # uv without an identified venv can select a managed interpreter that
+        # has no connection to the uv executable's own prefix or to PATH.
+        venv = _pipx_target(inv, env, home) if inject else _uv_venv(inv, env, roots)
+        if not (venv / 'pyvenv.cfg').is_file():
+            return False
+        candidates = [venv / 'bin/python']
+    for exe in candidates:
+        # A venv's python can be a symlink to the OS interpreter. Keep both
+        # site locations, and the resolved path at a prefix-install boundary.
+        prefixes = {exe.parent.parent, exe.resolve(strict=True).parent.parent, _known_prefix(exe, env)}
+        if any(_present(p / 'pip.conf') for p in prefixes):
+            return False
+    return bool(candidates)
 
 
 def _python_files(inv, env, home, roots, xdg):
@@ -265,27 +385,19 @@ def _python_files(inv, env, home, roots, xdg):
                  home / '.pip/pip.conf', home / '.config/pip/pip.conf', xdg / 'pip/pip.conf',
                  _MAC_LIBRARY / 'Application Support/pip/pip.conf', home / 'Library/Application Support/pip/pip.conf'}
     pip_files.update(p / 'pip/pip.conf' for p in [*xdg_dirs, *_PIP_SHARE_DIRS])
-    pip_mode = inv.tool == 'pip' or (inv.tool == 'uv' and 'pip' in inv.argv)
-    interpreters = ('pip', 'python3', 'python') if inv.tool == 'uv' and pip_mode else ()
-    for exe in _tool_paths(inv, env, interpreters):
-        for candidate in {exe, exe.resolve()}:
-            cfg = candidate.parent.parent / 'pip.conf'
-            if pip_mode and _present(cfg):
-                return False  # A selected interpreter has site-specific configuration.
-            pip_files.add(cfg)
-    if inv.tool == 'uv' and pip_mode and any(_present(r / '.venv/pip.conf') for r in roots):
+    if not _pip_prefixes_ok(inv, env, home, roots):
         return False
     if 'VIRTUAL_ENV' in env:
         pip_files.add(_absolute(env['VIRTUAL_ENV']) / 'pip.conf')
-    if not all(_pip_conf(_content(p)) for p in pip_files):
+    if not all(_pip_conf(read_source_text(p)) for p in pip_files):
         return False
     if inv.tool in ('uv', 'uvx', 'pipx'):
         files = [*(r / f for r in roots for f in ('uv.toml', 'pyproject.toml')),
                  xdg / 'uv/uv.toml', home / '.config/uv/uv.toml', _ETC / 'uv/uv.toml']
-        if not all(_no_markers(_content(p), _UV_ROUTING) for p in files):
+        if not all(_no_markers(read_source_text(p), _UV_ROUTING) for p in files):
             return False
     if inv.tool == 'poetry':
-        return all(_no_markers(_content(r / f), _POETRY_ROUTING)
+        return all(_no_markers(read_source_text(r / f), _POETRY_ROUTING)
                    for r in roots for f in ('pyproject.toml', 'poetry.toml'))
     return True
 

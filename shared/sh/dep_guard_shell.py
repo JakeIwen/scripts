@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from dep_guard_shell_context import executable_tokens, routing_assignment, writes_config
 from destructive_guard_shell import command_segments, parse_script, MAX_DEPTH
 
 _ASSIGNMENT = re.compile(r'([A-Za-z_][A-Za-z_0-9]*)=(.*)', re.S)
@@ -94,13 +95,30 @@ def _unwrap(args, cwd, inherited):
     return Simple(args[i:], cwd, env, env.get(_MARKER, ''))
 
 
-def _shell_body(args):
+def _shell_bodies(args, redirects):
+    flags = set()
     for i, option in enumerate(args[1:], 2):
-        if not re.fullmatch(r'-[a-zA-Z]+', option):
+        if option in ('--login', '--interactive', '--noexec'):
+            flags.add({'--login': 'l', '--interactive': 'i', '--noexec': 'n'}[option])
+        elif re.fullmatch(r'-[a-zA-Z]+', option):
+            flags.update(option[1:])
+        else:
             break
-        if 'c' in option:
-            return args[i] if i < len(args) else None
-    return None
+        if 'n' in flags:
+            return
+        if 'c' in flags:
+            if i < len(args):
+                yield args[i], bool(flags & {'i', 'l'})
+            return
+    else:
+        # Here-docs elsewhere are data, not shell commands. A login shell
+        # explicitly reading stdin executes its content after loading startup files.
+        if flags & {'i', 'l'}:
+            for fd, op, word in redirects:
+                if fd == 0 and op in {'<<', '<<-'} and word.heredoc:
+                    yield word.heredoc.script(), True
+                elif fd == 0 and op == '<<<':
+                    yield word.text, True
 
 
 def _cd(args, cwd):
@@ -147,11 +165,12 @@ def _cd_after(words, cwd, preceding, following, complex_list):
     return _cd(clean[1:], cwd)
 
 
-def _segments(tokens, cwd, inherited, depth):
+def _segments(tokens, source, cwd, inherited, depth, mutations, functions):
     if depth > MAX_DEPTH:
         return
     # The lexical reader deliberately flattens control flow. Do not infer a cd
     # from inside one branch/group for a command that could run outside it.
+    tokens = executable_tokens(tokens, source, functions)
     complex_list = any(t.operator and t.text in {'(', ')', '||', '|', '|&', '&'} or
                        not t.operator and t.text in {'if', 'while', 'until', 'for', 'case', '{'} for t in tokens)
     persistent = inherited.copy()
@@ -159,13 +178,20 @@ def _segments(tokens, cwd, inherited, depth):
     for segment in command_segments(tokens):
         args = tuple(t.text for t in segment.words)
         for nested in segment.substitutions:
-            yield from _segments(nested, cwd, persistent, depth+1)
+            yield from _segments(nested, source, cwd, persistent, depth+1, mutations, functions.copy())
         invocation = _unwrap(args, cwd, persistent)
+        if writes_config(invocation.argv, segment.redirects) or (invocation.argv and invocation.argv[0] in functions):
+            mutations.add('config')
+        if mutations:
+            cwd = None
+            invocation = Simple(invocation.argv, None, invocation.env, invocation.marker)
         if invocation.argv and invocation.argv[0].rsplit('/', 1)[-1] in _SHELLS:
-            body = _shell_body(invocation.argv)
-            if body is not None and depth < MAX_DEPTH:
-                child_env = {k: v for k, v in invocation.env.items() if k != _MARKER}
-                yield from _segments(parse_script(body, depth+1), invocation.cwd, child_env, depth+1)
+            for body, startup in _shell_bodies(invocation.argv, segment.redirects):
+                if depth < MAX_DEPTH:
+                    child_env = {k: v for k, v in invocation.env.items() if k != _MARKER}
+                    child_cwd = None if startup else invocation.cwd
+                    yield from _segments(parse_script(body, depth+1), body, child_cwd, child_env,
+                                         depth+1, mutations, functions.copy())
         elif invocation.argv:
             yield invocation
         # Earlier exports can select a private index, but cannot authorize an
@@ -179,11 +205,11 @@ def _segments(tokens, cwd, inherited, depth):
                 if not _assign(word, persistent):
                     cwd = None
             persistent.pop(_MARKER, None)
-            if complex_list or previous in ('&&', '||'):
+            if any(routing_assignment(w) for w in changed) or complex_list or previous in ('&&', '||'):
                 cwd = None
         cwd = _cd_after(args, cwd, previous, segment.boundary, complex_list)
         previous = segment.boundary
 
 
 def simple_commands(command, cwd):
-    return _segments(parse_script(command), cwd, {}, 0)
+    return _segments(parse_script(command), command, cwd, {}, 0, set(), set())

@@ -26,6 +26,7 @@ _NEXT_NAME = re.compile(r'\s*[a-zA-Z0-9]')
 class Spec:
     name: str
     pin: Optional[str] = None
+    conditional: bool = False
 
 
 def canonical_name(ecosystem, name):
@@ -67,9 +68,10 @@ def npm_spec(text, initializer=False):
 
 
 def pypi_spec(text, poetry=False, tool_version=False):
-    if len(text) > 4096 or _DYNAMIC.search(text):
+    requirement, marker, _ = text.partition(';')
+    requirement = requirement.strip()
+    if len(requirement) > 4096 or _DYNAMIC.search(requirement):
         return None
-    requirement = text.split(';', 1)[0].strip()
     match = _PY.fullmatch(requirement)
     if not match:
         return None
@@ -94,13 +96,16 @@ def pypi_spec(text, poetry=False, tool_version=False):
         if not re.fullmatch(r'[A-Za-z0-9.,+*!=~^<>_ -]+', version):
             return None
     exact = _PY_PIN.fullmatch(version)
-    return Spec(name, exact[1] if exact else None)
+    return Spec(name, exact[1] if exact else None, conditional=bool(marker))
 
 
 def with_requirements(value):
     """uv accepts comma lists; commas in extras and comparator lists stay put."""
     if '://' in value or '@' in value or '/' in value:
         return  # A URL/path may itself contain a comma followed by private text.
+    if ';' in value:
+        yield value  # Commas in a marker can be part of its quoted predicate.
+        return
     start = depth = 0
     for i, char in enumerate(value):
         if char == '[':

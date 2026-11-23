@@ -973,9 +973,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/test_bashrc_codex.sh` loads the file in Codex mode and checks it.
 - `shared/sh/dep_install_guard.py`: Claude/Codex PreToolUse Bash hook (Python 3.9+).
   Deploy it, `dep_guard_*.py` and `destructive_guard_shell.py` as one flat cohort.
-  `dep_guard_shell` adapts the lexical reader, `dep_guard_options` describes manager
-  options, and `dep_guard_commands` and `dep_guard_specs` extract direct operands.
-  `dep_guard_sources` gates public requests, `dep_guard_run` coordinates lookup,
+  `dep_guard_shell` and `dep_guard_shell_context` adapt the lexical reader;
+  `dep_guard_options` describes manager options, `dep_guard_commands` and
+  `dep_guard_specs` extract direct operands, and `dep_guard_targets` identifies
+  local executables and script targets. `dep_guard_sources` gates public requests,
+  `dep_guard_schedule` tracks independent ready checks and per-invocation facts,
+  `dep_guard_deadline` bounds the entire evaluation, `dep_guard_run` renders decisions,
   `dep_guard_lookup` owns registry facts, `dep_guard_osv` and `dep_guard_versions`
   interpret malware advisories, `dep_guard_verdict` the policy, `dep_guard_network` the shared I/O budget, and
   `dep_guard_cache` the limited per-host cache. Coverage: [shared README](shared/README.md#dependency-install-guard).

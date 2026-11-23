@@ -34,12 +34,12 @@ _PIP_VALUES = words('''--target -t --prefix --root --src --platform --python-ver
 _PIP_FLAGS = words('''-U --upgrade --force-reinstall -I --ignore-installed --require-hashes
     --disable-pip-version-check --compile --no-compile --prefer-binary --require-virtualenv
     --use-pep517 --no-warn-script-location --no-warn-conflicts --ignore-requires-python''')
-_UV_VALUES = words('''-p --from --with --with-editable --with-requirements --with-executables-from
+_UV_VALUES = words('''-p --from -w --with --with-editable --with-requirements --with-executables-from
     --group --optional --extra --package --resolution --prerelease --link-mode --refresh-package
     --upgrade-package -P --reinstall-package --exclude-newer --exclude-newer-package
     --default-group --env-file --allow-insecure-host --python-preference --config-setting
     --python-platform --python-version --dependency-metadata --fork-strategy''')
-_UV_FLAGS = words('''-U --upgrade --dev --no-sync --frozen --locked --script --no-project
+_UV_FLAGS = words('''-U --upgrade --dev --no-sync --frozen --locked --no-project
     --no-dev --no-editable --active --global --refresh --reinstall --exact --inexact --preview
     --native-tls --no-managed-python --managed-python --prerelease-allow''')
 _VALUES = {
@@ -50,7 +50,8 @@ _VALUES = {
     'bun': _NODE_VALUES | words('--backend --linker --env-file --filter'),
     'bunx': _NODE_VALUES | words('-p --env-file'),
     'pip': _PY_VALUES | _PIP_VALUES,
-    'uv': _PY_VALUES | _UV_VALUES | _PIP_VALUES,
+    'uv': _PY_VALUES | _UV_VALUES | _PIP_VALUES | {'--script'},
+    'uv-run': _PY_VALUES | _UV_VALUES | _PIP_VALUES,
     'pipx': _PY_VALUES | words('--pip-args --suffix --backend --spec'),
     'poetry': _PY_VALUES | words('-C -P --source --group -G --extras -E --python --platform --lockfile'),
 }
@@ -61,6 +62,7 @@ _FLAGS = {
     'bun': _NODE_FLAGS | words('-d --trust --no-verify --no-save --bun'),
     'bunx': _NODE_FLAGS | words('--bun -b'), 'pip': _PY_FLAGS | _PIP_FLAGS,
     'uv': _PY_FLAGS | _UV_FLAGS | _PIP_FLAGS,
+    'uv-run': _PY_FLAGS | _UV_FLAGS | _PIP_FLAGS | {'--script', '-s', '--gui-script'},
     'pipx': _PY_FLAGS | words('--force --include-deps --include-apps --system-site-packages --global --no-cache'),
     'poetry': _PY_FLAGS | words('-D --dev --optional --allow-prereleases --lock --no-interaction --no-ansi --no-root'),
 }
@@ -68,7 +70,7 @@ _RELOCATION = words('''--prefix --workspace --workspaces --filter --directory --
     --globalconfig --config --config-file --location --workspace-root --recursive --workspace-root-dir
     --isolated --pip-args --env-file --use-yarnrc --global-folder --no-config --script-shell --with-requirements''')
 _SHORT_RELOCATION = {'npm': {'-C', '-w'}, 'npx': {'-C', '-w'}, 'pnpm': {'-C', '-F', '-r', '-w'},
-                     'yarn': {'-R'}, 'poetry': {'-C', '-P'}, 'uv': {'-p'}}
+                     'yarn': {'-R'}, 'poetry': {'-C', '-P'}, 'uv': {'-p'}, 'uv-run': {'-p'}}
 
 
 @dataclass
@@ -107,6 +109,8 @@ def _option(args, i, style):
             return key, value, i + 1, True
         return key, args[i+1] if i+1 < len(args) else '', min(i+2, len(args)), True
     if key in flags:
+        if style in {'npm', 'npx'} and not equals and args[i+1:i+2] in (('true',), ('false',)):
+            return key, args[i+1], i+2, True
         return key, value if equals else None, i + 1, True
     # Opaque arity: no subsequent operand is safe to send to a public service.
     return key, None, i + (1 if equals or i+1 == len(args) or args[i+1].startswith('-') else 2), False

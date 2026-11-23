@@ -14,7 +14,7 @@ class SourcePrivacyTests(unittest.TestCase):
     def setUp(self):
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
+        self.root = Path(tmp.name).resolve()
         self.home = self.root / 'home'
         self.project = self.root / 'project'
         self.cwd = self.project / 'nested'
@@ -24,7 +24,13 @@ class SourcePrivacyTests(unittest.TestCase):
         self.env = {'HOME': str(self.home), 'PATH': str(self.bin)}
         self.etc = self.root / 'etc'
         self.library = self.root / 'Library'
-        for key, value in (('_ETC', self.etc), ('_MAC_LIBRARY', self.library), ('_PIP_SHARE_DIRS', ())):
+        self.system = self.root / 'usr/bin'
+        for alias, target in [('pip', 'pip3'), ('python3', 'python3')]:
+            launcher = self.seed(self.system / target, f'#!{self.system}/python3\n' if target == 'pip3' else 'not executed')
+            launcher.chmod(0o700)
+            (self.bin / alias).symlink_to(launcher)
+        for key, value in (('_ETC', self.etc), ('_MAC_LIBRARY', self.library), ('_PIP_SHARE_DIRS', ()),
+                           ('_SYSTEM_BIN', self.system), ('_DARWIN', False)):
             p = patch.object(dep_guard_sources, key, value)
             p.start()
             self.addCleanup(p.stop)
@@ -47,7 +53,9 @@ class SourcePrivacyTests(unittest.TestCase):
         return evaluate(cmd, self.cwd, env=dict(self.env, **env), home=self.home, transport=transport)
 
     def skipped(self, cmd, **env):
-        result = self.hook(cmd, env, False)
+        with patch('dep_guard_run.Cache', side_effect=AssertionError('private route opened public cache')) as cache:
+            result = self.hook(cmd, env, False)
+            cache.assert_not_called()
         self.assertFalse(self.calls, 'a private name reached transport')
         self.assertIsInstance(result, dict)
         self.assertNotIn('permissionDecision', result)
@@ -208,6 +216,67 @@ class SourcePrivacyTests(unittest.TestCase):
                     rc.rmdir()
                 else:
                     rc.unlink()
+
+    def test_selected_apple_launcher_uses_clt_or_xcode_framework_not_usr(self):
+        selection = self.root / 'xcode_select_link'
+        developers = [self.library / 'Developer/CommandLineTools', self.root / 'Xcode.app/Contents/Developer']
+        with patch.object(dep_guard_sources, '_DARWIN', True), patch.object(dep_guard_sources, '_XCODE_SELECTION', selection):
+            for version, developer in enumerate(developers, 9):
+                with self.subTest(developer=developer):
+                    prefix = developer / f'Library/Frameworks/Python3.framework/Versions/3.{version}'
+                    python = self.seed(prefix / 'bin/python3', 'never execute')
+                    python.chmod(0o700)
+                    (developer / 'usr/bin').mkdir(parents=True)
+                    (developer / 'usr/bin/python3').symlink_to(python)
+                    selection.symlink_to(developer)
+                    package = f'example-{version}'
+                    self.checked(f'{self.system}/python3 -m pip install {package}')
+                    self.seed(prefix / 'pip.conf', '[global]\nindex-url=https://confidential.invalid')
+                    self.skipped(f'{self.system}/python3 -m pip install {package}')
+                    self.skipped(f'{self.system}/pip3 install {package}')
+                    selection.unlink()
+            self.skipped('python3 -m pip install example-9')
+
+    def test_custom_shim_and_missing_launcher_do_not_use_public_cache(self):
+        self.checked('pip install example')
+        shim = self.seed(self.root / 'shims/python', '#!/bin/sh\nexit 7\n')
+        shim.chmod(0o700)
+        self.skipped(f'{shim} -m pip install example')
+        self.skipped('python -m pip install example', PATH=str(self.root / 'missing'))
+        self.skipped('pip install example', PYTHONHOME=str(self.root))
+        self.seed(self.system / 'pip3', f'#!{shim}\n')
+        self.skipped('pip install example')
+
+    def test_leading_dashes_on_pip_options_are_not_a_distinct_key(self):
+        self.checked('pip install example')
+        for key in ('--index-url', '--extra_index_url', '--find-links'):
+            with self.subTest(key=key):
+                self.seed(self.home / '.config/pip/pip.conf', f'[global]\n{key}=https://confidential.invalid')
+                self.skipped('pip install example')
+
+    def test_pipx_inject_uses_the_named_venv_and_not_its_own_executable_prefix(self):
+        base = self.root / 'custom-pipx'
+        venv = base / 'venvs/my-tool'
+        self.seed(venv / 'pyvenv.cfg', 'include-system-site-packages = false')
+        (venv / 'bin').mkdir()
+        (venv / 'bin/python').symlink_to(self.system / 'python3')
+        cmd = 'pipx inject my-tool example'
+        self.checked(cmd, PIPX_HOME=str(base))
+        self.seed(venv / 'pip.conf', '[global]\n--index-url=https://confidential.invalid')
+        self.skipped(cmd, PIPX_HOME=str(base))
+        self.skipped(cmd, PIPX_HOME=str(self.root / 'undiscoverable'))
+        self.skipped(cmd + ' --global', PIPX_HOME=str(base))
+
+    def test_uv_pip_only_checks_an_identified_target_environment(self):
+        cmd = 'uv pip install example'
+        self.skipped(cmd)
+        venv = self.project / '.venv'
+        self.seed(venv / 'pyvenv.cfg', 'include-system-site-packages = false')
+        (venv / 'bin').mkdir()
+        (venv / 'bin/python').symlink_to(self.system / 'python3')
+        self.checked(cmd)
+        self.seed(venv / 'pip.conf', '[global]\n--no-index=true')
+        self.skipped(cmd)
 
     def test_selected_python_prefix_even_outside_virtualenv(self):
         prefix = self.root / 'selected'

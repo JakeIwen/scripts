@@ -24,7 +24,8 @@ Poetry additions. No packages are installed by the hook. Unknown names stop at
 one authoritative registry probe: they are never sent to downloads or malware
 services. Private or uncertain source configuration and offline installs skip
 public checks, including cached facts. An unversioned `npx`/`npm exec` command
-that selects an existing local executable is not an install.
+that selects a project or global executable is not an install. Existing local
+files selected by `pipx run` are not registry requests either.
 
 | Evidence | Action |
 |---|---|
@@ -54,9 +55,13 @@ non-registry specs. Check those names yourself, including the project's own
 documentation. This is a best-effort tool-call check, not a package-manager or
 shell security boundary.
 
-The per-user cache (`~/.cache/dep-install-guard/lookups.json`) is capped at
-1 MiB and 2,000 entries. Per call: 20 distinct names, 40 requests, 8 MiB, six
-concurrent requests and a five-second network deadline. The hook must run with
+The cache lives in `dep-install-guard/lookups.json` under an absolute
+`XDG_CACHE_HOME`, otherwise under `~/.cache`; it is capped at 1 MiB and 2,000
+entries. Per call: 20 distinct names, 40 requests, 8 MiB, six concurrent requests
+and a five-second deadline for the entire evaluation, including filesystem
+reads. Confirmed public names proceed independently of stalled registries;
+unexpired, confirmed malware evidence still applies if existence cannot be
+refreshed. An override refresh never discards an unmarked invocation's facts. The hook must run with
 its lexical reader and all `dep_guard_*.py` siblings beside it. On an isolated
 check only, `DEP_INSTALL_GUARD_TRACE` in the hook environment can point to a
 private temporary trace of destination host, operation class and byte count.
