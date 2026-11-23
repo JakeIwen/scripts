@@ -2,10 +2,11 @@
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
+from dep_guard_config_paths import ConfigWrites
 from dep_guard_shell_context import executable_tokens, routing_assignment, writes_config
 from destructive_guard_shell import command_segments, parse_script, MAX_DEPTH
 
@@ -35,6 +36,7 @@ class Simple:
     cwd: Optional[Path]
     env: dict
     marker: str
+    writes: frozenset = frozenset()
 
 
 def _assign(word, env):
@@ -181,11 +183,15 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
         for nested in segment.substitutions:
             yield from _segments(nested, source, cwd, persistent, depth+1, mutations, functions.copy(), hook_env)
         invocation = _unwrap(args, cwd, persistent)
-        if writes_config(invocation.argv, segment.redirects) or (invocation.argv and invocation.argv[0] in functions):
-            mutations.add('config')
-        if mutations:
+        if not mutations.config:
+            record = lambda word: mutations.record(word, invocation.cwd)
+            if writes_config(invocation.argv, segment.redirects, record) or (invocation.argv and invocation.argv[0] in functions):
+                mutations.config = True
+        if mutations.config:
             cwd = None
-            invocation = Simple(invocation.argv, None, invocation.env, invocation.marker)
+            invocation = replace(invocation, cwd=None)
+        elif mutations.destinations:
+            invocation = replace(invocation, writes=frozenset(mutations.destinations))
         shell = invocation.argv[0].rsplit('/', 1)[-1] if invocation.argv else ''
         if shell in _SHELLS:
             for body, startup in _shell_bodies(invocation.argv, segment.redirects):
@@ -194,8 +200,8 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
                     if startup or shell == 'zsh' or _SHELL_STARTUP_ENV & (hook_env.keys() | child_env.keys()):
                         # Startup files can change the child route or write a config
                         # that a later command in the parent shell will discover.
-                        mutations.add('config')
-                    child_cwd = None if mutations else invocation.cwd
+                        mutations.config = True
+                    child_cwd = None if mutations.config else invocation.cwd
                     yield from _segments(parse_script(body, depth+1), body, child_cwd, child_env,
                                          depth+1, mutations, functions.copy(), hook_env)
         elif invocation.argv:
@@ -218,4 +224,4 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
 
 
 def simple_commands(command, cwd, *, env=None):
-    return _segments(parse_script(command), command, cwd, {}, 0, set(), set(), os.environ if env is None else env)
+    return _segments(parse_script(command), command, cwd, {}, 0, ConfigWrites(), set(), os.environ if env is None else env)

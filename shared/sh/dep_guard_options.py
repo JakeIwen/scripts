@@ -81,6 +81,24 @@ class Scan:
     consumed: int = 0
 
 
+# npm 10.9.4 @npmcli/config/lib/definitions: these supported one-letter
+# shorthands expand either to a Boolean option or to --loglevel plus a value.
+# Other managers share _NODE_FLAGS, but that doesn't make their letters npm shorthands.
+_NPM_BOOL_SHORT = frozenset('gDPOESByfvp')
+_NPM_FIXED_SHORT = frozenset('sqd')
+_NPM_LOGLEVEL = words('-d -dd -ddd -q -s --quiet --silent --verbose')
+
+
+def _npm_cluster(raw, args, i, style):
+    letters = raw[1:]
+    if (any(ch not in _NPM_BOOL_SHORT | _NPM_FIXED_SHORT for ch in letters) or
+            style == 'npx' and 'p' in letters):
+        return raw, None, i+1, False
+    if letters[-1] in _NPM_BOOL_SHORT and args[i+1:i+2] in (('true',), ('false',)):
+        return raw, args[i+1], i+2, True
+    return raw, None, i+1, True
+
+
 def _option(args, i, style):
     """Return key, value, next index, known. Slice indexes retain original argv."""
     raw = args[i]
@@ -88,21 +106,20 @@ def _option(args, i, style):
     values, flags = _VALUES[style], _FLAGS[style]
     if key not in values and key not in flags and not key.startswith('--'):
         if raw[:2] in values:
-            return raw[:2], raw[2:].lstrip('='), i + 1, not (style in {'npm', 'npx'} and raw[:2] == '-L')
+            return raw[:2], raw[2:].lstrip('='), i + 1, style not in {'npm', 'npx'}
         if len(raw) > 2 and all('-' + ch in flags for ch in raw[1:]):
-            if style in {'npm', 'npx'} and args[i+1:i+2] in (('true',), ('false',)):
-                return raw, args[i+1], i+2, True
+            if style in {'npm', 'npx'}:
+                return _npm_cluster(raw, args, i, style)
             return raw, None, i + 1, True
         for n, ch in enumerate(raw[1:], 1):
             key = '-' + ch
             if key in values:
                 attached = raw[n+1:]
-                # Only an npx package switch has no possible effect on source
-                # resolution here. Other mixed clusters need the native config parser.
-                known = style == 'npx' and key == '-p' and not any(c in raw[1:n] for c in 'Cw')
+                # A mixed cluster may expand into quite different options. Its
+                # provisional operand can explain abstention, never drive a lookup.
                 if attached:
-                    return key, attached.lstrip('='), i+1, known
-                return key, args[i+1] if i+1 < len(args) else '', min(i+2, len(args)), known
+                    return key, attached.lstrip('='), i+1, False
+                return key, args[i+1] if i+1 < len(args) else '', min(i+2, len(args)), False
             if key not in flags:
                 key = raw
                 break
@@ -111,8 +128,15 @@ def _option(args, i, style):
             return key, value, i + 1, True
         return key, args[i+1] if i+1 < len(args) else '', min(i+2, len(args)), True
     if key in flags:
-        if style in {'npm', 'npx'} and not equals and args[i+1:i+2] in (('true',), ('false',)):
-            return key, args[i+1], i+2, True
+        if style in {'npm', 'npx'}:
+            if key == '-W' or key in _NPM_LOGLEVEL and equals:
+                return key, None, i+1, False
+            if key not in _NPM_LOGLEVEL and not equals and args[i+1:i+2] in (('true',), ('false',)):
+                if style == 'npx':
+                    # npx can insert -- before the literal; don't guess whether
+                    # its separate preprocessor recognized this switch.
+                    return key, None, i+1, False
+                return key, args[i+1], i+2, True
         return key, value if equals else None, i + 1, True
     # Opaque arity: no subsequent operand is safe to send to a public service.
     return key, None, i + (1 if equals or i+1 == len(args) or args[i+1].startswith('-') else 2), False

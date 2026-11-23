@@ -57,20 +57,28 @@ def _manifest_bin(file, name):
     return False
 
 
-def _project_bin(cwd, name):
-    roots = (cwd, *cwd.parents)
-    if any((root / 'node_modules' / '.bin' / name).is_file() for root in roots):
-        return True
-    for root in roots:
+def _project_prefix(cwd):
+    for root in (cwd, *cwd.parents):
         manifest = root / NAMES.package
-        if manifest.exists() or manifest.is_symlink():
-            return _manifest_bin(manifest, name)
-        if (root / 'node_modules').is_dir():
-            break  # npm's local prefix is the first package or node_modules root.
+        if manifest.exists() or manifest.is_symlink() or (root / 'node_modules').is_dir():
+            return root  # npm's nearest package or node_modules root.
+    return cwd
+
+
+def _bin_tree(start, name):
+    return any((root / 'node_modules/.bin' / name).is_file() for root in (start, *start.parents))
+
+
+def _prefix_bin(prefix, project, name, mode):
+    # npm exec supplies globalPath only when localPrefix differs from globalPrefix.
+    if prefix.resolve() != project.resolve() and (prefix / 'bin' / name).is_file():
+        return True
+    if mode is not False and _bin_tree(prefix / 'lib', name):
+        return mode  # The global .bin walk replaces, rather than extends, the project walk.
     return False
 
 
-def _global_bin(inv, effective, configured):
+def _global_bin(inv, effective, configured, project, mode):
     # An npm_config_prefix overrides the default derived from Node, even for
     # a CLI whose bin directory is on PATH. Never guess a relative prefix.
     overrides = {v for k, v in effective.items() if k.lower() == 'npm_config_prefix' and v}
@@ -83,20 +91,17 @@ def _global_bin(inv, effective, configured):
     elif not configured and effective.get('DESTDIR'):
         raise ValueError('unproved global prefix')
     if configured:
-        matches = {(prefix / 'bin' / inv.name).is_file() for prefix in configured}
-        if len(matches) != 1:
-            raise ValueError('ambiguous configured npm global bin')
-        return True in matches
+        matches = {_prefix_bin(prefix, project, inv.name, mode) for prefix in configured}
+        return matches.pop() if len(matches) == 1 else None
     # npm's Unix default prefix derives from process.execPath, not every bin
     # directory on PATH. An arbitrary executable that shadows a name isn't proof.
     search = os.pathsep.join(str(inv.cwd / p) for p in effective.get('PATH', os.defpath).split(os.pathsep))
     node = shutil.which('node', path=search)
-    if node and (Path(node).resolve(strict=True).parent / inv.name).is_file():
-        return True
-    if not node:
-        exe = (inv.cwd / inv.executable if '/' in inv.executable else shutil.which(inv.executable, path=search))
-        if exe and (Path(exe).parent / inv.name).is_file():
-            raise ValueError('cannot establish the selected node prefix')
+    if node:
+        return _prefix_bin(Path(node).resolve(strict=True).parent.parent, project, inv.name, mode)
+    exe = (inv.cwd / inv.executable if '/' in inv.executable else shutil.which(inv.executable, path=search))
+    if exe and (Path(exe).parent / inv.name).is_file():
+        raise ValueError('cannot establish the selected node prefix')
     return False
 
 
@@ -114,11 +119,16 @@ def local_execution(inv, raw, env, home, options):
         # npm itself. A prefix supplied only by that file cannot prove a bin.
         global_only = npm_global_mode(options, effective, {}) is True
         prefixes = npm_config_prefixes(inv, effective, home, modes=file_modes, global_only=global_only)
-        if _global_bin(inv, effective, prefixes):
-            return True  # npm's global bin is a local target in either mode.
+        project = _project_prefix(inv.cwd.resolve(strict=True))
+        if _manifest_bin(project / NAMES.package, inv.name):
+            return True  # libnpmexec checks the package's own bin in either mode.
         mode = npm_global_mode(options, effective, file_modes)
-        if mode is True or not _project_bin(inv.cwd, inv.name):
-            return False
-        return True if mode is False else None
+        project_match = mode is not True and _bin_tree(project, inv.name)
+        if mode is False and project_match:
+            return True
+        global_match = _global_bin(inv, effective, prefixes, project, mode)
+        if mode is None and project_match and not global_match:
+            return None
+        return global_match
     except (OSError, ValueError, RuntimeError):
         return None

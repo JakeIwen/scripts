@@ -14,7 +14,7 @@ import stat
 import sys
 from typing import Mapping
 
-from dep_guard_config_paths import BUN_DOTENV, NAMES
+from dep_guard_config_paths import BUN_DOTENV, NAMES, previously_written
 from dep_guard_specs import NPM, PYPI
 
 
@@ -252,8 +252,12 @@ def _npm_files(inv, env, home, roots, xdg, modes=None):
         if p in seen:
             continue
         seen.add(p)
-        if len(seen) > 128 or not _npmrc(read_source_text(p), inv.name, npmrc, prefixes, modes):
+        if len(seen) > 128 or previously_written(p, inv.writes):
             raise ValueError('indeterminate npm configuration')
+        indirect = set()
+        if not _npmrc(read_source_text(p), inv.name, indirect, prefixes, modes) or (indirect and None in inv.writes):
+            raise ValueError('indeterminate npm configuration')
+        npmrc.update(indirect - seen)
     return prefixes, yarnrc
 
 

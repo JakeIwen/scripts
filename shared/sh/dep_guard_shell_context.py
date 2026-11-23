@@ -23,7 +23,7 @@ def routing_assignment(word):
     return bool(_ROUTE_ENV.match(word))
 
 
-def _git_may_write(args):
+def _git_may_write(args, destination):
     """Read-only commands name config files as *inputs*. Unknown verbs (including aliases) may write them."""
     i = 0
     while i < len(args) and args[i].startswith('-'):
@@ -47,10 +47,12 @@ def _git_may_write(args):
         for j, word in enumerate(tail):
             if word == '--':
                 break  # The remaining words are pathspecs, not output options.
-            if word.startswith('--output=') and possible_config_path(word.partition('=')[2]):
-                return True
-            if word == '--output' and (j+1 >= len(tail) or possible_config_path(tail[j+1])):
-                return True
+            if word.startswith('--output=') or word == '--output':
+                path = word.partition('=')[2] if '=' in word else next(iter(tail[j+1:j+2]), '')
+                # Global options such as -C may change where Git writes a relative path.
+                destination(path if not i or path.startswith('/') else None)
+                if not path or possible_config_path(path):
+                    return True
         return False
     if verb == 'branch':
         if not tail:
@@ -72,20 +74,56 @@ def _git_may_write(args):
     return True
 
 
-def writes_config(argv, redirects):
-    if any(op in {'>', '>>', '>|', '&>', '&>>', '<>'} and possible_config_path(t.text) for _, op, t in redirects):
-        return True
+def _file_outputs(tool, args):
+    """Literal outputs for simple forms only; other writers may derive their targets."""
+    if tool == 'dd':
+        yield from (arg[3:] for arg in args if arg.startswith('of='))
+        return
+    # These switches take no operand and don't add alternate output names.
+    switches = {'tee': 'ai', 'cp': 'afipPRrv', 'mv': 'finv', 'ln': 'fns', 'touch': 'acm', 'rm': 'dfirRv'}
+    if tool not in switches:
+        yield None  # e.g. sed/perl/patch can name destinations inside their program or input.
+        return
+    paths = []
+    ended = False
+    for arg in args:
+        if not ended and arg == '--':
+            ended = True
+        elif not ended and arg.startswith('-') and arg != '-':
+            if not all(c in switches[tool] for c in arg[1:]):
+                yield None
+                return
+        else:
+            paths.append(arg)
+    if tool in {'cp', 'mv', 'ln'}:
+        if len(paths) < 2:
+            yield None  # ln, for instance, can derive the link name from its input.
+        elif tool == 'mv':
+            yield from paths  # Moving also removes the source.
+        else:
+            yield paths[-1]
+    else:
+        yield from paths
+
+
+def writes_config(argv, redirects, destination):
+    for _, op, token in redirects:
+        if op in {'>', '>>', '>|', '&>', '&>>', '<>'} or op == '>&' and not re.fullmatch(r'\d+|-', token.text):
+            destination(token.text)
+            if possible_config_path(token.text):
+                return True
     if not argv:
         return False
     tool = argv[0].rsplit('/', 1)[-1]
     args = argv[1:]
     if tool == 'git':
-        return _git_may_write(args)
+        return _git_may_write(args, destination)
     if tool in {'source', '.'} or tool == 'builtin' and args and args[0] in {'source', '.'}:
         return True
-    if tool in _CONFIG_WRITERS and any(possible_config_path(w) or
-                                        (w.startswith('of=') and possible_config_path(w[3:])) for w in args):
-        return True
+    if tool in _CONFIG_WRITERS:
+        for output in _file_outputs(tool, args):
+            destination(output)
+        return any(possible_config_path(w) or (w.startswith('of=') and possible_config_path(w[3:])) for w in args)
     if tool.startswith('python') and 'pip' in args:
         args = args[args.index('pip')+1:]
         tool = 'pip'

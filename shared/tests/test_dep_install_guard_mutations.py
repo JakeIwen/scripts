@@ -51,6 +51,34 @@ class MutationTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.check(prefix + ' && pnpm add PACKAGE')
 
+    def test_earlier_writes_invalidate_the_indirect_npmrc_actually_consulted(self):
+        indirect = self.cwd / 'policy' / 'mirror'
+        indirect.parent.mkdir()
+        intermediate = self.home / 'defaults'
+        (self.home / '.npmrc').write_text(f'globalconfig={intermediate}\n')
+        intermediate.write_text(f'userconfig={indirect}\n')
+        # Creation of a previously absent config matters as much as replacing one.
+        self.check('echo setting >policy/mirror && npm i PACKAGE')
+        indirect.write_text('registry=https://registry.npmjs.org/\n')
+        (self.cwd / 'alias').symlink_to(indirect)
+        for prefix in (f'printf setting >> {indirect}', 'tee -a policy/mirror', 'cp template alias',
+                       'mv policy/mirror backup', 'cp mirror policy/', "sed -i 's/a/b/' policy/mirror",
+                       'git diff --output=policy/mirror', 'dd if=template of=alias',
+                       'cd policy && tee mirror', "bash -c 'tee alias'", 'tee "$DEST/mirror"',
+                       'ln -s policy/mirror new-name && tee new-name'):
+            with self.subTest(prefix=prefix):
+                self.check(prefix + ' && npm install PACKAGE')
+        self.check('echo setting > alias && npm exec -- PACKAGE')
+        for prefix in ('tee mirror', 'cp policy/mirror backup', 'git diff -- policy/mirror',
+                       'cat < policy/mirror', 'printf setting >policy/other'):
+            with self.subTest(prefix=prefix):
+                self.check(prefix + ' && npm install PACKAGE', public=True)
+        self.check('npm install PACKAGE && tee alias', public=True)
+        # An unknown directory plus an ordinary basename is harmless only when
+        # no consulted config selected an indirect source with an arbitrary name.
+        (self.home / '.npmrc').unlink()
+        self.check('tee "$DEST/mirror" && npm i PACKAGE', public=True)
+
     def test_git_tree_changes_or_unknown_verbs_obscure_future_route(self):
         for invocation in ('switch other', 'checkout -- file', 'restore .', 'reset HEAD~1', 'pull', 'merge other',
                            'rebase origin/main', 'cherry-pick other', 'revert HEAD', 'stash pop', 'stash apply',

@@ -117,6 +117,38 @@ class OperandBoundaryTests(unittest.TestCase):
         self.local('pipx run report.py')
         self.checks('pipx run --spec report.py report.py', 'report-py')
 
+    def test_npm_exec_resolution_table(self):
+        # npm 10.9.4 exec.js + libnpmexec 9.0.1: explicit packages bypass
+        # hasPkgBin and executable matching. Otherwise the package manifest is
+        # checked in either mode; only the .bin walk changes its starting prefix.
+        (self.bin / 'node').touch(mode=0o700)
+        bins = self.cwd / 'node_modules/.bin'
+        bins.mkdir(parents=True)
+        for global_mode in (False, True):
+            for explicit in (False, True):
+                for target in ('manifest', 'project-bin', 'global-bin', 'absent'):
+                    name = f'{target}-{int(global_mode)}-{int(explicit)}'
+                    if target == 'manifest':
+                        (self.cwd / 'package.json').write_text(json.dumps({'name': name, 'bin': 'main.js'}))
+                    elif target == 'project-bin':
+                        (bins / name).touch()
+                    elif target == 'global-bin':
+                        (self.bin / name).touch()
+                    mode = '-g' if global_mode else '--global=false'
+                    package = f'--package={name}' if explicit else ''
+                    cmd = f'npm {mode} exec {package} -- {name}'
+                    with self.subTest(cmd=cmd):
+                        if explicit or target == 'absent' or (global_mode and target == 'project-bin'):
+                            self.checks(cmd, name)
+                        else:
+                            self.local(cmd)
+
+        global_tree = self.bin.parent / 'lib/node_modules/.bin'
+        global_tree.mkdir(parents=True)
+        (global_tree / 'tree-only').touch()
+        self.local('npm -g exec -- tree-only')
+        self.checks('npm --global=false exec -- tree-only', 'tree-only')
+
     def test_false_npm_global_and_project_location_keep_the_project_bin_local(self):
         bins = self.cwd / 'node_modules/.bin'
         bins.mkdir(parents=True)
@@ -135,7 +167,7 @@ class OperandBoundaryTests(unittest.TestCase):
         bins = self.cwd / 'node_modules/.bin'
         bins.mkdir(parents=True)
         for i, flags in enumerate(('-g', '--global true', '--location=global', '--no-global=false',
-                                   '--location=global --global=false', '-gs false')):
+                                   '--location=global --global=false', '-gs')):
             with self.subTest(flags=flags):
                 self.local(f'npm exec {flags} -- global-cli')
                 name = f'project-only-{i}'
@@ -148,6 +180,15 @@ class OperandBoundaryTests(unittest.TestCase):
         (not_global / 'wrong-prefix').touch()
         (self.cwd / '.npmrc').write_text(f'prefix={not_global.parent}\n')
         self.checks('npm -g exec -- wrong-prefix', 'wrong-prefix')
+
+    def test_short_options_bind_a_boolean_only_after_a_boolean_expansion(self):
+        self.checks('npm exec -gs false -- example', 'false')
+        self.checks('npm exec -gq true -- example', 'true')
+        self.checks('npm exec -gdD false -- example', 'example')
+        (self.cwd / 'package.json').write_text(json.dumps({'name': 'false', 'bin': 'main.js'}))
+        self.local('npm exec -dd false -- second')
+        for flags in ('-gW', '-gz', '-gLtarget'):
+            self.abstains(f'npm exec {flags} false -- not-an-operand')
 
     def test_local_bin_proof_never_authorizes_a_public_lookup(self):
         (self.cwd / '.npmrc').write_text('registry=https://private.invalid\n')
