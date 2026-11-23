@@ -154,6 +154,7 @@ ROOTFS_PATH_BUDGETS_MIB=(
   /home/pi/Documents/agent-shared:2048
   /home/pi/.cache/dep-install-guard:4
   /home/pi/.claude/delegation-nudge:16
+  /home/pi/.claude/gateway-pin-refresh:1
   /home/pi/.local/state/llm-switchboard/desk:1
   /var/lib/vanresearch.img:232
   /var/lib/van-telemetry-advisor:160

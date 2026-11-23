@@ -271,6 +271,7 @@ MiB so fractional-GiB limits are exact:
 | `/home/pi/Documents/agent-shared` | 2GiB |
 | `/home/pi/.cache/dep-install-guard` | 4MiB |
 | `/home/pi/.claude/delegation-nudge` | 16MiB |
+| `/home/pi/.claude/gateway-pin-refresh` | 1MiB |
 | `/var/lib/vanresearch.img` | 232MiB |
 | `/var/lib/van-telemetry-advisor` | 160MiB |
 | `/opt/van-research-cli` | 1GiB |
