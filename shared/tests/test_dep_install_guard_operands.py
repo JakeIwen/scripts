@@ -190,6 +190,23 @@ class OperandBoundaryTests(unittest.TestCase):
         for flags in ('-gW', '-gz', '-gLtarget'):
             self.abstains(f'npm exec {flags} false -- not-an-operand')
 
+    def test_npx_preprocessor_may_move_the_option_boundary_after_a_cluster(self):
+        for command in ('npx -qy bin-name --package package-name command',
+                        'npx -qy bin-name --registry https://example.invalid command',
+                        'npx -qy ./local --package package-name command', 'npx -pfoo',
+                        'npx -ypfoo cmd', 'npx -yp foo', 'npx -pfoo --package=@org/b foo bar'):
+            with self.subTest(command=command):
+                self.abstains(command)
+        self.checks('npm exec -qy --package=package-name -- command', 'package-name')
+
+    def test_changed_tree_is_not_proof_of_a_local_runner(self):
+        bins = self.cwd / 'node_modules/.bin'
+        bins.mkdir(parents=True)
+        (bins / 'semver').touch()
+        self.local('git status && npx semver')
+        self.abstains('mv node_modules node_modules.old && npx semver')
+        self.abstains('printf data >node_modules/.bin/semver && npx semver')
+
     def test_local_bin_proof_never_authorizes_a_public_lookup(self):
         (self.cwd / '.npmrc').write_text('registry=https://private.invalid\n')
         bins = self.cwd / 'node_modules/.bin'

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from dep_guard_config_paths import ConfigWrites
-from dep_guard_shell_context import executable_tokens, routing_assignment, writes_config
+from dep_guard_shell_context import executable_tokens, neutral_predecessor, redirects_change_config, routing_assignment
 from destructive_guard_shell import command_segments, parse_script, MAX_DEPTH
 
 _ASSIGNMENT = re.compile(r'([A-Za-z_][A-Za-z_0-9]*)=(.*)', re.S)
@@ -127,7 +127,7 @@ def _shell_bodies(args, redirects):
 def _cd(args, cwd, hook_env):
     if args[:1] == ('--',):
         args = args[1:]
-    if (cwd is None or len(args) != 1 or not args[0] or args[0].startswith(('-', '~')) or
+    if (cwd is None or len(args) != 1 or not args[0] or args[0].startswith(('-', '+', '~', '=')) or
             any(ch in args[0] for ch in '$`*?[]{}\x00')):
         return None
     target = Path(args[0])
@@ -155,12 +155,12 @@ def _cd_after(words, cwd, preceding, following, complex_list, hook_env):
             clean = clean[1:]
         elif clean[:1] == ('-p',):
             clean = clean[1:]
-    if clean[:1] in {('pushd',), ('popd',), ('source',), ('.',), ('eval',), ('typeset',), ('declare',),
+    if clean[:1] in {('popd',), ('source',), ('.',), ('eval',), ('typeset',), ('declare',),
                       ('alias',), ('function',), ('read',), ('readarray',), ('local',)}:
         return None
     if 'cd' not in clean and not any(w in ('pushd', 'popd') for w in clean):
         return cwd
-    if not clean or clean[0] != 'cd':
+    if not clean or clean[0] not in ('cd', 'pushd'):
         # A conditional/control prefix might execute cd; a program argument cannot.
         return None if clean and (clean[0] in _CONTROL or _ASSIGNMENT.fullmatch(clean[0])) else cwd
     if controlled or complex_list or preceding in ('&&', '||', '|', '|&') or following in ('||', '|', '|&', '&'):
@@ -183,9 +183,13 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
         for nested in segment.substitutions:
             yield from _segments(nested, source, cwd, persistent, depth+1, mutations, functions.copy(), hook_env)
         invocation = _unwrap(args, cwd, persistent)
+        # Redirections take effect before the program starts, but the program's
+        # other effects invalidate only *later* proofs, not its own install.
+        def record(word, *, parents=False):
+            mutations.record(word, invocation.cwd, parents=parents)
+
         if not mutations.config:
-            record = lambda word: mutations.record(word, invocation.cwd)
-            if writes_config(invocation.argv, segment.redirects, record) or (invocation.argv and invocation.argv[0] in functions):
+            if redirects_change_config(segment.redirects, record) or (invocation.argv and invocation.argv[0] in functions):
                 mutations.config = True
         if mutations.config:
             cwd = None
@@ -206,6 +210,8 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
                                          depth+1, mutations, functions.copy(), hook_env)
         elif invocation.argv:
             yield invocation
+        if not mutations.config and not neutral_predecessor(args, record, functions):
+            mutations.config = True
         # Earlier exports can select a private index, but cannot authorize an
         # override. Conditional exports/unsets cannot positively establish a route.
         state = list(args)

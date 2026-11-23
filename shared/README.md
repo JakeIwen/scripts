@@ -51,8 +51,10 @@ A failed check adds context without erasing an independently established deny.
 **Not checked:** bare installs (including `npm ci`, `uv sync` and
 `poetry install`), requirements/constraint files, manifest edits followed by
 bare installs, package names inside scripts, remote commands over SSH, and
-non-registry specs. Check those names yourself, including the project's own
-documentation. This is a best-effort tool-call check, not a package-manager or
+non-registry specs. In a compound shell command, an unrecognized or potentially
+mutating predecessor (including another install) makes later installs unchecked.
+Run an install in a separate tool call to check it against the resulting filesystem.
+Check skipped names yourself against the project's own documentation. This is a best-effort tool-call check, not a package-manager or
 shell security boundary.
 
 The cache lives in `dep-install-guard/lookups.json` under an absolute

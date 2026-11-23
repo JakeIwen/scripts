@@ -107,9 +107,13 @@ class InstallGuardTests(unittest.TestCase):
 
     def test_one_command_override_is_not_another_commands_permission(self):
         self.api.rows['unknown'] = {'status': 404}
-        reason = self.denied(self.hook('DEP_GUARD_ALLOW=unknown npm i unknown; npm i unknown'))
-        self.assertIn('not found', reason)
-        self.assertIn('DEP_GUARD_ALLOW=unknown', reason)
+        result = self.hook('DEP_GUARD_ALLOW=unknown npm i unknown; npm i other')
+        self.assertNotIn('permissionDecision', result)
+        self.assertIn('override', result['additionalContext'])
+        self.assertIn('not checked', result['additionalContext'])
+        self.assertEqual(self.api.requests, [('GET', 'registry.npmjs.org', '/-/package/unknown/dist-tags')])
+        # A fresh tool call has no predecessor or inherited confirmation.
+        self.assertIn('not found', self.denied(self.hook('npm i unknown')))
 
     def test_missing_and_mal_denies_survive_unavailable_and_override(self):
         self.api.rows.update(unknown={'status': 404}, offline={'status': 503})

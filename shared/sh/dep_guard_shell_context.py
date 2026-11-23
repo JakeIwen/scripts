@@ -3,18 +3,14 @@
 import re
 
 from dep_guard_config_paths import possible_config_path
-from dep_guard_options import scan
+from dep_guard_forms import PYTHON
 from destructive_guard_shell import BOUNDARIES
 
-_CONFIG_WRITERS = {'tee', 'cp', 'mv', 'install', 'sed', 'perl', 'dd', 'touch', 'ln', 'rm', 'patch',
-                   'rsync', 'chmod', 'chown', 'truncate'}
 _GIT_READS = {'status', 'diff', 'log', 'show', 'grep', 'ls-files', 'rev-parse', 'blame'}
-_GIT_GLOBAL_VALUES = {'-C', '-c', '--git-dir', '--work-tree', '--config-env', '--namespace', '--super-prefix'}
-_GIT_GLOBAL_FLAGS = {'-p', '-P', '--paginate', '--no-pager', '--bare', '--no-replace-objects',
+_GIT_GLOBAL_VALUES = {'-C', '--git-dir', '--work-tree', '--namespace', '--super-prefix'}
+_GIT_GLOBAL_FLAGS = {'-P', '--no-pager', '--bare', '--no-replace-objects',
                      '--literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
                      '--no-optional-locks', '--no-advice', '--no-lazy-fetch'}
-_MUTATE = {'set', 'unset', 'delete', 'edit', 'fix', 'rm', 'remove'}
-_CONFIG_PROGS = {'npm', 'pnpm', 'yarn', 'pip', 'uv', 'poetry', 'bun'}
 _ROUTE_ENV = re.compile(r'(?i)(?:npm_|pip_|uv_|pipx_|poetry_|pnpm_|corepack_|yarn_|bun_|xdg_|'
                         r'home(?:=|$)|virtual_env(?:=|$)|prefix(?:=|$)|destdir(?:=|$)|path(?:=|$))')
 
@@ -28,7 +24,12 @@ def _git_may_write(args, destination):
     i = 0
     while i < len(args) and args[i].startswith('-'):
         opt, eq, _ = args[i].partition('=')
-        if opt in _GIT_GLOBAL_FLAGS or (args[i][:2] in ('-C', '-c') and len(args[i]) > 2):
+        if args[i].startswith('-c'):
+            config = args[i][2:] or next(iter(args[i+1:i+2]), '')
+            if not re.fullmatch(r'color\.ui=(?:true|false|auto|always|never)', config):
+                return True
+            i += 2 if args[i] == '-c' else 1
+        elif opt in _GIT_GLOBAL_FLAGS or (args[i].startswith('-C') and len(args[i]) > 2):
             i += 1
         elif opt in _GIT_GLOBAL_VALUES:
             i += 1 if eq else 2
@@ -51,8 +52,12 @@ def _git_may_write(args, destination):
                 path = word.partition('=')[2] if '=' in word else next(iter(tail[j+1:j+2]), '')
                 # Global options such as -C may change where Git writes a relative path.
                 destination(path if not i or path.startswith('/') else None)
-                if not path or possible_config_path(path):
+                if not path or path.startswith('-') or possible_config_path(path):
                     return True
+            elif word.startswith('-') and not re.fullmatch(
+                    r'-[sbpU0-9]+|--(?:stat|short|branch|oneline|cached|staged|name-only|name-status|'
+                    r'porcelain(?:=v[12])?|show-toplevel|abbrev-ref|verify|no-ext-diff|no-textconv)', word):
+                return True  # Other options can write files or invoke external programs.
         return False
     if verb == 'branch':
         if not tail:
@@ -74,67 +79,73 @@ def _git_may_write(args, destination):
     return True
 
 
-def _file_outputs(tool, args):
-    """Literal outputs for simple forms only; other writers may derive their targets."""
-    if tool == 'dd':
-        yield from (arg[3:] for arg in args if arg.startswith('of='))
-        return
-    # These switches take no operand and don't add alternate output names.
-    switches = {'tee': 'ai', 'cp': 'afipPRrv', 'mv': 'finv', 'ln': 'fns', 'touch': 'acm', 'rm': 'dfirRv'}
-    if tool not in switches:
-        yield None  # e.g. sed/perl/patch can name destinations inside their program or input.
-        return
-    paths = []
-    ended = False
-    for arg in args:
-        if not ended and arg == '--':
-            ended = True
-        elif not ended and arg.startswith('-') and arg != '-':
-            if not all(c in switches[tool] for c in arg[1:]):
-                yield None
-                return
-        else:
-            paths.append(arg)
-    if tool in {'cp', 'mv', 'ln'}:
-        if len(paths) < 2:
-            yield None  # ln, for instance, can derive the link name from its input.
-        elif tool == 'mv':
-            yield from paths  # Moving also removes the source.
-        else:
-            yield paths[-1]
-    else:
-        yield from paths
-
-
-def writes_config(argv, redirects, destination):
+def redirects_change_config(redirects, destination):
     for _, op, token in redirects:
         if op in {'>', '>>', '>|', '&>', '&>>', '<>'} or op == '>&' and not re.fullmatch(r'\d+|-', token.text):
             destination(token.text)
             if possible_config_path(token.text):
                 return True
-    if not argv:
+    return False
+
+
+def _mkdir_safe(args, destination):
+    ended = False
+    for arg in args:
+        if not ended and arg == '--':
+            ended = True
+            continue
+        if not ended and arg in ('-p', '--parents'):
+            continue
+        if (not ended and arg.startswith('-')) or any(possible_config_path(part) for part in arg.split('/') if part):
+            return False
+        destination(arg, parents=True)  # mkdir -p can also create an indirect config's parent or the config itself.
+    return True
+
+
+def _options_known(args, switches):
+    for arg in args:
+        if arg.startswith('-') and arg not in ('-', '--') and not re.fullmatch(switches, arg):
+            return False
+    return True
+
+
+# This is an allowlist of *predecessors*, not a list of package managers.
+# Every other command could rewrite routing or the files used to prove a bin.
+# Keep predicates narrow for commands with both read and write/execute forms.
+_ROUTE_NEUTRAL = {
+    **dict.fromkeys(('cd', 'pushd', 'ls', 'pwd', 'echo', 'cat', 'head', 'tail', 'wc', 'test', '[',
+                     'true', 'which', 'type', 'sleep'), lambda a, d: True),
+    'printf': lambda a, d: not a or not a[0].startswith('-v') and all('%n' not in w for w in a),
+    'mkdir': _mkdir_safe,
+    'find': lambda a, d: all(not w.startswith('-') or w in {
+        '-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth', '-depth', '-print',
+        '-print0', '-prune', '-xdev', '-o', '-a', '-not', '-empty', '-mtime', '-size', '-L', '-P', '-H'} for w in a),
+    'rg': lambda a, d: _options_known(a, r'-[inuclwFvheS]+|--(?:files|hidden|no-heading|line-number|fixed-strings)'),
+    'grep': lambda a, d: _options_known(a, r'-[iRrnclwFvheEH]+|--(?:line-number|fixed-strings|recursive)'),
+    'git': lambda a, d: not _git_may_write(a, d),
+    'command': lambda a, d: a[:1] in (('-v',), ('-V',)),
+    'env': lambda a, d: a in ((), ('-0',), ('--null',)),
+    'date': lambda a, d: all(w in ('-u', '-R') or w.startswith('+') for w in a),
+    **dict.fromkeys(('node', 'npm', 'python'), lambda a, d: a == ('--version',)),
+}
+
+
+def neutral_predecessor(words, destination, functions):
+    if not words:
+        return True  # A redirect-only segment has already been inspected.
+    if words[:1] == ('rtk',) and 'rtk' not in functions:
+        words = words[2:] if words[1:2] == ('proxy',) else words[1:]
+    if not words or words[0] in functions:
         return False
-    tool = argv[0].rsplit('/', 1)[-1]
-    args = argv[1:]
-    if tool == 'git':
-        return _git_may_write(args, destination)
-    if tool in {'source', '.'} or tool == 'builtin' and args and args[0] in {'source', '.'}:
-        return True
-    if tool in _CONFIG_WRITERS:
-        for output in _file_outputs(tool, args):
-            destination(output)
-        return any(possible_config_path(w) or (w.startswith('of=') and possible_config_path(w[3:])) for w in args)
-    if tool.startswith('python') and 'pip' in args:
-        args = args[args.index('pip')+1:]
-        tool = 'pip'
-    if re.fullmatch(r'pip\d+(?:\.\d+)?', tool):
-        tool = 'pip'
-    if tool not in _CONFIG_PROGS or not _MUTATE.intersection(args):
-        return False
-    verb = scan(args, tool, first=True)
-    return (verb.operands == ['config'] and bool(_MUTATE.intersection(args[verb.consumed:])) or
-            tool == 'npm' and verb.operands in (['set'], ['unset']) or
-            verb.uncertain and 'config' in args and bool(_MUTATE.intersection(args)))
+    tool = words[0]
+    if tool.startswith(('/bin/', '/usr/bin/')):
+        tool = tool.removeprefix('/usr').removeprefix('/bin/')
+    if PYTHON.fullmatch(tool):
+        tool = 'python'
+    if any('$' in w or '`' in w or w.startswith(('*', '?', '[', '{', '~', '=')) for w in words[1:]):
+        return False  # Expansion could supply an option or execute code, even to an otherwise safe reader.
+    check = _ROUTE_NEUTRAL.get(tool)
+    return check is not None and check(words[1:], destination)
 
 
 def _is_start(tokens, i):

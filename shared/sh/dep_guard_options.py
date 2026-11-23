@@ -89,10 +89,9 @@ _NPM_FIXED_SHORT = frozenset('sqd')
 _NPM_LOGLEVEL = words('-d -dd -ddd -q -s --quiet --silent --verbose')
 
 
-def _npm_cluster(raw, args, i, style):
+def _npm_cluster(raw, args, i):
     letters = raw[1:]
-    if (any(ch not in _NPM_BOOL_SHORT | _NPM_FIXED_SHORT for ch in letters) or
-            style == 'npx' and 'p' in letters):
+    if any(ch not in _NPM_BOOL_SHORT | _NPM_FIXED_SHORT for ch in letters):
         return raw, None, i+1, False
     if letters[-1] in _NPM_BOOL_SHORT and args[i+1:i+2] in (('true',), ('false',)):
         return raw, args[i+1], i+2, True
@@ -103,13 +102,17 @@ def _option(args, i, style):
     """Return key, value, next index, known. Slice indexes retain original argv."""
     raw = args[i]
     key, equals, value = raw.partition('=')
+    if style == 'npx' and not key.startswith('--') and len(key) > 2:
+        # npm 10.9.4 bin/npx-cli.js finds the -- boundary before nopt
+        # expands clusters. Unknown switch words can swallow a positional.
+        return raw, None, i+1, False
     values, flags = _VALUES[style], _FLAGS[style]
     if key not in values and key not in flags and not key.startswith('--'):
         if raw[:2] in values:
             return raw[:2], raw[2:].lstrip('='), i + 1, style not in {'npm', 'npx'}
         if len(raw) > 2 and all('-' + ch in flags for ch in raw[1:]):
-            if style in {'npm', 'npx'}:
-                return _npm_cluster(raw, args, i, style)
+            if style == 'npm':
+                return _npm_cluster(raw, args, i)
             return raw, None, i + 1, True
         for n, ch in enumerate(raw[1:], 1):
             key = '-' + ch

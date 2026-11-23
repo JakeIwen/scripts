@@ -59,6 +59,7 @@ class MutationTests(unittest.TestCase):
         intermediate.write_text(f'userconfig={indirect}\n')
         # Creation of a previously absent config matters as much as replacing one.
         self.check('echo setting >policy/mirror && npm i PACKAGE')
+        self.check('mkdir -p policy/mirror/nested && npm i PACKAGE')
         indirect.write_text('registry=https://registry.npmjs.org/\n')
         (self.cwd / 'alias').symlink_to(indirect)
         for prefix in (f'printf setting >> {indirect}', 'tee -a policy/mirror', 'cp template alias',
@@ -69,7 +70,7 @@ class MutationTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.check(prefix + ' && npm install PACKAGE')
         self.check('echo setting > alias && npm exec -- PACKAGE')
-        for prefix in ('tee mirror', 'cp policy/mirror backup', 'git diff -- policy/mirror',
+        for prefix in ('printf ok >mirror', 'git diff -- policy/mirror',
                        'cat < policy/mirror', 'printf setting >policy/other'):
             with self.subTest(prefix=prefix):
                 self.check(prefix + ' && npm install PACKAGE', public=True)
@@ -77,7 +78,25 @@ class MutationTests(unittest.TestCase):
         # An unknown directory plus an ordinary basename is harmless only when
         # no consulted config selected an indirect source with an arbitrary name.
         (self.home / '.npmrc').unlink()
-        self.check('tee "$DEST/mirror" && npm i PACKAGE', public=True)
+        self.check('printf ok >"$DEST/mirror" && npm i PACKAGE', public=True)
+
+    def test_unclassified_predecessors_cannot_establish_a_public_route(self):
+        for prefix in ('curl -o .npmrc https://example.invalid/config', 'aws codeartifact login --tool npm',
+                       'previously-unseen-tool --quiet', 'find . -delete', "find . -exec unknown {} '+'",
+                       'find . -fprint .npmrc', 'rg --pre helper pattern', 'env -S unknown',
+                       'python3 --version --other', 'date -s tomorrow', './pwd', 'git grep --open-files-in-pager=helper needle',
+                       'git -c diff.external=helper diff', 'rg -e -- --pre=helper'):
+            with self.subTest(prefix=prefix):
+                self.check(prefix + ' && npm i PACKAGE')
+
+    def test_known_read_only_predecessors_keep_the_later_install_eligible(self):
+        for prefix in ('cd .', 'pushd .', 'mkdir -p build', 'ls -a', 'pwd', 'echo ok', "printf '%s' ok",
+                       'cat log', 'head -n 5 log', 'tail log', 'wc -l log', 'grep -n sample log',
+                       'rg --files', 'find . -type f -print', 'test -f file', '[ -f file ]', 'true',
+                       'which npm', 'command -v npm', 'type npm', 'node --version', 'npm --version',
+                       'python3 --version', 'git status', 'sleep 1', 'date +%s', 'env'):
+            with self.subTest(prefix=prefix):
+                self.check(prefix + ' && npm i PACKAGE', public=True)
 
     def test_git_tree_changes_or_unknown_verbs_obscure_future_route(self):
         for invocation in ('switch other', 'checkout -- file', 'restore .', 'reset HEAD~1', 'pull', 'merge other',

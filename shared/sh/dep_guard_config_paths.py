@@ -44,7 +44,7 @@ class ConfigWrites:
     config: bool = False  # A known config basename or an unbounded shell state change.
     destinations: set = field(default_factory=set)  # None means an unresolved output.
 
-    def record(self, word, cwd):
+    def record(self, word, cwd, *, parents=False):
         if not word or word.startswith(('~', '=')) or any(c in word for c in '$`*?[]{}\x00'):
             self.destinations.add(None)
         else:
@@ -59,6 +59,11 @@ class ConfigWrites:
                     if previously_written(dest, self.destinations):
                         self.destinations.add(None)
                     self.destinations.add(dest)
+                    if parents:
+                        for parent in dest.parents:
+                            if parent.exists():
+                                break
+                            self.destinations.add(parent)
             except (OSError, ValueError, RuntimeError):
                 self.destinations.add(None)
         if len(self.destinations) > 128:

@@ -56,8 +56,7 @@ class CommandTests(unittest.TestCase):
 
     def test_node_runners_have_different_option_ownership(self):
         for cmd, names in [
-            ('npx -yp foo', 'foo'), ('npx -ypfoo tool', 'foo'),
-            ('npx -pfoo --package=@org/b foo bar', 'foo @org/b'), ('npx app -p hidden', 'app'),
+            ('npx -p foo tool', 'foo'), ('npx --package=foo --package=@org/b foo bar', 'foo @org/b'), ('npx app -p hidden', 'app'),
             ('npm exec -p app', 'app'), ('npm exec app --package foo', 'foo'),
             ('npm exec --package foo -- app --package hidden', 'foo'), ('npm x -- app -p other', 'app'),
             ('npx -- app --package hidden', 'app'), ('npx --package=foo -c "hello world"', 'foo'),

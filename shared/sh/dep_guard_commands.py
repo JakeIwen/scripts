@@ -129,7 +129,7 @@ def _requests(tool, style, mode, operands, options):
         yield spec, False
 
 
-def parse_commands(command: str, cwd: Path, env=None, home=None):
+def parse_commands(command: str, cwd: Path, env=None, home=None, *, notes=None):
     env = os.environ if env is None else env
     home = Path.home() if home is None else home
     for simple in simple_commands(command, cwd, env=env):
@@ -143,6 +143,10 @@ def parse_commands(command: str, cwd: Path, env=None, home=None):
             continue
         operation, mode, style, start, options, uncertain = op
         result = _operands(argv, start, mode, style)
+        if style == 'npx' and result.uncertain:
+            if notes is not None:
+                notes.add('not checked: indeterminate npx option or command boundary')
+            continue  # There may be no provable package operand to emit at all.
         options += result.options
         inject_env = (result.operands[0] if mode == 'inject' and result.operands and
                       not any(key == '--global' for key, _ in options) else None)

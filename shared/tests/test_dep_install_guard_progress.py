@@ -11,6 +11,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 
 from dep_guard_cache import Cache
+from dep_guard_commands import parse_commands
 from dep_guard_lookup import fact_key
 from dep_guard_verdict import Existence
 from dep_install_guard import evaluate
@@ -40,6 +41,13 @@ class ProgressTests(unittest.TestCase):
     def check(self, command, transport=None, seconds=5):
         return evaluate(command, self.cwd, env=self.env, home=self.home,
                         transport=transport or self.api, seconds=seconds)
+
+    def independent(self, commands, transport=None, seconds=5):
+        # Exercise refresh/override reconciliation for separately proven routes.
+        # A shell install is *not* a route-neutral predecessor of a second one.
+        invocations = [inv for cmd in commands for inv in parse_commands(cmd, self.cwd, env=self.env, home=self.home)]
+        with patch('dep_guard_run.parse_commands', return_value=invocations):
+            return self.check(commands[0], transport, seconds)
 
     def denial(self, result):
         self.assertIsInstance(result, dict)
@@ -93,11 +101,10 @@ class ProgressTests(unittest.TestCase):
         self.api.rows['missing'] = {'status': 404}
         self.assertIn('not found', self.denial(self.check('npm i missing')))
         self.api.rows['missing']['status'] = 503
-        for cmd in ('DEP_GUARD_ALLOW=missing npm i missing; npm i missing',
-                    'npm i missing; DEP_GUARD_ALLOW=missing npm i missing'):
+        for cmd in (self.mixed('missing', True), self.mixed('missing', False)):
             with self.subTest(cmd=cmd):
                 self.api.requests.clear()
-                self.assertIn('not found', self.denial(self.check(cmd)))
+                self.assertIn('not found', self.denial(self.independent(cmd)))
                 self.assertEqual(self.api.requests, [('GET', 'registry.npmjs.org', '/-/package/missing/dist-tags')])
         fresh_only = self.check('DEP_GUARD_ALLOW=missing npm i missing')
         self.assertNotIn('permissionDecision', fresh_only)
@@ -107,11 +114,10 @@ class ProgressTests(unittest.TestCase):
         self.api.rows['newpkg'] = {'count': 17, 'age': 4}
         self.assertIn('17 weekly downloads', self.denial(self.check('npm i newpkg')))
         self.api.rows['newpkg']['count'] = 'error'
-        for cmd in ('npm i newpkg; DEP_GUARD_ALLOW=newpkg npm i newpkg',
-                    'DEP_GUARD_ALLOW=newpkg npm i newpkg; npm i newpkg'):
+        for cmd in (self.mixed('newpkg', True), self.mixed('newpkg', False)):
             with self.subTest(cmd=cmd):
                 self.api.requests.clear()
-                self.assertIn('17 weekly downloads', self.denial(self.check(cmd)))
+                self.assertIn('17 weekly downloads', self.denial(self.independent(cmd)))
                 self.assertEqual(self.api.requests, [('GET', 'api.npmjs.org', '/downloads/point/last-week/newpkg')])
         fresh_only = self.check('DEP_GUARD_ALLOW=newpkg npm i newpkg')
         self.assertNotIn('permissionDecision', fresh_only)
@@ -121,7 +127,7 @@ class ProgressTests(unittest.TestCase):
     def mixed(name, marked_first):
         plain = 'npm i ' + name
         marked = 'DEP_GUARD_ALLOW=' + name + ' ' + plain
-        return '; '.join((marked, plain) if marked_first else (plain, marked))
+        return (marked, plain) if marked_first else (plain, marked)
 
     def test_fresh_existence_replaces_cached_404_for_both_invocations(self):
         for marked_first in (True, False):
@@ -132,11 +138,11 @@ class ProgressTests(unittest.TestCase):
                 probe = ('GET', 'registry.npmjs.org', '/-/package/' + name + '/dist-tags')
                 self.api.requests.clear()
                 self.assertIn('not found', self.denial(self.check('npm i ' + name)))
-                self.assertIn('not found', self.denial(self.check(cmd)))
+                self.assertIn('not found', self.denial(self.independent(cmd)))
                 self.assertEqual(self.api.requests, [probe, probe], 'no telemetry after either 404')
                 self.api.requests.clear()
                 self.api.rows[name]['status'] = 200
-                self.assertIsNone(self.check(cmd))
+                self.assertIsNone(self.independent(cmd))
                 self.assertEqual(self.api.requests[0], probe)
                 self.assertCountEqual([row[1] for row in self.api.requests],
                                       ['registry.npmjs.org', 'api.npmjs.org', 'api.osv.dev'])
@@ -153,7 +159,7 @@ class ProgressTests(unittest.TestCase):
                 self.assertIn('17 weekly downloads', self.denial(self.check('npm i ' + name)))
                 self.api.rows[name]['count'] = 100_000
                 self.api.requests.clear()
-                self.assertIsNone(self.check(cmd))
+                self.assertIsNone(self.independent(cmd))
                 self.assertEqual(self.api.requests, [('GET', 'api.npmjs.org', '/downloads/point/last-week/' + name)])
                 self.api.requests.clear()
                 self.assertIsNone(self.check('npm i ' + name))
@@ -165,7 +171,7 @@ class ProgressTests(unittest.TestCase):
         self.assertIn('17 weekly downloads', self.denial(self.check('npm i ' + name)))
         self.api.rows[name]['count'] = None
         self.api.requests.clear()
-        result = self.check(self.mixed(name, marked_first=False))
+        result = self.independent(self.mixed(name, marked_first=False))
         self.assertNotIn('permissionDecision', result)
         self.assertIn('use unconfirmed', result['additionalContext'])
         probe = ('GET', 'api.npmjs.org', '/downloads/point/last-week/' + name)
@@ -182,7 +188,9 @@ class ProgressTests(unittest.TestCase):
                 return block()
             return self.api(*args)
 
-        result = self.bounded('python3 -m pip install slow; npm i mal@1.2.3', transport)
+        start = time.monotonic()
+        result = self.independent(('python3 -m pip install slow', 'npm i mal@1.2.3'), transport, BUDGET)
+        self.assertLess(time.monotonic() - start, LATEST_RETURN)
         self.assertTrue(entered.is_set(), 'test must actually reach the stalled existence probe')
         self.assertIn('MAL-2025-123', self.denial(result))
         self.assertIn(('GET', 'api.osv.dev', '/v1/vulns/MAL-2025-123'), self.api.requests)

@@ -15,7 +15,7 @@ MAX_NAMES = 20
 
 def select_requests(command, cwd, env, home, budget):
     requests, notes = {}, set()
-    for inv in parse_commands(command, cwd, env=env, home=home):
+    for inv in parse_commands(command, cwd, env=env, home=home, notes=notes):
         if not budget.remaining():
             notes.add(DEADLINE_NOTE)
             break
