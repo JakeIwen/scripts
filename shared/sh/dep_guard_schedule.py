@@ -84,14 +84,13 @@ class PackageChecks:
         if answer not in (Existence.FOUND, Existence.MISSING):
             return
         for f in self.facts[k].values():
-            if f.existence is Existence.UNKNOWN:
-                f.existence = answer
+            f.existence = answer
         self.update_cache(k, 'exists', answer.value, 7 * DAY if answer is Existence.FOUND else 3600)
 
     def activate(self, keys):
         for k in keys:
-            # Snapshot the normal and override lanes BEFORE starting a refresh.
-            # A failed refresh (or a successful one) is not the unmarked command's evidence.
+            # The unmarked invocation keeps its cached fallback while the marked
+            # one waits for a refresh; a definitive reply supersedes both.
             n = self.cache.get(fact_key(k, 'downloads'))
             m = cached_metadata(self.cache, k)
             for override, f in self.facts[k].items():
@@ -114,10 +113,14 @@ class PackageChecks:
         for k in keys:
             answer = (answers or {}).get(k, Downloads())
             for f in self.facts[k].values():
-                if f.existence is Existence.FOUND and f.stats is None:
+                if f.existence is Existence.FOUND and (answer.state is not Stat.UNKNOWN or f.stats is None):
                     f.stats = answer
             if answer.state is Stat.MEASURED:
                 self.update_cache(k, 'downloads', answer.count, 7 * DAY)
+            elif answer.state is Stat.NO_ROW:
+                # No row is evidence, not a zero count. Expire any previous
+                # count so the next install asks the service again.
+                self.update_cache(k, 'downloads', None, 0)
 
     def accept_meta(self, k, answer):
         for f in self.facts[k].values():

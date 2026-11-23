@@ -117,6 +117,64 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn('permissionDecision', fresh_only)
         self.assertIn('downloads unavailable', fresh_only['additionalContext'])
 
+    @staticmethod
+    def mixed(name, marked_first):
+        plain = 'npm i ' + name
+        marked = 'DEP_GUARD_ALLOW=' + name + ' ' + plain
+        return '; '.join((marked, plain) if marked_first else (plain, marked))
+
+    def test_fresh_existence_replaces_cached_404_for_both_invocations(self):
+        for marked_first in (True, False):
+            name = 'published-' + str(int(marked_first))
+            cmd = self.mixed(name, marked_first)
+            with self.subTest(cmd=cmd):
+                self.api.rows[name] = {'status': 404}
+                probe = ('GET', 'registry.npmjs.org', '/-/package/' + name + '/dist-tags')
+                self.api.requests.clear()
+                self.assertIn('not found', self.denial(self.check('npm i ' + name)))
+                self.assertIn('not found', self.denial(self.check(cmd)))
+                self.assertEqual(self.api.requests, [probe, probe], 'no telemetry after either 404')
+                self.api.requests.clear()
+                self.api.rows[name]['status'] = 200
+                self.assertIsNone(self.check(cmd))
+                self.assertEqual(self.api.requests[0], probe)
+                self.assertCountEqual([row[1] for row in self.api.requests],
+                                      ['registry.npmjs.org', 'api.npmjs.org', 'api.osv.dev'])
+                self.api.requests.clear()
+                self.assertIsNone(self.check('npm i ' + name))
+                self.assertEqual(self.api.requests, [])
+
+    def test_fresh_download_count_supersedes_cached_low_count_for_both_invocations(self):
+        for marked_first in (True, False):
+            name = 'popular-' + str(int(marked_first))
+            cmd = self.mixed(name, marked_first)
+            with self.subTest(cmd=cmd):
+                self.api.rows[name] = {'count': 17, 'age': 20}
+                self.assertIn('17 weekly downloads', self.denial(self.check('npm i ' + name)))
+                self.api.rows[name]['count'] = 100_000
+                self.api.requests.clear()
+                self.assertIsNone(self.check(cmd))
+                self.assertEqual(self.api.requests, [('GET', 'api.npmjs.org', '/downloads/point/last-week/' + name)])
+                self.api.requests.clear()
+                self.assertIsNone(self.check('npm i ' + name))
+                self.assertEqual(self.api.requests, [])
+
+    def test_confirmed_no_statistics_replaces_old_count_without_caching_zero(self):
+        name = 'no-statistics'
+        self.api.rows[name] = {'count': 17, 'age': 20}
+        self.assertIn('17 weekly downloads', self.denial(self.check('npm i ' + name)))
+        self.api.rows[name]['count'] = None
+        self.api.requests.clear()
+        result = self.check(self.mixed(name, marked_first=False))
+        self.assertNotIn('permissionDecision', result)
+        self.assertIn('use unconfirmed', result['additionalContext'])
+        probe = ('GET', 'api.npmjs.org', '/downloads/point/last-week/' + name)
+        self.assertEqual(self.api.requests, [probe])
+        self.api.rows[name]['count'] = 100_000
+        self.api.requests.clear()
+        self.assertIsNone(self.check('npm i ' + name))
+        self.assertEqual(self.api.requests, [probe], 'next plain install must fetch the missing count')
+
     def test_stalled_pypi_existence_does_not_starve_npm_mal_lookup(self):
         block, entered = self.stalled((503, b''))
         def transport(*args):

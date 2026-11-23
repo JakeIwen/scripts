@@ -1,10 +1,7 @@
 """PreToolUse Bash hook. Ordinary commands need no registry modules or file I/O."""
 import json
 import os
-import re
 import sys
-
-CANDIDATE = re.compile(r'npm|npx|yarn|bun|pip|poetry|\buv(?:x)?\b|corepack')
 
 
 def context(message):
@@ -12,7 +9,14 @@ def context(message):
 
 
 def candidate(command, env):
-    return env.get('DEP_INSTALL_GUARD') != 'off' and CANDIDATE.search(re.sub(r'''[\\'"\n]''', '', command))
+    if env.get('DEP_INSTALL_GUARD') == 'off':
+        return False
+    try:
+        from dep_guard_forms import may_install
+    except ImportError:
+        # A broken deployment must be visible, not a silent pass on all calls.
+        return True
+    return may_install(command)
 
 
 def evaluate(command, cwd, *, env, home, transport=None, seconds=None):
@@ -35,6 +39,9 @@ def check_candidate(command, cwd, env, home, transport=None, seconds=None):
 
 
 def main():
+    # The Pi deploys these modules flat onto its SD root. The bytecode cache is
+    # unnecessary for a short-lived hook and is not part of its disk budget.
+    sys.dont_write_bytecode = True
     try:
         payload = json.load(sys.stdin)
     except (ValueError, TypeError, OSError):
@@ -45,9 +52,6 @@ def main():
     command = args.get('command') if isinstance(args, dict) else None
     if not isinstance(command, str) or not candidate(command, os.environ):
         return 0
-    # The Pi deploys these modules flat onto its SD root. The bytecode cache is
-    # unnecessary for a short-lived hook and is not part of its disk budget.
-    sys.dont_write_bytecode = True
     from pathlib import Path
     cwd = payload.get('cwd')
     path = Path(cwd) if isinstance(cwd, str) and cwd.startswith('/') and '\x00' not in cwd else None

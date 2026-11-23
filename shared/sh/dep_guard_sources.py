@@ -14,6 +14,7 @@ import stat
 import sys
 from typing import Mapping
 
+from dep_guard_config_paths import BUN_DOTENV, NAMES
 from dep_guard_specs import NPM, PYPI
 
 
@@ -87,7 +88,7 @@ def _registry_key(key, name):
     return key == 'registry' or (scope.startswith('@') and key == scope + ':registry')
 
 
-def _npmrc(text, name, indirect, prefixes):
+def _npmrc(text, name, indirect, prefixes, modes=None):
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith(('#', ';')):
@@ -96,6 +97,8 @@ def _npmrc(text, name, indirect, prefixes):
         key = key.strip().lower().replace('_', '-')
         if any(char in key for char in '\\$\"\'[]'):
             return False  # Quoted/dynamic keys need npm's full INI dialect.
+        if modes is not None and key in {'global', 'location'}:
+            modes.setdefault(key, set()).add(value.strip() if '=' in line else 'true')
         if key in {'prefix', 'globalconfig', 'userconfig'}:
             # Distribution npmrc files (notably Debian's) set a literal prefix
             # and /etc/npmrc. Inspect that path too, but never expand variables.
@@ -104,12 +107,15 @@ def _npmrc(text, name, indirect, prefixes):
             path = _absolute(value.strip())
             if key == 'prefix':
                 prefixes.add(path)
-                path /= 'etc/npmrc'
+                path = path / 'etc' / NAMES.npm_system
             indirect.add(path)
             continue
-        if key in _NPM_REDIRECT or key in {'offline', 'prefer-offline'}:
+        if key in _NPM_REDIRECT:
             return False
-        if _registry_key(key, name) and not _explicit_public(NPM, value):
+        # Selecting an existing executable needs npm's mode and prefix, not
+        # permission to disclose any name. Public routing checks run separately.
+        if modes is None and (key in {'offline', 'prefer-offline'} or
+                              _registry_key(key, name) and not _explicit_public(NPM, value)):
             return False
     return True
 
@@ -224,38 +230,39 @@ def _present(path):
     return True
 
 
-def _npm_files(inv, env, home, roots, xdg):
+def _npm_files(inv, env, home, roots, xdg, modes=None):
     prefixes = set()
-    npmrc = {r / '.npmrc' for r in roots | {home}}
-    npmrc.add(_ETC / 'npmrc')
-    yarnrc = {_ETC / 'yarnrc', xdg / 'yarn/config'}
+    npmrc = {r / NAMES.npm_project for r in roots | {home}}
+    npmrc.add(_ETC / NAMES.npm_system)
+    yarnrc = {_ETC / NAMES.yarn_system, xdg / 'yarn' / NAMES.yarn_xdg}
     if inv.tool == 'pnpm':
-        npmrc.update({xdg / 'pnpm/rc', home / 'Library/Preferences/pnpm/rc',
-                      home / 'Library/pnpm/config/rc', home / '.config/pnpm/rc'})
+        npmrc.update({xdg / 'pnpm' / NAMES.pnpm_rc, home / 'Library/Preferences/pnpm' / NAMES.pnpm_rc,
+                      home / 'Library/pnpm/config' / NAMES.pnpm_rc, home / '.config/pnpm' / NAMES.pnpm_rc})
     for exe in _tool_paths(inv, env, ('npm', 'node')):
-        npmrc.add(exe.parent.parent / 'etc/npmrc')
-        yarnrc.add(exe.parent.parent / 'etc/yarnrc')
+        npmrc.add(exe.parent.parent / 'etc' / NAMES.npm_system)
+        yarnrc.add(exe.parent.parent / 'etc' / NAMES.yarn_system)
         target = exe.resolve()
         if target.name == 'npm-cli.js':
-            npmrc.add(target.parent.parent / 'npmrc')  # npm's built-in config
+            npmrc.add(target.parent.parent / NAMES.npm_system)  # npm's built-in config
         elif target.parent.name == 'bin':
-            npmrc.add(target.parent.parent / 'etc/npmrc')
+            npmrc.add(target.parent.parent / 'etc' / NAMES.npm_system)
     seen = set()
     while npmrc:
         p = npmrc.pop()
         if p in seen:
             continue
         seen.add(p)
-        if len(seen) > 128 or not _npmrc(read_source_text(p), inv.name, npmrc, prefixes):
+        if len(seen) > 128 or not _npmrc(read_source_text(p), inv.name, npmrc, prefixes, modes):
             raise ValueError('indeterminate npm configuration')
     return prefixes, yarnrc
 
 
-def npm_config_prefixes(inv, env, home):
+def npm_config_prefixes(inv, env, home, *, modes=None, global_only=False):
     """Possible literal npmrc prefixes for implicit local bins. Unproved routes raise."""
     effective = dict(env, **inv.env)
     xdg = _absolute(effective['XDG_CONFIG_HOME']) if 'XDG_CONFIG_HOME' in effective else home / '.config'
-    prefixes, _ = _npm_files(inv, effective, home, _roots(inv.cwd), xdg)
+    roots = set() if global_only else _roots(inv.cwd)
+    prefixes, _ = _npm_files(inv, effective, home, roots, xdg, modes)
     return prefixes
 
 
@@ -263,17 +270,16 @@ def _js_files(inv, env, home, roots, xdg):
     _, yarnrc = _npm_files(inv, env, home, roots, xdg)
     tool = inv.tool
     if tool == 'yarn':
-        files = yarnrc | {r / f for r in roots | {home} for f in ('.yarnrc.yml', '.yarnrc')}
+        files = yarnrc | {r / f for r in roots | {home} for f in (NAMES.yarn_modern, NAMES.yarn_classic)}
     elif tool == 'bun':
         # Bun loads dotenv before resolving install settings. Do not inspect a
         # general-purpose secrets file just to try to prove this name is public.
-        dotenv = ('.env', '.env.local', '.env.development', '.env.production', '.env.test')
-        if any(_present(r / f) for r in roots for f in dotenv):
+        if any(_present(r / f) for r in roots for f in BUN_DOTENV):
             return False
-        files = [*(r / 'bunfig.toml' for r in roots), home / '.bunfig.toml', xdg / '.bunfig.toml']
+        files = [*(r / NAMES.bun_project for r in roots), home / NAMES.bun_user, xdg / NAMES.bun_user]
     elif tool == 'pnpm':
-        files = [*(r / 'pnpm-workspace.yaml' for r in roots), xdg / 'pnpm/config.yaml',
-                 home / 'Library/Preferences/pnpm/config.yaml']
+        files = [*(r / NAMES.pnpm_workspace for r in roots), xdg / 'pnpm' / NAMES.pnpm_yaml,
+                 home / 'Library/Preferences/pnpm' / NAMES.pnpm_yaml]
     else:
         return True
     return all(_no_markers(read_source_text(p), _JS_ROUTING[tool]) for p in files)
@@ -325,17 +331,16 @@ def _known_prefix(executable, env):
 
 
 def _pipx_target(inv, env, home):
-    # Limit proof to the simple literal form. Don't guess which operand is the
-    # venv after pipx options, a normalized alias, or multiple possible homes.
-    if (len(inv.argv) < 4 or inv.argv[1] != 'inject' or '--global' in inv.argv or
-            not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', inv.argv[2])):
+    # The parser excludes --global targets and identifies the environment after
+    # manager options. A name we cannot map to one literal directory is private.
+    if not inv.inject_env or not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', inv.inject_env):
         raise ValueError('unproved pipx target')
     bases = ([_absolute(env['PIPX_HOME'])] if 'PIPX_HOME' in env else
              [home / '.local/pipx', home / '.local/share/pipx', home / 'Library/Application Support/pipx'])
     existing = [p for p in bases if _present(p)]
     if len(existing) != 1:
         raise ValueError('unproved pipx home')
-    return existing[0] / 'venvs' / inv.argv[2]
+    return existing[0] / 'venvs' / inv.inject_env
 
 
 def _uv_venv(inv, env, roots):
@@ -350,8 +355,8 @@ def _uv_venv(inv, env, roots):
 
 
 def _pip_prefixes_ok(inv, env, home, roots):
-    uv_pip = inv.tool == 'uv' and 'pip' in inv.argv
-    inject = inv.tool == 'pipx' and 'inject' in inv.argv
+    uv_pip = inv.operation == 'uv pip install'
+    inject = inv.operation == 'pipx inject'
     if inv.tool != 'pip' and not uv_pip and not inject:
         return True
     if {'PYTHONHOME', 'PYTHONPATH', '__PYVENV_LAUNCHER__', 'PYTHONEXECUTABLE',
@@ -363,14 +368,14 @@ def _pip_prefixes_ok(inv, env, home, roots):
         # uv without an identified venv can select a managed interpreter that
         # has no connection to the uv executable's own prefix or to PATH.
         venv = _pipx_target(inv, env, home) if inject else _uv_venv(inv, env, roots)
-        if not (venv / 'pyvenv.cfg').is_file():
+        if not (venv / NAMES.venv).is_file():
             return False
         candidates = [venv / 'bin/python']
     for exe in candidates:
         # A venv's python can be a symlink to the OS interpreter. Keep both
         # site locations, and the resolved path at a prefix-install boundary.
         prefixes = {exe.parent.parent, exe.resolve(strict=True).parent.parent, _known_prefix(exe, env)}
-        if any(_present(p / 'pip.conf') for p in prefixes):
+        if any(_present(p / NAMES.pip) for p in prefixes):
             return False
     return bool(candidates)
 
@@ -381,24 +386,24 @@ def _python_files(inv, env, home, roots, xdg):
         return False
     if {'XDG_DATA_HOME', 'XDG_DATA_DIRS'} & env.keys():
         return False  # Different pip/platformdirs releases resolve data roots differently.
-    pip_files = {_ETC / 'pip.conf', _ETC / 'xdg/pip/pip.conf', home / '.local/share/pip/pip.conf',
-                 home / '.pip/pip.conf', home / '.config/pip/pip.conf', xdg / 'pip/pip.conf',
-                 _MAC_LIBRARY / 'Application Support/pip/pip.conf', home / 'Library/Application Support/pip/pip.conf'}
-    pip_files.update(p / 'pip/pip.conf' for p in [*xdg_dirs, *_PIP_SHARE_DIRS])
+    pip_files = {_ETC / NAMES.pip, _ETC / 'xdg/pip' / NAMES.pip, home / '.local/share/pip' / NAMES.pip,
+                 home / '.pip' / NAMES.pip, home / '.config/pip' / NAMES.pip, xdg / 'pip' / NAMES.pip,
+                 _MAC_LIBRARY / 'Application Support/pip' / NAMES.pip, home / 'Library/Application Support/pip' / NAMES.pip}
+    pip_files.update(p / 'pip' / NAMES.pip for p in [*xdg_dirs, *_PIP_SHARE_DIRS])
     if not _pip_prefixes_ok(inv, env, home, roots):
         return False
     if 'VIRTUAL_ENV' in env:
-        pip_files.add(_absolute(env['VIRTUAL_ENV']) / 'pip.conf')
+        pip_files.add(_absolute(env['VIRTUAL_ENV']) / NAMES.pip)
     if not all(_pip_conf(read_source_text(p)) for p in pip_files):
         return False
     if inv.tool in ('uv', 'uvx', 'pipx'):
-        files = [*(r / f for r in roots for f in ('uv.toml', 'pyproject.toml')),
-                 xdg / 'uv/uv.toml', home / '.config/uv/uv.toml', _ETC / 'uv/uv.toml']
+        files = [*(r / f for r in roots for f in (NAMES.uv, NAMES.pyproject)),
+                 xdg / 'uv' / NAMES.uv, home / '.config/uv' / NAMES.uv, _ETC / 'uv' / NAMES.uv]
         if not all(_no_markers(read_source_text(p), _UV_ROUTING) for p in files):
             return False
     if inv.tool == 'poetry':
         return all(_no_markers(read_source_text(r / f), _POETRY_ROUTING)
-                   for r in roots for f in ('pyproject.toml', 'poetry.toml'))
+                   for r in roots for f in (NAMES.pyproject, NAMES.poetry))
     return True
 
 

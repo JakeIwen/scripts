@@ -5,6 +5,8 @@ import tempfile
 import unittest
 
 from dep_guard_commands import parse_commands
+from dep_guard_forms import DIRECT, VERBS
+from dep_install_guard import candidate
 
 
 class CommandTests(unittest.TestCase):
@@ -14,12 +16,33 @@ class CommandTests(unittest.TestCase):
         self.root = Path(self.tmp.name).resolve()
 
     def parse(self, text):
-        return list(parse_commands(text, self.root))
+        requests = list(parse_commands(text, self.root))
+        if requests:
+            self.assertTrue(candidate(text, {}), 'prefilter discarded a parsed invocation: ' + text)
+        return requests
 
     def assertNames(self, command, expected):
         result = self.parse(command)
         self.assertEqual(expected.split(), [r.name for r in result], command)
         return result
+
+    def test_prefilter_uses_every_form_understood_by_the_parser(self):
+        for exe, forms in VERBS.items():
+            for verb, mode in forms.items():
+                suffix = '--with example program' if mode == 'with-only' else 'env example' if mode == 'inject' else 'example'
+                cmd = f'/opt/bin/{exe} {verb} {suffix}'
+                with self.subTest(cmd=cmd):
+                    self.assertTrue(self.parse(cmd))
+        for exe in DIRECT:
+            self.assertTrue(self.parse(exe + ' example'))
+        for cmd in ('np"m" i example', 'np\\\nm in example', 'printf ok\nnpm install example',
+                    '/bin/bash -c "python3.9 -mpip install example"', 'rtk proxy uv run -wexample python'):
+            self.assertTrue(self.parse(cmd), cmd)
+
+    def test_prefilter_ignores_tool_mentions_without_an_install_operation(self):
+        for cmd in ('git status', 'npm --version', 'git grep npm', 'git grep pkg-npm',
+                    'echo pipx', 'uv run python', 'yarn --help', 'npm run build'):
+            self.assertFalse(candidate(cmd, {}), cmd)
 
     def test_node_installs(self):
         for tool, verbs in [('npm', 'install i in add isntall it install-test'), ('pnpm', 'add install i'),

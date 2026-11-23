@@ -6,6 +6,8 @@ import re
 import shutil
 from pathlib import Path
 
+from dep_guard_config_paths import NAMES
+from dep_guard_options import npm_global_mode
 from dep_guard_sources import npm_config_prefixes, read_source_text
 
 
@@ -60,7 +62,7 @@ def _project_bin(cwd, name):
     if any((root / 'node_modules' / '.bin' / name).is_file() for root in roots):
         return True
     for root in roots:
-        manifest = root / 'package.json'
+        manifest = root / NAMES.package
         if manifest.exists() or manifest.is_symlink():
             return _manifest_bin(manifest, name)
         if (root / 'node_modules').is_dir():
@@ -68,9 +70,18 @@ def _project_bin(cwd, name):
     return False
 
 
-def _global_bin(inv, env, home):
-    effective = dict(env, **inv.env)
-    configured = npm_config_prefixes(inv, effective, home)
+def _global_bin(inv, effective, configured):
+    # An npm_config_prefix overrides the default derived from Node, even for
+    # a CLI whose bin directory is on PATH. Never guess a relative prefix.
+    overrides = {v for k, v in effective.items() if k.lower() == 'npm_config_prefix' and v}
+    if not overrides and not configured and effective.get('PREFIX'):
+        overrides = {effective['PREFIX']}
+    if overrides:
+        if any(not Path(v).is_absolute() or '$' in v for v in overrides):
+            raise ValueError('unproved global prefix')
+        configured = {Path(v) for v in overrides}
+    elif not configured and effective.get('DESTDIR'):
+        raise ValueError('unproved global prefix')
     if configured:
         matches = {(prefix / 'bin' / inv.name).is_file() for prefix in configured}
         if len(matches) != 1:
@@ -89,7 +100,7 @@ def _global_bin(inv, env, home):
     return False
 
 
-def local_execution(inv, raw, env, home):
+def local_execution(inv, raw, env, home, options):
     """True = existing target, False = not local, None = do not look up the name."""
     if inv.cwd is None:
         return None
@@ -98,6 +109,16 @@ def local_execution(inv, raw, env, home):
             return (inv.cwd / raw).is_file()
         if raw != inv.name or '/' in inv.name:
             return False
-        return _project_bin(inv.cwd, inv.name) or _global_bin(inv, env, home)
+        effective, file_modes = dict(env, **inv.env), {}
+        # An explicit CLI/environment global mode skips the project npmrc in
+        # npm itself. A prefix supplied only by that file cannot prove a bin.
+        global_only = npm_global_mode(options, effective, {}) is True
+        prefixes = npm_config_prefixes(inv, effective, home, modes=file_modes, global_only=global_only)
+        if _global_bin(inv, effective, prefixes):
+            return True  # npm's global bin is a local target in either mode.
+        mode = npm_global_mode(options, effective, file_modes)
+        if mode is True or not _project_bin(inv.cwd, inv.name):
+            return False
+        return True if mode is False else None
     except (OSError, ValueError, RuntimeError):
         return None

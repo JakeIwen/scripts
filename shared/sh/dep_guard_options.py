@@ -43,7 +43,7 @@ _UV_FLAGS = words('''-U --upgrade --dev --no-sync --frozen --locked --no-project
     --no-dev --no-editable --active --global --refresh --reinstall --exact --inexact --preview
     --native-tls --no-managed-python --managed-python --prerelease-allow''')
 _VALUES = {
-    'npm': _NODE_VALUES | words('-C -w'), 'npx': _NODE_VALUES | words('-C -w -p'),
+    'npm': _NODE_VALUES | words('-C -w -L'), 'npx': _NODE_VALUES | words('-C -w -p -L'),
     'pnpm': _NODE_VALUES | words('-C -F --allow-build --store-dir --virtual-store-dir'),
     'yarn': _NODE_VALUES | words('--use-yarnrc --mode --cache-folder --modules-folder --mutex --use'),
     'yarn-dlx': _NODE_VALUES | words('-p'),
@@ -56,7 +56,7 @@ _VALUES = {
     'poetry': _PY_VALUES | words('-C -P --source --group -G --extras -E --python --platform --lockfile'),
 }
 _FLAGS = {
-    'npm': _NODE_FLAGS | words('-p'), 'npx': _NODE_FLAGS,
+    'npm': _NODE_FLAGS | words('-p --no-global --local'), 'npx': _NODE_FLAGS | words('--no-global --local'),
     'pnpm': _NODE_FLAGS | words('-p -r -w --workspace-root --recursive --lockfile-only'),
     'yarn': _NODE_FLAGS | words('-T -R -i --ignore-engines'), 'yarn-dlx': _NODE_FLAGS | words('-q'),
     'bun': _NODE_FLAGS | words('-d --trust --no-verify --no-save --bun'),
@@ -88,8 +88,10 @@ def _option(args, i, style):
     values, flags = _VALUES[style], _FLAGS[style]
     if key not in values and key not in flags and not key.startswith('--'):
         if raw[:2] in values:
-            return raw[:2], raw[2:].lstrip('='), i + 1, True
+            return raw[:2], raw[2:].lstrip('='), i + 1, not (style in {'npm', 'npx'} and raw[:2] == '-L')
         if len(raw) > 2 and all('-' + ch in flags for ch in raw[1:]):
+            if style in {'npm', 'npx'} and args[i+1:i+2] in (('true',), ('false',)):
+                return raw, args[i+1], i+2, True
             return raw, None, i + 1, True
         for n, ch in enumerate(raw[1:], 1):
             key = '-' + ch
@@ -135,7 +137,42 @@ def scan(args, style, first=False):
             result.options.append((key, value))
             relocate = _SHORT_RELOCATION.get(style, ())
             cluster = not key.startswith('--') and value is None and any('-'+c in relocate for c in key[1:])
-            if not known or key in _RELOCATION or key in relocate or cluster:
+            relocates = key in _RELOCATION
+            if style in {'npm', 'npx'}:
+                if key in ('--location', '-L'):
+                    relocates = value not in ('global', 'project', 'user')
+                elif key in ('--global', '--no-global', '--local', '-g') and value not in (None, 'true', 'false'):
+                    relocates = True  # nopt can return an invalid boolean as a positional.
+            if not known or relocates or key in relocate or cluster:
                 result.uncertain = True
     result.consumed = i
     return result
+
+
+def npm_global_mode(options, env, file_modes):
+    """npm's global flag OR location=global. Unknown file precedence stays unknown."""
+    config = {'global': {'false'}, 'location': {'user'}}
+    for k, default in config.items():
+        # Ancestor configs are a conservative superset of npm's actual sources.
+        default.update(file_modes.get(k, ()))
+        values = {v for key, v in env.items() if key.lower() == 'npm_config_' + k and v}
+        if values:
+            config[k] = values
+    for key, value in options:
+        if key in ('--global', '--no-global', '--local'):
+            enabled = value != 'false'
+            if key in ('--no-global', '--local'):
+                enabled = not enabled
+            config['global'] = {str(enabled).lower()}
+        elif key.startswith('-') and not key.startswith('--') and 'g' in key[1:]:
+            # nopt expands a short cluster first; its boolean value binds to
+            # the last flag only: -sg false differs from -gs false.
+            config['global'] = {'false' if key.endswith('g') and value == 'false' else 'true'}
+        elif key in ('--location', '-L'):
+            config['location'] = {value}
+    flags, locations = config['global'], config['location']
+    if flags == {'true'} or locations == {'global'}:
+        return True
+    if flags == {'false'} and locations <= {'project', 'user'}:
+        return False
+    return None

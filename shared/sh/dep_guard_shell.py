@@ -13,7 +13,8 @@ _ASSIGNMENT = re.compile(r'([A-Za-z_][A-Za-z_0-9]*)=(.*)', re.S)
 _CONTROL = {'if', 'then', 'elif', 'else', 'while', 'until', 'do', '{', '!'}
 _SHELLS = {'sh', 'bash', 'zsh'}
 _MARKER = 'DEP_GUARD_ALLOW'
-_CHANGE_ENV = {'HOME', 'XDG_CONFIG_HOME', 'CDPATH', 'PATH', 'BASH_ENV', 'ENV', 'ZDOTDIR'}
+_CHANGE_ENV = {'HOME', 'XDG_CONFIG_HOME', 'CDPATH', 'PATH', 'ZDOTDIR'}
+_SHELL_STARTUP_ENV = {'BASH_ENV', 'ENV'}
 _WRAPPERS = {'sudo', 'env', 'command', 'nice', 'nohup', 'time', 'timeout', 'exec', 'rtk', 'corepack'}
 _WRAPPER_VALUES = {
     'sudo': {'-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from',
@@ -121,7 +122,7 @@ def _shell_bodies(args, redirects):
                     yield word.text, True
 
 
-def _cd(args, cwd):
+def _cd(args, cwd, hook_env):
     if args[:1] == ('--',):
         args = args[1:]
     if (cwd is None or len(args) != 1 or not args[0] or args[0].startswith(('-', '~')) or
@@ -129,7 +130,7 @@ def _cd(args, cwd):
         return None
     target = Path(args[0])
     if not target.is_absolute():
-        if cwd is None or os.environ.get('CDPATH') and not args[0].startswith('.'):
+        if cwd is None or hook_env.get('CDPATH') and not args[0].startswith('.'):
             return None
         target = cwd / target
     try:
@@ -141,7 +142,7 @@ def _cd(args, cwd):
         return None
 
 
-def _cd_after(words, cwd, preceding, following, complex_list):
+def _cd_after(words, cwd, preceding, following, complex_list, hook_env):
     """Only assert a new location for an unconditional, successful literal cd."""
     clean = tuple(words)
     controlled = False
@@ -162,10 +163,10 @@ def _cd_after(words, cwd, preceding, following, complex_list):
         return None if clean and (clean[0] in _CONTROL or _ASSIGNMENT.fullmatch(clean[0])) else cwd
     if controlled or complex_list or preceding in ('&&', '||', '|', '|&') or following in ('||', '|', '|&', '&'):
         return None
-    return _cd(clean[1:], cwd)
+    return _cd(clean[1:], cwd, hook_env)
 
 
-def _segments(tokens, source, cwd, inherited, depth, mutations, functions):
+def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_env):
     if depth > MAX_DEPTH:
         return
     # The lexical reader deliberately flattens control flow. Do not infer a cd
@@ -178,20 +179,25 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions):
     for segment in command_segments(tokens):
         args = tuple(t.text for t in segment.words)
         for nested in segment.substitutions:
-            yield from _segments(nested, source, cwd, persistent, depth+1, mutations, functions.copy())
+            yield from _segments(nested, source, cwd, persistent, depth+1, mutations, functions.copy(), hook_env)
         invocation = _unwrap(args, cwd, persistent)
         if writes_config(invocation.argv, segment.redirects) or (invocation.argv and invocation.argv[0] in functions):
             mutations.add('config')
         if mutations:
             cwd = None
             invocation = Simple(invocation.argv, None, invocation.env, invocation.marker)
-        if invocation.argv and invocation.argv[0].rsplit('/', 1)[-1] in _SHELLS:
+        shell = invocation.argv[0].rsplit('/', 1)[-1] if invocation.argv else ''
+        if shell in _SHELLS:
             for body, startup in _shell_bodies(invocation.argv, segment.redirects):
                 if depth < MAX_DEPTH:
                     child_env = {k: v for k, v in invocation.env.items() if k != _MARKER}
-                    child_cwd = None if startup else invocation.cwd
+                    if startup or shell == 'zsh' or _SHELL_STARTUP_ENV & (hook_env.keys() | child_env.keys()):
+                        # Startup files can change the child route or write a config
+                        # that a later command in the parent shell will discover.
+                        mutations.add('config')
+                    child_cwd = None if mutations else invocation.cwd
                     yield from _segments(parse_script(body, depth+1), body, child_cwd, child_env,
-                                         depth+1, mutations, functions.copy())
+                                         depth+1, mutations, functions.copy(), hook_env)
         elif invocation.argv:
             yield invocation
         # Earlier exports can select a private index, but cannot authorize an
@@ -207,9 +213,9 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions):
             persistent.pop(_MARKER, None)
             if any(routing_assignment(w) for w in changed) or complex_list or previous in ('&&', '||'):
                 cwd = None
-        cwd = _cd_after(args, cwd, previous, segment.boundary, complex_list)
+        cwd = _cd_after(args, cwd, previous, segment.boundary, complex_list, hook_env)
         previous = segment.boundary
 
 
-def simple_commands(command, cwd):
-    return _segments(parse_script(command), command, cwd, {}, 0, set(), set())
+def simple_commands(command, cwd, *, env=None):
+    return _segments(parse_script(command), command, cwd, {}, 0, set(), set(), os.environ if env is None else env)

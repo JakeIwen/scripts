@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
+from dep_guard_forms import DIRECT as _DIRECT, PIP as _PIP, PYTHON as _PYTHON, VERBS as _VERBS
 from dep_guard_options import scan
 from dep_guard_targets import local_execution, uv_script_route
 from dep_guard_shell import simple_commands
@@ -16,6 +17,8 @@ from dep_guard_specs import NPM, PYPI, canonical_name, npm_spec, pypi_spec, with
 class Invocation:
     ecosystem: str
     tool: str
+    operation: str  # Identified manager and verb, not words that may also be operands.
+    inject_env: Optional[str]
     name: str
     pin: Optional[str]
     cwd: Optional[Path]
@@ -27,20 +30,6 @@ class Invocation:
 
 
 _NODE = {'npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'bun', 'bunx'}
-_PYTHON = re.compile(r'python(?:[23](?:\.\d+)?)?t?')
-_PIP = re.compile(r'pip(?:[23](?:\.\d+)?)?')
-# Each mode describes which operands denote packages, not which ones a tool runs.
-_VERBS = {
-    'npm': {**dict.fromkeys('install i in isntall add install-test it'.split(), 'add'),
-            'exec': 'npm-exec', 'x': 'npm-exec', 'create': 'create', 'init': 'create'},
-    'pnpm': {'add': 'add', 'install': 'add', 'i': 'add', 'dlx': 'exec'},
-    'yarn': {'add': 'add', 'global add': 'add', 'dlx': 'exec'},
-    'bun': {'add': 'add', 'install': 'add', 'i': 'add', 'x': 'exec'},
-    'pip': {'install': 'add'}, 'pipx': {'install': 'add', 'run': 'exec', 'inject': 'inject'},
-    'poetry': {'add': 'add'}, 'uv': {'add': 'add', 'pip install': 'add', 'tool install': 'tool-add',
-                                   'tool run': 'exec', 'run': 'with-only'},
-}
-_DIRECT = {'npx': 'npm', 'pnpx': 'pnpm', 'bunx': 'bun', 'uvx': 'uv'}
 
 
 def _package_command(argv):
@@ -68,7 +57,7 @@ def _package_command(argv):
 def _operation(argv, tool, start, direct):
     options, uncertain = [], False
     if direct:
-        return 'exec', direct if direct in ('npx', 'bunx') else tool, start, options, uncertain
+        return direct, 'exec', direct if direct in ('npx', 'bunx') else tool, start, options, uncertain
     first = scan(argv[start:], tool, first=True)
     if not first.operands:
         return None
@@ -92,7 +81,7 @@ def _operation(argv, tool, start, direct):
         style = 'uv-run'
     if tool == 'bun' and verb == 'x':
         style = 'bunx'
-    return mode, style, start, options, uncertain
+    return f'{tool} {verb}', mode, style, start, options, uncertain
 
 
 def _operands(argv, start, mode, style):
@@ -125,9 +114,7 @@ def _requests(tool, style, mode, operands, options):
             for spec in selected:
                 yield spec or '', False
         elif operands and not any(k in ('-c', '--call') for k, _ in options):
-            global_mode = any(k == '--global' or k.startswith('-') and not k.startswith('--') and 'g' in k[1:]
-                              for k, _ in options)
-            yield operands[0], tool == 'pipx' or tool == 'npm' and not global_mode
+            yield operands[0], tool in ('pipx', 'npm')
         return
     if mode in ('tool-add', 'create'):
         operands = operands[:1]
@@ -144,7 +131,7 @@ def _requests(tool, style, mode, operands, options):
 def parse_commands(command: str, cwd: Path, env=None, home=None):
     env = os.environ if env is None else env
     home = Path.home() if home is None else home
-    for simple in simple_commands(command, cwd):
+    for simple in simple_commands(command, cwd, env=env):
         argv = simple.argv
         parsed = _package_command(argv)
         if not parsed:
@@ -153,9 +140,11 @@ def parse_commands(command: str, cwd: Path, env=None, home=None):
         op = _operation(argv, tool, start, direct)
         if not op:
             continue
-        mode, style, start, options, uncertain = op
+        operation, mode, style, start, options, uncertain = op
         result = _operands(argv, start, mode, style)
         options += result.options
+        inject_env = (result.operands[0] if mode == 'inject' and result.operands and
+                      not any(key == '--global' for key, _ in options) else None)
         manager_argv = argv[:start+result.consumed]
         dynamic_route = any('$' in a or '`' in a for a in manager_argv)
         directory = None if uncertain or result.uncertain or dynamic_route else simple.cwd
@@ -169,10 +158,10 @@ def parse_commands(command: str, cwd: Path, env=None, home=None):
             if not spec:
                 continue
             # Markers depend on the install target's environment, not the hook's.
-            inv = Invocation(ecosystem, tool, spec.name, spec.pin, None if spec.conditional else directory,
+            inv = Invocation(ecosystem, tool, operation, inject_env, spec.name, spec.pin, None if spec.conditional else directory,
                              manager_argv, simple.env, argv[0], spec.name in overrides, False)
             if maybe_local:
-                local = local_execution(inv, raw, env, home)
+                local = local_execution(inv, raw, env, home, options)
                 if local is None:
                     inv = replace(inv, cwd=None)
                 elif local:

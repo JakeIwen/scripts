@@ -61,7 +61,9 @@ entries. Per call: 20 distinct names, 40 requests, 8 MiB, six concurrent request
 and a five-second deadline for the entire evaluation, including filesystem
 reads. Confirmed public names proceed independently of stalled registries;
 unexpired, confirmed malware evidence still applies if existence cannot be
-refreshed. An override refresh never discards an unmarked invocation's facts. The hook must run with
+refreshed. Successful refreshes apply to every invocation of the same name;
+a failed refresh leaves an unmarked invocation's valid cache evidence intact.
+The override itself applies only to its own invocation. The hook must run with
 its lexical reader and all `dep_guard_*.py` siblings beside it. On an isolated
 check only, `DEP_INSTALL_GUARD_TRACE` in the hook environment can point to a
 private temporary trace of destination host, operation class and byte count.

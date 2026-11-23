@@ -117,6 +117,69 @@ class OperandBoundaryTests(unittest.TestCase):
         self.local('pipx run report.py')
         self.checks('pipx run --spec report.py report.py', 'report-py')
 
+    def test_false_npm_global_and_project_location_keep_the_project_bin_local(self):
+        bins = self.cwd / 'node_modules/.bin'
+        bins.mkdir(parents=True)
+        (bins / 'installed-bin').touch()
+        for flags in ('--global=false', '-g false', '--no-global', '--location=project', '-L user',
+                      '--global --no-global', '--no-global true', '--local', '-sg false'):
+            with self.subTest(flags=flags):
+                self.local(f'npm exec {flags} -- installed-bin')
+        self.checks('npm exec --location=project --package=installed-bin -- cmd', 'installed-bin')
+
+    def test_true_global_mode_checks_project_only_names_but_not_global_executables(self):
+        node = self.bin / 'node'
+        node.touch()
+        node.chmod(0o700)
+        (self.bin / 'global-cli').touch()
+        bins = self.cwd / 'node_modules/.bin'
+        bins.mkdir(parents=True)
+        for i, flags in enumerate(('-g', '--global true', '--location=global', '--no-global=false',
+                                   '--location=global --global=false', '-gs false')):
+            with self.subTest(flags=flags):
+                self.local(f'npm exec {flags} -- global-cli')
+                name = f'project-only-{i}'
+                (bins / name).touch()
+                self.checks(f'npm exec {flags} -- {name}', name)
+        self.checks('npm --location global exec --package=global-cli -- cmd', 'global-cli')
+        # A prefix set only in the ignored project config is not the global bin.
+        not_global = self.root / 'project-prefix/bin'
+        not_global.mkdir(parents=True)
+        (not_global / 'wrong-prefix').touch()
+        (self.cwd / '.npmrc').write_text(f'prefix={not_global.parent}\n')
+        self.checks('npm -g exec -- wrong-prefix', 'wrong-prefix')
+
+    def test_local_bin_proof_never_authorizes_a_public_lookup(self):
+        (self.cwd / '.npmrc').write_text('registry=https://private.invalid\n')
+        bins = self.cwd / 'node_modules/.bin'
+        bins.mkdir(parents=True)
+        (bins / 'private-tool').touch()
+        self.local('npm exec --global=false -- private-tool')
+        self.abstains('npm exec --global=false -- other-private-name')
+        self.abstains('npm exec --package private-tool -- private-tool')
+
+    def test_environment_and_config_global_modes_do_not_create_a_project_exemption(self):
+        bins = self.cwd / 'node_modules/.bin'
+        bins.mkdir(parents=True)
+        (bins / 'project-only').touch()
+        self.checks('NPM_CONFIG_GLOBAL=true npm exec -- project-only', 'project-only')
+        self.local('NPM_CONFIG_GLOBAL=true npm exec --no-global -- project-only')
+        (self.home / '.npmrc').write_text('location=global\n')
+        self.abstains('npm exec -- project-only')  # A possible npmrc global mode needs proof.
+        self.local('npm exec --location=project -- project-only')
+
+    def test_uv_add_pip_is_not_the_uv_pip_install_operation(self):
+        result = self.hook('uv add pip requests')
+        self.assertEqual('deny', result.get('permissionDecision'))
+        self.assertCountEqual(['/pypi/pip/json', '/pypi/requests/json'], self.calls)
+
+    def test_uv_run_with_pip_and_pipx_install_inject_use_their_actual_operations(self):
+        self.checks('uv run --with pip python', 'pip')
+        self.checks('pipx install inject', 'inject')
+        # A real pipx inject, even with global options before its verb, must
+        # still prove its named environment, not check the name on faith.
+        self.abstains('pipx --verbose inject some-env inject')
+
     def test_pep508_marker_and_npm_boolean_values_are_not_independent_requests(self):
         self.abstains('pip install "conditional==1.0; python_version < \'3\'"')
         self.checks('uv add "conditional; sys_platform == \'win32\'" active', 'active')
