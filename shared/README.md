@@ -53,7 +53,9 @@ A failed check adds context without erasing an independently established deny.
 bare installs, package names inside scripts, remote commands over SSH, and
 non-registry specs. In a compound shell command, an unrecognized or potentially
 mutating predecessor (including another install or a write to a file) makes later
-installs unchecked. Redirects to `/dev/null`, `/dev/stdout`, `/dev/stderr` or an
+installs unchecked. So does the install's own output redirect to a file
+(`npm install x >install.log`), since the shell opens it first; pipe instead
+(`npm install x 2>&1 | tail`). Redirects to `/dev/null`, `/dev/stdout`, `/dev/stderr` or an
 open descriptor do not write a named file. Before its first command operand,
 `npx` accepts only `-y`, `--yes`, `-p NAME`, `--package NAME` or `--package=NAME`
 for checking; other switches make its operand boundary uncertain.
