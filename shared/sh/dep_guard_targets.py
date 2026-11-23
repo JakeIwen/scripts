@@ -107,9 +107,8 @@ def _global_bin(inv, effective, configured, project, mode):
 
 def local_execution(inv, raw, env, home, options):
     """True = existing target, False = not local, None = do not look up the name."""
-    # Unknown predecessors invalidate cwd; even an allowed mkdir or redirect
-    # can change which prefix, manifest or executable exists when this runs.
-    if inv.cwd is None or inv.writes:
+    # An earlier write or unclassified command invalidates cwd before this proof.
+    if inv.cwd is None:
         return None
     try:
         if inv.tool == 'pipx':

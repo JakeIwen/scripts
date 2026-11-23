@@ -2,7 +2,6 @@
 
 import re
 
-from dep_guard_config_paths import possible_config_path
 from dep_guard_forms import PYTHON
 from destructive_guard_shell import BOUNDARIES
 
@@ -19,7 +18,7 @@ def routing_assignment(word):
     return bool(_ROUTE_ENV.match(word))
 
 
-def _git_may_write(args, destination):
+def _git_may_write(args):
     """Read-only commands name config files as *inputs*. Unknown verbs (including aliases) may write them."""
     i = 0
     while i < len(args) and args[i].startswith('-'):
@@ -50,9 +49,7 @@ def _git_may_write(args, destination):
                 break  # The remaining words are pathspecs, not output options.
             if word.startswith('--output=') or word == '--output':
                 path = word.partition('=')[2] if '=' in word else next(iter(tail[j+1:j+2]), '')
-                # Global options such as -C may change where Git writes a relative path.
-                destination(path if not i or path.startswith('/') else None)
-                if not path or path.startswith('-') or possible_config_path(path):
+                if not _output_sink(path):
                     return True
             elif word.startswith('-') and not re.fullmatch(
                     r'-[sbpU0-9]+|--(?:stat|short|branch|oneline|cached|staged|name-only|name-status|'
@@ -79,27 +76,32 @@ def _git_may_write(args, destination):
     return True
 
 
-def redirects_change_config(redirects, destination):
-    for _, op, token in redirects:
-        if op in {'>', '>>', '>|', '&>', '&>>', '<>'} or op == '>&' and not re.fullmatch(r'\d+|-', token.text):
-            destination(token.text)
-            if possible_config_path(token.text):
-                return True
+def _output_sink(path):
+    # Compare literal names only: another path could be a link to a config
+    # (or a config could link to it). A numeric filename is not an fd.
+    return path in {'/dev/null', '/dev/stdout', '/dev/stderr'} or bool(re.fullmatch(r'/dev/fd/[0-9]+', path))
+
+
+def redirects_may_write(redirects):
+    for _, op, word in redirects:
+        if op in {'<', '<&', '<<', '<<-', '<<<'}:
+            continue
+        if op == '>&' and re.fullmatch(r'[0-9]+-?|-', word.text):
+            continue  # Duplicate, move or close a descriptor; do not open a file.
+        if not _output_sink(word.text):
+            return True
     return False
 
 
-def _mkdir_safe(args, destination):
-    ended = False
-    for arg in args:
-        if not ended and arg == '--':
-            ended = True
-            continue
-        if not ended and arg in ('-p', '--parents'):
-            continue
-        if (not ended and arg.startswith('-')) or any(possible_config_path(part) for part in arg.split('/') if part):
-            return False
-        destination(arg, parents=True)  # mkdir -p can also create an indirect config's parent or the config itself.
-    return True
+def _tee_only_sinks(args):
+    # BSD and GNU can stop option parsing at different points. Only discard
+    # switches before the first output; every remaining word must be a sink.
+    i = 0
+    while i < len(args) and args[i] in ('-a', '-i'):
+        i += 1
+    if args[i:i+1] == ('--',):
+        i += 1
+    return all(_output_sink(w) for w in args[i:])
 
 
 def _options_known(args, switches):
@@ -114,23 +116,23 @@ def _options_known(args, switches):
 # Keep predicates narrow for commands with both read and write/execute forms.
 _ROUTE_NEUTRAL = {
     **dict.fromkeys(('cd', 'pushd', 'ls', 'pwd', 'echo', 'cat', 'head', 'tail', 'wc', 'test', '[',
-                     'true', 'which', 'type', 'sleep'), lambda a, d: True),
-    'printf': lambda a, d: not a or not a[0].startswith('-v') and all('%n' not in w for w in a),
-    'mkdir': _mkdir_safe,
-    'find': lambda a, d: all(not w.startswith('-') or w in {
+                     'true', 'which', 'type', 'sleep'), lambda a: True),
+    'printf': lambda a: not a or not a[0].startswith('-v') and all('%n' not in w for w in a),
+    'tee': _tee_only_sinks,
+    'find': lambda a: all(not w.startswith('-') or w in {
         '-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth', '-depth', '-print',
         '-print0', '-prune', '-xdev', '-o', '-a', '-not', '-empty', '-mtime', '-size', '-L', '-P', '-H'} for w in a),
-    'rg': lambda a, d: _options_known(a, r'-[inuclwFvheS]+|--(?:files|hidden|no-heading|line-number|fixed-strings)'),
-    'grep': lambda a, d: _options_known(a, r'-[iRrnclwFvheEH]+|--(?:line-number|fixed-strings|recursive)'),
-    'git': lambda a, d: not _git_may_write(a, d),
-    'command': lambda a, d: a[:1] in (('-v',), ('-V',)),
-    'env': lambda a, d: a in ((), ('-0',), ('--null',)),
-    'date': lambda a, d: all(w in ('-u', '-R') or w.startswith('+') for w in a),
-    **dict.fromkeys(('node', 'npm', 'python'), lambda a, d: a == ('--version',)),
+    'rg': lambda a: _options_known(a, r'-[inuclwFvheS]+|--(?:files|hidden|no-heading|line-number|fixed-strings)'),
+    'grep': lambda a: _options_known(a, r'-[iRrnclwFvheEH]+|--(?:line-number|fixed-strings|recursive)'),
+    'git': lambda a: not _git_may_write(a),
+    'command': lambda a: a[:1] in (('-v',), ('-V',)),
+    'env': lambda a: a in ((), ('-0',), ('--null',)),
+    'date': lambda a: all(w in ('-u', '-R') or w.startswith('+') for w in a),
+    **dict.fromkeys(('node', 'npm', 'python'), lambda a: a == ('--version',)),
 }
 
 
-def neutral_predecessor(words, destination, functions):
+def neutral_predecessor(words, functions):
     if not words:
         return True  # A redirect-only segment has already been inspected.
     if words[:1] == ('rtk',) and 'rtk' not in functions:
@@ -145,7 +147,7 @@ def neutral_predecessor(words, destination, functions):
     if any('$' in w or '`' in w or w.startswith(('*', '?', '[', '{', '~', '=')) for w in words[1:]):
         return False  # Expansion could supply an option or execute code, even to an otherwise safe reader.
     check = _ROUTE_NEUTRAL.get(tool)
-    return check is not None and check(words[1:], destination)
+    return check is not None and check(words[1:])
 
 
 def _is_start(tokens, i):

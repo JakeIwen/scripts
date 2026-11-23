@@ -6,8 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
-from dep_guard_config_paths import ConfigWrites
-from dep_guard_shell_context import executable_tokens, neutral_predecessor, redirects_change_config, routing_assignment
+from dep_guard_shell_context import executable_tokens, neutral_predecessor, redirects_may_write, routing_assignment
 from destructive_guard_shell import command_segments, parse_script, MAX_DEPTH
 
 _ASSIGNMENT = re.compile(r'([A-Za-z_][A-Za-z_0-9]*)=(.*)', re.S)
@@ -36,7 +35,12 @@ class Simple:
     cwd: Optional[Path]
     env: dict
     marker: str
-    writes: frozenset = frozenset()
+
+
+@dataclass
+class RouteState:
+    # Shared across nested substitutions and shells because they write the same filesystem.
+    uncertain: bool = False
 
 
 def _assign(word, env):
@@ -180,22 +184,16 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
     previous = None
     for segment in command_segments(tokens):
         args = tuple(t.text for t in segment.words)
+        if redirects_may_write(segment.redirects):
+            mutations.uncertain = True
         for nested in segment.substitutions:
             yield from _segments(nested, source, cwd, persistent, depth+1, mutations, functions.copy(), hook_env)
         invocation = _unwrap(args, cwd, persistent)
-        # Redirections take effect before the program starts, but the program's
-        # other effects invalidate only *later* proofs, not its own install.
-        def record(word, *, parents=False):
-            mutations.record(word, invocation.cwd, parents=parents)
-
-        if not mutations.config:
-            if redirects_change_config(segment.redirects, record) or (invocation.argv and invocation.argv[0] in functions):
-                mutations.config = True
-        if mutations.config:
+        if invocation.argv and invocation.argv[0] in functions:
+            mutations.uncertain = True
+        if mutations.uncertain:
             cwd = None
             invocation = replace(invocation, cwd=None)
-        elif mutations.destinations:
-            invocation = replace(invocation, writes=frozenset(mutations.destinations))
         shell = invocation.argv[0].rsplit('/', 1)[-1] if invocation.argv else ''
         if shell in _SHELLS:
             for body, startup in _shell_bodies(invocation.argv, segment.redirects):
@@ -204,14 +202,14 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
                     if startup or shell == 'zsh' or _SHELL_STARTUP_ENV & (hook_env.keys() | child_env.keys()):
                         # Startup files can change the child route or write a config
                         # that a later command in the parent shell will discover.
-                        mutations.config = True
-                    child_cwd = None if mutations.config else invocation.cwd
+                        mutations.uncertain = True
+                    child_cwd = None if mutations.uncertain else invocation.cwd
                     yield from _segments(parse_script(body, depth+1), body, child_cwd, child_env,
                                          depth+1, mutations, functions.copy(), hook_env)
         elif invocation.argv:
             yield invocation
-        if not mutations.config and not neutral_predecessor(args, record, functions):
-            mutations.config = True
+        if not mutations.uncertain and not neutral_predecessor(args, functions):
+            mutations.uncertain = True
         # Earlier exports can select a private index, but cannot authorize an
         # override. Conditional exports/unsets cannot positively establish a route.
         state = list(args)
@@ -230,4 +228,4 @@ def _segments(tokens, source, cwd, inherited, depth, mutations, functions, hook_
 
 
 def simple_commands(command, cwd, *, env=None):
-    return _segments(parse_script(command), command, cwd, {}, 0, ConfigWrites(), set(), os.environ if env is None else env)
+    return _segments(parse_script(command), command, cwd, {}, 0, RouteState(), set(), os.environ if env is None else env)

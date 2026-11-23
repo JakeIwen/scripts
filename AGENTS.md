@@ -978,7 +978,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `dep_guard_options` describes manager options, `dep_guard_commands` and
   `dep_guard_specs` extract direct operands, and `dep_guard_targets` identifies
   local executables and script targets. `dep_guard_config_paths` supplies the config
-  names used by both source discovery and mutation detection. `dep_guard_sources` gates public requests,
+  names used by source and executable discovery. `dep_guard_sources` gates public requests,
   `dep_guard_schedule` tracks independent ready checks and per-invocation facts,
   `dep_guard_deadline` bounds the entire evaluation, `dep_guard_run` renders decisions,
   `dep_guard_lookup` owns registry facts, `dep_guard_osv` and `dep_guard_versions`

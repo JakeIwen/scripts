@@ -27,7 +27,6 @@ class Invocation:
     executable: str
     override: bool
     local: bool
-    writes: frozenset
 
 
 _NODE = {'npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'bun', 'bunx'}
@@ -164,7 +163,7 @@ def parse_commands(command: str, cwd: Path, env=None, home=None, *, notes=None):
                 continue
             # Markers depend on the install target's environment, not the hook's.
             inv = Invocation(ecosystem, tool, operation, inject_env, spec.name, spec.pin, None if spec.conditional else directory,
-                             manager_argv, simple.env, argv[0], spec.name in overrides, False, simple.writes)
+                             manager_argv, simple.env, argv[0], spec.name in overrides, False)
             if maybe_local:
                 local = local_execution(inv, raw, env, home, options)
                 if local is None:

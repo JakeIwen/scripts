@@ -59,7 +59,7 @@ class CommandTests(unittest.TestCase):
             ('npx -p foo tool', 'foo'), ('npx --package=foo --package=@org/b foo bar', 'foo @org/b'), ('npx app -p hidden', 'app'),
             ('npm exec -p app', 'app'), ('npm exec app --package foo', 'foo'),
             ('npm exec --package foo -- app --package hidden', 'foo'), ('npm x -- app -p other', 'app'),
-            ('npx -- app --package hidden', 'app'), ('npx --package=foo -c "hello world"', 'foo'),
+            ('npx -- app --package hidden', 'app'),
             ('npm exec --call=hello', ''), ('pnpm --package=one dlx --package two tool --package hidden', 'one two'),
             ('corepack pnpm dlx foo hidden', 'foo'), ('pnpx tool --package hidden', 'tool'),
             ('corepack yarn dlx -p one --package=two do-stuff -p data', 'one two'), ('yarn dlx tool x', 'tool'),

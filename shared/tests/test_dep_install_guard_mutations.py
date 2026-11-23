@@ -70,15 +70,23 @@ class MutationTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.check(prefix + ' && npm install PACKAGE')
         self.check('echo setting > alias && npm exec -- PACKAGE')
-        for prefix in ('printf ok >mirror', 'git diff -- policy/mirror',
-                       'cat < policy/mirror', 'printf setting >policy/other'):
+        for prefix in ('git diff -- policy/mirror', 'cat < policy/mirror'):
             with self.subTest(prefix=prefix):
                 self.check(prefix + ' && npm install PACKAGE', public=True)
         self.check('npm install PACKAGE && tee alias', public=True)
-        # An unknown directory plus an ordinary basename is harmless only when
-        # no consulted config selected an indirect source with an arbitrary name.
         (self.home / '.npmrc').unlink()
-        self.check('printf ok >"$DEST/mirror" && npm i PACKAGE', public=True)
+        self.check('printf ok >"$DEST/mirror" && npm i PACKAGE')
+
+    def test_only_terminal_sinks_and_fd_duplication_remain_eligible(self):
+        for prefix in ('echo ok 2>/dev/null', 'printf ok >>/dev/stdout 2>&1', 'echo ok &>/dev/stderr',
+                       'echo ok >|/dev/fd/1', 'tee /dev/null /dev/stderr', 'tee -- /dev/stdout',
+                       'cat <<<data', 'git diff --output=/dev/null'):
+            with self.subTest(prefix=prefix):
+                self.check(prefix + ' && npm i PACKAGE', public=True)
+        for prefix in ('echo ok >first 2>/dev/null', 'echo ok &>>capture', 'echo ok >|2',
+                       'tee /dev/null capture', 'tee /dev/null -a', 'tee -- -a', 'mkdir -p build', 'git diff --output=result'):
+            with self.subTest(prefix=prefix):
+                self.check(prefix + ' && npm i PACKAGE')
 
     def test_unclassified_predecessors_cannot_establish_a_public_route(self):
         for prefix in ('curl -o .npmrc https://example.invalid/config', 'aws codeartifact login --tool npm',
@@ -90,7 +98,7 @@ class MutationTests(unittest.TestCase):
                 self.check(prefix + ' && npm i PACKAGE')
 
     def test_known_read_only_predecessors_keep_the_later_install_eligible(self):
-        for prefix in ('cd .', 'pushd .', 'mkdir -p build', 'ls -a', 'pwd', 'echo ok', "printf '%s' ok",
+        for prefix in ('cd .', 'pushd .', 'ls -a', 'pwd', 'echo ok', "printf '%s' ok",
                        'cat log', 'head -n 5 log', 'tail log', 'wc -l log', 'grep -n sample log',
                        'rg --files', 'find . -type f -print', 'test -f file', '[ -f file ]', 'true',
                        'which npm', 'command -v npm', 'type npm', 'node --version', 'npm --version',

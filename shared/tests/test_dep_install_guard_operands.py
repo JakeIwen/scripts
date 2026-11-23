@@ -199,6 +199,39 @@ class OperandBoundaryTests(unittest.TestCase):
                 self.abstains(command)
         self.checks('npm exec -qy --package=package-name -- command', 'package-name')
 
+    def test_npx_prefix_rejects_every_unproved_historical_switch(self):
+        # Frozen inventory: expanding the npm table must never expand npx's grammar.
+        old_switches = """
+            --access --auth-type --before --cache --cafile --call --color --config --config-file --cwd
+            --dev --dir --directory --dry-run --exact --fetch-timeout --filter --force --foreground-scripts
+            --frozen-lockfile --global --globalconfig --https-proxy --ignore-existing --ignore-scripts
+            --ignore-workspace-root-check --include --include-workspace-root --install-links
+            --install-strategy --json --legacy-bundling --legacy-peer-deps --local --location --loglevel
+            --logs-dir --no --no-audit --no-color --no-fund --no-global --no-install --no-package-lock
+            --no-progress --no-save --offline --omit --optional --otp --package --package-lock-only
+            --parseable --peer --prefer-offline --prefer-online --prefix --production --proxy --quiet
+            --registry --save --save-dev --save-exact --save-optional --save-peer --save-prefix --save-prod
+            --script-shell --shell --silent --strict-peer-deps --tag --userconfig --verbose --workspace
+            --workspace-root-dir --workspaces --yes -B -C -D -E -L -O -P -S -W -c -d -dd -ddd -f -g -p -q
+            -s -v -w -y
+        """.split()
+        for flag in old_switches:
+            with self.subTest(flag=flag):
+                if flag in ('-y', '--yes'):
+                    name = 'yes-short' if flag == '-y' else 'yes-long'
+                    self.checks(f'npx {flag} {name} --registry https://example.invalid cmd', name)
+                elif flag in ('-p', '--package'):
+                    name = 'spec-short' if flag == '-p' else 'spec-long'
+                    self.checks(f'npx {flag} {name} bin-name --package cmd', name)
+                else:
+                    self.abstains(f'npx {flag} bin-name --registry https://example.invalid cmd')
+        self.checks('npx -y --package=attached -- unrelated', 'attached')
+        self.checks('npx --yes false --registry arg', 'false')
+        for command in ('npx -y -p explicit --no-audit bin-name', 'npx -p=foo cmd',
+                        'npx --yes=false cmd', 'npx --package --no-audit cmd', 'npx -p', 'npx --package=',
+                        'npx -p explicit * --no-audit cmd'):
+            self.abstains(command)
+
     def test_changed_tree_is_not_proof_of_a_local_runner(self):
         bins = self.cwd / 'node_modules/.bin'
         bins.mkdir(parents=True)

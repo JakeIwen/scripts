@@ -43,7 +43,7 @@ _UV_FLAGS = words('''-U --upgrade --dev --no-sync --frozen --locked --no-project
     --no-dev --no-editable --active --global --refresh --reinstall --exact --inexact --preview
     --native-tls --no-managed-python --managed-python --prerelease-allow''')
 _VALUES = {
-    'npm': _NODE_VALUES | words('-C -w -L'), 'npx': _NODE_VALUES | words('-C -w -p -L'),
+    'npm': _NODE_VALUES | words('-C -w -L'),
     'pnpm': _NODE_VALUES | words('-C -F --allow-build --store-dir --virtual-store-dir'),
     'yarn': _NODE_VALUES | words('--use-yarnrc --mode --cache-folder --modules-folder --mutex --use'),
     'yarn-dlx': _NODE_VALUES | words('-p'),
@@ -56,7 +56,7 @@ _VALUES = {
     'poetry': _PY_VALUES | words('-C -P --source --group -G --extras -E --python --platform --lockfile'),
 }
 _FLAGS = {
-    'npm': _NODE_FLAGS | words('-p --no-global --local'), 'npx': _NODE_FLAGS | words('--no-global --local'),
+    'npm': _NODE_FLAGS | words('-p --no-global --local'),
     'pnpm': _NODE_FLAGS | words('-p -r -w --workspace-root --recursive --lockfile-only'),
     'yarn': _NODE_FLAGS | words('-T -R -i --ignore-engines'), 'yarn-dlx': _NODE_FLAGS | words('-q'),
     'bun': _NODE_FLAGS | words('-d --trust --no-verify --no-save --bun'),
@@ -69,7 +69,7 @@ _FLAGS = {
 _RELOCATION = words('''--prefix --workspace --workspaces --filter --directory --cwd --dir --project --userconfig
     --globalconfig --config --config-file --location --workspace-root --recursive --workspace-root-dir
     --isolated --pip-args --env-file --use-yarnrc --global-folder --no-config --script-shell --with-requirements''')
-_SHORT_RELOCATION = {'npm': {'-C', '-w'}, 'npx': {'-C', '-w'}, 'pnpm': {'-C', '-F', '-r', '-w'},
+_SHORT_RELOCATION = {'npm': {'-C', '-w'}, 'pnpm': {'-C', '-F', '-r', '-w'},
                      'yarn': {'-R'}, 'poetry': {'-C', '-P'}, 'uv': {'-p'}, 'uv-run': {'-p'}}
 
 
@@ -102,14 +102,10 @@ def _option(args, i, style):
     """Return key, value, next index, known. Slice indexes retain original argv."""
     raw = args[i]
     key, equals, value = raw.partition('=')
-    if style == 'npx' and not key.startswith('--') and len(key) > 2:
-        # npm 10.9.4 bin/npx-cli.js finds the -- boundary before nopt
-        # expands clusters. Unknown switch words can swallow a positional.
-        return raw, None, i+1, False
     values, flags = _VALUES[style], _FLAGS[style]
     if key not in values and key not in flags and not key.startswith('--'):
         if raw[:2] in values:
-            return raw[:2], raw[2:].lstrip('='), i + 1, style not in {'npm', 'npx'}
+            return raw[:2], raw[2:].lstrip('='), i + 1, style != 'npm'
         if len(raw) > 2 and all('-' + ch in flags for ch in raw[1:]):
             if style == 'npm':
                 return _npm_cluster(raw, args, i)
@@ -131,22 +127,61 @@ def _option(args, i, style):
             return key, value, i + 1, True
         return key, args[i+1] if i+1 < len(args) else '', min(i+2, len(args)), True
     if key in flags:
-        if style in {'npm', 'npx'}:
+        if style == 'npm':
             if key == '-W' or key in _NPM_LOGLEVEL and equals:
                 return key, None, i+1, False
             if key not in _NPM_LOGLEVEL and not equals and args[i+1:i+2] in (('true',), ('false',)):
-                if style == 'npx':
-                    # npx can insert -- before the literal; don't guess whether
-                    # its separate preprocessor recognized this switch.
-                    return key, None, i+1, False
                 return key, args[i+1], i+2, True
         return key, value if equals else None, i + 1, True
     # Opaque arity: no subsequent operand is safe to send to a public service.
     return key, None, i + (1 if equals or i+1 == len(args) or args[i+1].startswith('-') else 2), False
 
 
+def _npx_prefix(args):
+    """Only the small, proven prefix grammar of npm 10.9.4 bin/npx-cli.js.
+
+    npx sets the command boundary *before* npm parses flags. Neither npm's
+    option arities nor its shorthand table decide which words npx passes on.
+    """
+    result = Scan()
+    while result.consumed < len(args):
+        word = args[result.consumed]
+        result.consumed += 1
+        if word == '--':  # Explicit end of options, not a switch.
+            if result.consumed < len(args):
+                result.operands.append(args[result.consumed])
+                result.consumed += 1
+            break
+        if not word.startswith('-'):
+            # Expansion may yield an option, not the positional that ends
+            # the prefix. This matters even when a package was given earlier.
+            if not word or any(c in word for c in '$`*?[]{}'):
+                result.uncertain = True
+                break
+            result.operands.append(word)
+            break
+        if word in ('-y', '--yes'):
+            result.options.append(('--yes', None))
+            continue
+        if word.startswith('--package='):
+            spec = word.partition('=')[2]
+        elif word in ('-p', '--package') and result.consumed < len(args):
+            spec = args[result.consumed]
+            result.consumed += 1
+        else:
+            result.uncertain = True
+            break
+        if not spec or spec.startswith('-') or any(c in spec for c in '$`*?[]{}'):
+            result.uncertain = True
+            break
+        result.options.append(('--package', spec))
+    return result
+
+
 def scan(args, style, first=False):
     """Scan manager options, optionally stopping after its first positional."""
+    if style == 'npx':
+        return _npx_prefix(args)
     result = Scan()
     i, ended = 0, False
     while i < len(args):
@@ -165,7 +200,7 @@ def scan(args, style, first=False):
             relocate = _SHORT_RELOCATION.get(style, ())
             cluster = not key.startswith('--') and value is None and any('-'+c in relocate for c in key[1:])
             relocates = key in _RELOCATION
-            if style in {'npm', 'npx'}:
+            if style == 'npm':
                 if key in ('--location', '-L'):
                     relocates = value not in ('global', 'project', 'user')
                 elif key in ('--global', '--no-global', '--local', '-g') and value not in (None, 'true', 'false'):

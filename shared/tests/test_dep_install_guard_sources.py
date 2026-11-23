@@ -154,6 +154,17 @@ class SourcePrivacyTests(unittest.TestCase):
         self.skipped('npm install private-example', npm_config_python='/fixture/python',
                      NPM_CONFIG_REGISTRY='https://confidential.invalid')
 
+    def test_prior_output_invalidates_pip_config_without_comparing_symlink_targets(self):
+        settings = self.seed(self.cwd / 'company-pip-settings', '[global]\nindex-url=https://pypi.org/simple\n')
+        conf = self.home / '.config/pip/pip.conf'
+        conf.parent.mkdir(parents=True)
+        conf.symlink_to(settings)
+        self.checked('printf ok 2>/dev/null && pip install public-example')
+        for prefix in ('printf setting > company-pip-settings', 'cat <<<setting >company-pip-settings',
+                       'tee -a company-pip-settings', 'printf ok >other-file', 'printf ok >2'):
+            with self.subTest(prefix=prefix):
+                self.skipped(prefix + ' && pip install confidential')
+
     def test_distribution_npmrc_with_an_absolute_globalconfig(self):
         config = self.root / 'distro/npmrc'
         self.seed(self.etc / 'npmrc', f'globalconfig={config}')

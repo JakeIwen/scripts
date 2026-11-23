@@ -52,10 +52,14 @@ A failed check adds context without erasing an independently established deny.
 `poetry install`), requirements/constraint files, manifest edits followed by
 bare installs, package names inside scripts, remote commands over SSH, and
 non-registry specs. In a compound shell command, an unrecognized or potentially
-mutating predecessor (including another install) makes later installs unchecked.
+mutating predecessor (including another install or a write to a file) makes later
+installs unchecked. Redirects to `/dev/null`, `/dev/stdout`, `/dev/stderr` or an
+open descriptor do not write a named file. Before its first command operand,
+`npx` accepts only `-y`, `--yes`, `-p NAME`, `--package NAME` or `--package=NAME`
+for checking; other switches make its operand boundary uncertain.
 Run an install in a separate tool call to check it against the resulting filesystem.
-Check skipped names yourself against the project's own documentation. This is a best-effort tool-call check, not a package-manager or
-shell security boundary.
+Check skipped names yourself against the project's own documentation. This is a
+best-effort tool-call check, not a package-manager or shell security boundary.
 
 The cache lives in `dep-install-guard/lookups.json` under an absolute
 `XDG_CACHE_HOME`, otherwise under `~/.cache`; it is capped at 1 MiB and 2,000
