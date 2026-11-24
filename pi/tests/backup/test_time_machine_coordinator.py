@@ -118,18 +118,28 @@ class RemoteTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 3)
                 self.assertEqual(run.call_args.kwargs['timeout'], 21)
 
-    def test_safe_hello_failure_retries_but_not_below_ten_seconds(self):
-        with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 121]), \
+    def test_bypassed_success_is_kept_and_only_a_failed_call_retries(self):
+        # rc 0 after a hello failure: the direct dial worked; tear down, keep the result.
+        with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 101]), \
                 mock.patch.object(coordinator.subprocess, 'run', side_effect=[
                     self.result(stdout=b'{"first": true}', stderr=b'master hello exchange failed'),
                     self.result()]) as run:
             self.assertEqual(coordinator.remote('test', '--capture-request'), {'first': True})
         self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.args[0][-3:], ['-O', 'exit', 'pi@vanpi.lan'])
+        # A failed bypassed call retries once with the remaining budget...
         with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 110]), \
                 mock.patch.object(coordinator.subprocess, 'run', side_effect=[
-                    self.result(stderr=b'master hello exchange failed'), self.result(), self.result()]) as run:
+                    self.result(1, stderr=b'master hello exchange failed'), self.result(), self.result()]) as run:
             self.assertEqual(coordinator.remote('test', '--capture-request'), {'ok': True})
         self.assertEqual(run.call_args.kwargs['timeout'], 20)
+        # ...but not when under ten seconds remain.
+        with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 121]), \
+                mock.patch.object(coordinator.subprocess, 'run', side_effect=[
+                    self.result(1, stderr=b'master hello exchange failed'), self.result()]) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                coordinator.remote('test', '--capture-request')
+        self.assertEqual(run.call_count, 2)
 
     def test_teardown_error_does_not_mask_original(self):
         with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(255)), \

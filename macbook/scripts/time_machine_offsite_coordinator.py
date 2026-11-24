@@ -153,7 +153,10 @@ def remote(user, *args):
             except Exception:
                 pass
             timeout = deadline - time.monotonic()
-            if attempt == 0 and args and args[0] in REPLAY_SAFE and timeout >= 10:
+            # A bypassed frozen master can still return rc 0 from its direct
+            # dial; keep that result and retry only a failed call.
+            if (attempt == 0 and result.returncode and args and args[0] in REPLAY_SAFE
+                    and timeout >= 10):
                 continue
         if result.returncode:
             raise subprocess.CalledProcessError(result.returncode, 'ssh',
