@@ -36,6 +36,12 @@ PI_SCRIPT = '/home/pi/scripts/codex_update.py'
 PI_METERED = Path('/home/pi/scripts/vanpi-metered')
 MAC_METERED = Path('/Users/jacobr/dev/scripts/macbook/metered/mac-metered')
 SSH_OPTIONS = ('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5')
+# Mac Panel polls status every 15 s; each uncached poll is a fresh login on the
+# CPU-starved Pi. The data is weekly-update state, so minutes of staleness are fine.
+PI_STATUS_TTL_SECONDS = 600
+# Short for failures: off the van LAN the vanpi.lan lookup stalls each ask for ~10 s.
+PI_STATUS_FAILURE_TTL_SECONDS = 60
+PI_STATUS_CACHE_NAME = 'pi-status-cache.json'
 
 
 class Outcome:
@@ -283,10 +289,44 @@ def host_fields(name, state, now):
     return level, fields
 
 
+def valid_pi_answer(value):
+    """Every tool record must be an object (or the old flat Codex record) for host_fields."""
+    if not isinstance(value, dict):
+        return False
+    return 'outcome' in value or all(isinstance(value.get(name, {}), dict) for name in TOOLS)
+
+
+def cached_pi_status(host):
+    """The Pi's status answer for the panel, reusing a recent one (or recent failure).
+
+    Only the automation-status path goes through here; every other Pi ask
+    (none today) stays live, and `run` never needs Pi state.
+    """
+    path = host.state_dir / PI_STATUS_CACHE_NAME
+    try:
+        entry = json.loads(path.read_text())
+        asked_at, value = entry['asked_at'], entry['value']
+        ttl = PI_STATUS_TTL_SECONDS if value is not None else PI_STATUS_FAILURE_TTL_SECONDS
+        # A clock that moved backwards makes the age negative: treat as a miss.
+        if (value is None or valid_pi_answer(value)) and 0 <= host.now() - asked_at < ttl:
+            return value
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    value = ask_pi(host, 'status', '--json', timeout=10)
+    if not valid_pi_answer(value):
+        value = None
+    try:
+        host.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        atomic_json(path, {'asked_at': host.now(), 'value': value})
+    except (OSError, ValueError):
+        pass
+    return value
+
+
 def automation_record(host):
     from tool_automation import status_field, status_record
     levels, fields = [], []
-    for machine, state in (('Mac', read_state(host)), ('Pi', ask_pi(host, 'status', '--json', timeout=10))):
+    for machine, state in (('Mac', read_state(host)), ('Pi', cached_pi_status(host))):
         for name, adapter in TOOLS.items():
             label = f'{machine} {adapter.label}'
             if state is None:

@@ -289,8 +289,50 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(machine.options[0]['timeout'], 10)
         self.assertIn('BatchMode=yes', machine.calls[0])
         self.assertIn('ConnectTimeout=5', machine.calls[0])
-        _, output = self.main(['status', '--automation'], self.host(FakeMachine(), is_pi=False))
+        _, output = self.main(['status', '--automation'], self.host(FakeMachine(), is_pi=False, now=NOW + 601))
         self.assertEqual(json.loads(output)['level'], 'unknown')
+
+    def panel(self, machine, now):
+        return self.main(['status', '--automation'], self.host(machine, is_pi=False, now=now))[1]
+
+    def ssh_calls(self, machine):
+        return [call for call in machine.calls if call[0] == '/usr/bin/ssh']
+
+    def test_pi_status_is_cached_for_ten_minutes(self):
+        pi_state = {'codex': {'outcome': 'current', 'version': '1.0.0'}}
+        machine = FakeMachine(pi=pi_state)
+        first = self.panel(machine, NOW)
+        self.assertEqual(self.panel(machine, NOW + 599), first)
+        self.assertEqual(len(self.ssh_calls(machine)), 1)
+        self.panel(machine, NOW + 600)
+        self.assertEqual(len(self.ssh_calls(machine)), 2)
+
+    def test_pi_failure_is_cached_for_a_minute(self):
+        machine = FakeMachine()
+        self.panel(machine, NOW)
+        self.panel(machine, NOW + 59)
+        self.assertEqual(len(self.ssh_calls(machine)), 1)
+        self.panel(machine, NOW + 60)
+        self.assertEqual(len(self.ssh_calls(machine)), 2)
+
+    def test_malformed_pi_answer_is_a_cached_failure_not_a_success(self):
+        machine = FakeMachine(pi={'codex': 'broken'})
+        record = json.loads(self.panel(machine, NOW))
+        self.assertEqual(record['level'], 'unknown')
+        self.panel(machine, NOW + 59)
+        self.assertEqual(len(self.ssh_calls(machine)), 1)
+        self.panel(machine, NOW + 60)
+        self.assertEqual(len(self.ssh_calls(machine)), 2)
+
+    def test_corrupt_or_malformed_pi_cache_is_a_miss(self):
+        cache = self.root / 'state' / codex_update.PI_STATUS_CACHE_NAME
+        cache.parent.mkdir()
+        for content in ('{not json', '[]', '{"asked_at": "x", "value": {}}',
+                        json.dumps({'asked_at': NOW, 'value': 'junk'})):
+            cache.write_text(content)
+            machine = FakeMachine(pi={})
+            self.panel(machine, NOW)
+            self.assertEqual(len(self.ssh_calls(machine)), 1, content)
 
 
 class ContractTest(unittest.TestCase):
