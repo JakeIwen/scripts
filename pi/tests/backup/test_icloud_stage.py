@@ -23,25 +23,74 @@ ARCHIVE_ERROR = 'Archive consistency check complete, problems found.\n'
 INTEGRITY_ERROR = 'Data integrity error: Segment entry checksum mismatch [segment 8, offset 9]\n'
 
 
-def eio(path):
-    return f"OSError: [Errno 5] Input/output error: '{path}'\n"
+def eio(path=None):
+    suffix = f": '{path}'" if path is not None else ''
+    return 'OSError: [Errno 5] Input/output error' + suffix + '\n'
 
 
 class SnapshotRejectionTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = test_config()
+        self.work_allowed = self.enterContext(mock.patch.object(backup, 'check_work_allowed'))
+
     def snapshot(self, root, report=None, state=None):
         def run(args, cfg, **kwargs):
             if args[1] == 'check' and report is not None:
                 raise backup.command_failure('/usr/bin/borg', 'check', *report)
         with mock.patch.object(backup, 'run', side_effect=run), mock.patch.object(backup.backup_locks, 'held'):
-            backup.make_snapshot(test_config(), root, root / 'source', NAME, state)
+            backup.make_snapshot(self.cfg, root, root / 'source', NAME, state)
 
-    def test_borg_eio_names_a_staged_repository_path(self):
+    def staged_segment(self, root):
+        dest = root / NAME / 'payload' / 'repository'
+        segment = dest / 'data/0/8'
+        segment.parent.mkdir(parents=True)
+        segment.write_bytes(b'fixture segment')
+        return segment
+
+    def test_pathless_borg_eio_rejects_only_if_a_staged_read_reproduces_it(self):
         with tempfile_root() as root:
-            dest = root / NAME / 'payload' / 'repository'
-            with self.assertRaises(icloud_stage.StageRejected) as caught:
-                self.snapshot(root, (2, eio(dest / 'data/0/8')))
+            segment = self.staged_segment(root)
+            path_open = Path.open
+            damaged = mock.MagicMock()
+            damaged.__enter__.return_value = damaged
+            damaged.read.side_effect = OSError(errno.EIO, 'Input/output error')
+
+            def open_file(path, *args):
+                return damaged if path == segment else path_open(path, *args)
+
+            with mock.patch.object(Path, 'open', open_file), self.assertRaises(icloud_stage.StageReadError) as caught:
+                self.snapshot(root, (2, eio()))
+            damaged.read.assert_called_once()
             self.assertEqual(caught.exception.failure_code, BackupFailure.STAGE_UNREADABLE)
-            self.assertFalse((dest.parent / 'manifest.json').exists())
+            self.assertFalse((root / NAME / 'payload' / 'manifest.json').exists())
+
+    def test_clean_confirmation_keeps_stage_after_pathless_or_named_borg_eio(self):
+        with tempfile_root() as root:
+            segment = self.staged_segment(root)
+            path_open = Path.open
+            for path in (None, segment.parents[2] / 'config.tmp'):
+                opened = []
+
+                def open_file(candidate, *args):
+                    opened.append(candidate)
+                    return path_open(candidate, *args)
+
+                with self.subTest(path), mock.patch.object(Path, 'open', open_file), \
+                        mock.patch.object(icloud_stage.hashlib, 'sha256', side_effect=AssertionError('sweep need not hash')), \
+                        self.assertRaises(RuntimeError) as caught:
+                    self.snapshot(root, (2, eio(path)))
+                self.assertIn(segment, opened)
+                self.assertNotIsInstance(caught.exception, icloud_stage.StageRejected)
+                self.assertEqual(backup.failure_code(caught.exception), BackupFailure.DISK_ERROR)
+                self.assertTrue(segment.is_file())
+
+    def test_confirmation_can_be_stopped_before_reading_staged_files(self):
+        with tempfile_root() as root:
+            self.staged_segment(root)
+            self.work_allowed.side_effect = backup.Deferred('ignition is on')
+            with mock.patch.object(Path, 'open', side_effect=AssertionError('must stop before reading')), \
+                    self.assertRaisesRegex(backup.Deferred, 'ignition is on'):
+                self.snapshot(root, (2, eio()))
 
     def test_exact_borg_integrity_diagnostics_reject_even_when_borg_returns_warning(self):
         for code, detail in ((1, REPOSITORY_ERROR), (1, ARCHIVE_ERROR), (2, INTEGRITY_ERROR)):
@@ -77,8 +126,28 @@ class SnapshotRejectionTests(unittest.TestCase):
                     backup.file_manifest(root)
                 self.assertEqual(caught.exception.repository, root)
             with self.assertRaises(OSError) as caught:
-                backup.file_manifest(root, mock.Mock(side_effect=error))
+                backup.file_manifest(root, mock.Mock(side_effect=[None, None, error]))
             self.assertIs(caught.exception, error)
+
+    def test_metadata_eio_rejects_the_stage_at_lstat_and_both_stats(self):
+        with tempfile_root() as root:
+            staged_file = root / 'config'
+            staged_file.write_bytes(b'fixture config')
+            for method, failing_call in (('lstat', 1), ('stat', 1), ('stat', 2)):
+                original = getattr(Path, method)
+                calls = []
+
+                def access(path, *args, **kwargs):
+                    if path == staged_file:
+                        calls.append(path)
+                        if len(calls) == failing_call:
+                            raise OSError(errno.EIO, 'Input/output error')
+                    return original(path, *args, **kwargs)
+
+                with self.subTest(method=method, failing_call=failing_call), mock.patch.object(Path, method, access), \
+                        self.assertRaises(icloud_stage.StageReadError) as caught:
+                    backup.file_manifest(root)
+                self.assertEqual(caught.exception.repository, root)
 
     def test_walk_enumeration_error_cannot_return_an_incomplete_manifest(self):
         with tempfile_root() as root:
@@ -114,7 +183,7 @@ class SnapshotRejectionTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {'VANPI_ICLOUD_BORG_STAMP': str(stamp)}), \
                     mock.patch.object(backup, 'STATE_DIR', root), mock.patch.object(backup, 'run', side_effect=run), \
                     mock.patch.object(backup.backup_locks, 'held'), self.assertRaises(icloud_stage.StageRejected):
-                backup.make_snapshot(test_config(), root, root / 'source', NAME, state)
+                backup.make_snapshot(self.cfg, root, root / 'source', NAME, state)
             icloud_stage.record(state, NAME, BackupFailure.STAGE_CHECK_FAILED)
             self.assertEqual(state['stage_rejected']['borg_stamp_mtime'], 1000)
 
@@ -262,6 +331,12 @@ class StuckStageTests(WorkerFixture):
         self.assertEqual(len(self.copies), 2)
         self.assertEqual((state['phase'], state['last_error']), ('deferred', icloud_stage.WAIT_MESSAGE))
         self.assertIsNone(state['pending'])
+        waiting = backup.read_json(self.state_dir / 'history.json')['attempts'][-1]
+        self.assertIsNone(waiting['generation'])
+        self.assertEqual(attempt_row({**state, 'attempt_generation': self.LAST})['generation'], self.LAST)
+        legacy = dict(state)
+        del legacy['attempt_generation']
+        self.assertEqual(attempt_row(legacy)['generation'], self.LAST)
         os.utime(self.stamp, (2000, 2000))
         self.run_quietly(1)
         self.assertEqual(len(self.copies), 3)
@@ -289,12 +364,34 @@ class StuckStageTests(WorkerFixture):
             self.run_quietly(1)
         self.assertEqual(discard.call_count, 2)
         self.assertEqual(self.copies, [NAME])
-        self.snapshot.side_effect = backup.Deferred('stop after claiming replacement')
-        state, _ = self.run_quietly(0)
-        self.assertNotEqual(state['pending'], NAME)
+        state, _ = self.run_quietly(1)
+        self.assertIsNone(state['pending'])
         self.assertEqual(state['stage_rejected']['state'], 'discarded')
         self.assertEqual(state['stage_rejected']['count'], 1)
         self.assertNotIn(NAME, self.local_names())
+
+    def test_resumed_cleanup_reports_journaled_failure_before_clearing_it(self):
+        state = backup.read_json(self.state_dir / 'state.json')
+        state['pending_borg_stamp_mtime'] = 1000
+        icloud_stage.record(state, NAME, BackupFailure.STAGE_UNREADABLE)
+        backup.atomic_json(self.state_dir / 'state.json', state)
+
+        def verify_alert(state, title, message):
+            self.assertFalse(self.damaged.exists())
+            journal = backup.read_json(self.state_dir / 'state.json')['stage_rejected']
+            self.assertEqual(journal['state'], 'discarding')
+
+        self.notify.side_effect = verify_alert
+        state, _ = self.run_quietly(1)
+        self.notify.assert_called_once_with(state, 'vanpi backup disk read error',
+                                            FAILURE_MESSAGES[BackupFailure.STAGE_UNREADABLE])
+        self.assertEqual(state['failure_code'], BackupFailure.STAGE_UNREADABLE)
+        self.assertEqual(state['stage_rejected']['state'], 'discarded')
+        self.assertEqual(self.copies, [])
+        history = backup.read_json(self.state_dir / 'history.json')['attempts'][-1]
+        self.assertEqual((history['phase'], history['generation'], history['message']),
+                         ('error', NAME, FAILURE_MESSAGES[BackupFailure.STAGE_UNREADABLE]))
+        self.assertIsNotNone(history['ended_at'])
 
     def test_a_changed_pending_name_is_not_discarded(self):
         state = {'pending': self.NEWER}

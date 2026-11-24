@@ -75,20 +75,23 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   mid-purge: retention no longer lists either one.
 - Damaged stage: rsync resumes by size and mtime, so it can keep an unreadable
   file indefinitely. The worker rejects an unpublished copy only when Borg
-  reports a repository or archive integrity failure, or an I/O error (EIO)
-  is traced to reading or listing the staged repository. Other check failures
-  (including lock errors, warning-only exits, and stops) keep the stage. An
-  I/O error outside the staged reads, such as an rsync destination write
-  error, reports `disk_error` and does not condemn the copy.
+  reports a repository or archive integrity failure, or the worker encounters
+  EIO (an I/O error) while opening, reading, listing, or checking metadata in
+  the staged repository. An EIO from Borg, with or without a pathname, triggers
+  an independent read sweep: if the sweep reads the stage cleanly, the worker
+  keeps it and reports `disk_error`. An rsync write error also reports
+  `disk_error`. Other check failures (including lock errors, warning-only
+  exits, and stops) keep the stage.
   Before deleting, the worker saves the rejected generation and count in
   `stage_rejected` as `discarding`. Cleanup stays within the verified backup
   mount, never follows symlinks or crosses nested or bind mounts, and refuses
   a generation with `payload/manifest.json` or `_COMPLETE.json`. If cleanup
   fails or is interrupted, the next admitted run retries only that cleanup
-  before doing any more copy or check work. A failed attempt retains its own
-  generation name in history. After cleanup the worker clears `pending` and
-  reports `stage_unreadable` (ntfy “vanpi backup disk read error”) or
-  `stage_check_failed` for the rejected attempt.
+  before doing any more copy or check work. After deletion, including on a
+  resumed cleanup, the worker records the rejected generation and reports
+  `stage_unreadable` (ntfy “vanpi backup disk read error”) or `stage_check_failed`
+  before clearing `pending`. An attempt that waits without claiming a
+  generation does not use the last verified generation's name.
   A first rejection with a known Borg success stamp can restage at the next
   due run. From the second rejection in a row, the worker waits for a newer
   stamp than the one saved at rsync start. If that baseline was unavailable,

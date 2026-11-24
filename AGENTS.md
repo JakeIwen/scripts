@@ -1260,10 +1260,12 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
   and size-based upload estimates, re-exported by the shared cloud worker.
 - `pi/scripts/backup/icloud_stage.py` owns durable rejection and guarded cleanup
-  of unpublished Pi Borg stages. Only Borg integrity evidence or a staged read
-  EIO condemns a copy; generic backup I/O reports `disk_error`. Journaled
-  `discarding` records resume deletion, not rsync, on the pinned mount without
-  following links or crossing mount boundaries. From the second rejection a
+  of unpublished Pi Borg stages. Only Borg integrity evidence or a staged read,
+  listing, or metadata EIO condemns a copy. Borg EIO triggers an independent
+  read sweep; if it reads cleanly, report `disk_error` and keep the stage.
+  Journaled `discarding` records resume deletion, not rsync, on the pinned mount
+  without crossing mount boundaries or following links, and replay the failure
+  report before clearing `pending`. From the second rejection a
   restage needs a newer Borg success stamp than at rsync start; unknown baselines
   require a stamp newer than the rejection time. `backup_priority.py` retargets
   a still-matching override to the durably claimed replacement; verification

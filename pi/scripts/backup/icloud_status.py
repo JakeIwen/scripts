@@ -357,7 +357,9 @@ def progress(state):
 
 
 def attempt_generation(state):
-    return generation(state.get('attempt_generation') or state.get('pending') or state.get('last_generation'))
+    if 'attempt_generation' in state:
+        return generation(state['attempt_generation'])
+    return generation(state.get('pending') or state.get('last_generation'))
 
 
 def attempt_row(state, ended_at=None):

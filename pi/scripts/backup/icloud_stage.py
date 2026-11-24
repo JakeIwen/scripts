@@ -1,6 +1,7 @@
 """Rejecting and rebuilding an unreadable or corrupt unpublished Borg stage."""
 from contextlib import contextmanager
 import errno
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -26,7 +27,6 @@ BORG_INTEGRITY = re.compile(
     r'|Archive consistency check complete, problems found\.$'
     r'|(?:borg\.helpers\.errors\.IntegrityError: )?Data integrity error: .+'
     r'|Segment entry checksum mismatch \[segment \d+, offset \d+\])', re.MULTILINE)
-BORG_EIO_PATH = re.compile(r"^OSError: \[Errno 5\] Input/output error: (['\"])(/.+?)\1\s*$", re.MULTILINE)
 
 
 class StageRejected(RuntimeError):
@@ -48,25 +48,30 @@ def disk_io_error(exc):
     return (isinstance(exc, OSError) and exc.errno == errno.EIO) or getattr(exc, 'disk_io', False) is True
 
 
+def borg_check_failure(exc):
+    return (getattr(exc, 'command', None) == BORG_CHECK
+            and getattr(exc, 'returncode', None) in BORG_CHECK_FAILURES)
+
+
 def tag_borg_check(failure, stderr):
     """Keep only the evidence needed for the rejection decision, not the raw diagnostics."""
-    if failure.command == BORG_CHECK and failure.returncode in BORG_CHECK_FAILURES:
+    if borg_check_failure(failure):
         failure.borg_integrity = BORG_INTEGRITY.search(stderr) is not None
-        failure.borg_eio_paths = tuple(Path(match[2]) for match in BORG_EIO_PATH.finditer(stderr))
 
 
-def rejection(exc, repository):
-    """Only a completed check with positive evidence condemns the copy."""
-    if (getattr(exc, 'command', None) != BORG_CHECK
-            or getattr(exc, 'returncode', None) not in BORG_CHECK_FAILURES):
-        return None
-    detail = getattr(exc, 'detail', '')
-    if any((path == repository or repository in path.parents) and '..' not in path.parts
-           for path in getattr(exc, 'borg_eio_paths', ())):
-        return StageRejected('staged repository copy could not be read', BackupFailure.STAGE_UNREADABLE, detail)
-    if getattr(exc, 'borg_integrity', False):
-        return StageRejected('staged repository copy failed its Borg check', BackupFailure.STAGE_CHECK_FAILED, detail)
+def rejection(exc):
+    """Only Borg's own integrity diagnostics are direct proof of a bad copy."""
+    if borg_check_failure(exc) and getattr(exc, 'borg_integrity', False):
+        return StageRejected('staged repository copy failed its Borg check', BackupFailure.STAGE_CHECK_FAILED,
+                             getattr(exc, 'detail', ''))
     return None
+
+
+def confirm_read_error(exc, repository, check):
+    # Borg can report a bare EIO from a segment fd or a named EIO from a write
+    # (e.g. save_config's temp file). Neither proves a staged read failed.
+    if borg_check_failure(exc) and disk_io_error(exc):
+        file_manifest(repository, check, hash_files=False)
 
 
 def stage_read_error(repository, exc):
@@ -80,6 +85,41 @@ def staged_read(repository, read, *args):
         return read(*args)
     except OSError as exc:
         stage_read_error(repository, exc)
+
+
+def staged_files(root, check):
+    if check is not None:
+        check()
+    for directory, dirs, files in os.walk(root, onerror=lambda exc: stage_read_error(root, exc)):
+        for name in dirs + files:
+            if check is not None:
+                check()
+            path = Path(directory) / name
+            mode = staged_read(root, path.lstat).st_mode
+            if stat.S_ISLNK(mode):
+                raise RuntimeError('repository copy contains a symlink')
+        for name in sorted(files):
+            path = Path(directory) / name
+            if not stat.S_ISREG(staged_read(root, path.stat).st_mode):
+                raise RuntimeError('repository copy contains a non-file')
+            yield path
+
+
+def file_manifest(root, check=None, *, hash_files=True):
+    """Read the staged repository; the EIO confirmation needs no hashes or manifest."""
+    result = {}
+    for path in staged_files(root, check):
+        digest = hashlib.sha256() if hash_files else None
+        with staged_read(root, path.open, 'rb') as stream:
+            for data in iter(lambda: staged_read(root, stream.read, 4 * 1024 * 1024), b''):
+                if check is not None:
+                    check()
+                if digest is not None:
+                    digest.update(data)
+        size = staged_read(root, path.stat).st_size
+        if digest is not None:
+            result[str(path.relative_to(root))] = {'bytes': size, 'sha256': digest.hexdigest()}
+    return result
 
 
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -228,12 +268,21 @@ def cleanup_pending(state):
     return rejected_stage(state).get('state') == DISCARDING
 
 
-def finish_discard(state, mount, generation, verify, save):
+def cleanup_failure(state):
+    code = rejected_stage(state).get('failure_code')
+    if code not in (BackupFailure.STAGE_UNREADABLE, BackupFailure.STAGE_CHECK_FAILED):
+        raise RuntimeError('missing or invalid staged copy rejection code')
+    return StageRejected('finished interrupted cleanup of rejected staged copy', BackupFailure(code))
+
+
+def finish_discard(state, mount, generation, verify, save, report):
     record = rejected_stage(state)
     if state.get('pending') != generation.name or record.get('generation') != generation.name:
         raise RuntimeError('pending generation changed before its staged copy could be discarded')
     save()
     discard(mount, generation, verify)
+    # A restart must still owe this report until deletion and reporting have both run.
+    report()
     record['state'] = DISCARDED
     state.update(pending=None, progress={})
     state.pop('pending_borg_stamp_mtime', None)
