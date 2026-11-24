@@ -27,9 +27,10 @@ REMOTE = '/home/pi/scripts/backup/time_machine_icloud.py'
 CONTROL_PATH = '~/.ssh/cm-tmoffsite-%C'
 # Must outlive the 120 s StartInterval so the next run reuses it.
 CONTROL_PERSIST = 300
+# Worst case: resolution (<= TEARDOWN_TIMEOUT) + 30 s + teardown
+# (<= 2 * TEARDOWN_TIMEOUT) + 30 s. launchd does not start a second instance
+# while one runs, so a long run only skips a StartInterval tick.
 REQUEST_TIMEOUT = 30
-# Leaves half the 30 s REQUEST_TIMEOUT for a fresh direct login.
-FIRST_ATTEMPT_TIMEOUT = 15
 # The keepalive window must not cut short the REQUEST_TIMEOUT request deadline.
 ALIVE_INTERVAL = 10
 ALIVE_COUNT_MAX = 3
@@ -144,13 +145,11 @@ def remote(user, *args):
     # Fixed host/helper and strictly validated generation arguments, no shell payload.
     path = resolve_control_path(user)
     safe = bool(args and args[0] in REPLAY_SAFE)
-    deadline = time.monotonic() + REQUEST_TIMEOUT
-    timeout = FIRST_ATTEMPT_TIMEOUT if safe and path else REQUEST_TIMEOUT
     for attempt in range(2):
         argv = [*ssh_prefix(user, path), PI_SSH_HOST, 'sudo', '-n',
                 '/usr/bin/python3', REMOTE, *args]
         try:
-            result = subprocess.run(argv, capture_output=True, timeout=timeout)
+            result = subprocess.run(argv, capture_output=True, timeout=REQUEST_TIMEOUT)
             failure = (subprocess.CalledProcessError(result.returncode, 'ssh',
                        output=result.stdout, stderr=result.stderr) if result.returncode else None)
             failed_master = (result.returncode == SSH_TRANSPORT_FAILURE or
@@ -164,8 +163,7 @@ def remote(user, *args):
                 teardown(user, path)
             except Exception:
                 pass
-            timeout = deadline - time.monotonic()
-            if failure and safe and attempt == 0 and timeout >= 10:
+            if failure and safe and attempt == 0:
                 path = None  # The fallback must not reuse the failed master.
                 continue
         if failure:
