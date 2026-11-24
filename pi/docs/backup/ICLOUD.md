@@ -79,9 +79,14 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   EIO (an I/O error) while opening, reading, listing, or checking metadata in
   the staged repository. An EIO from Borg, with or without a pathname, triggers
   an independent read sweep: if the sweep reads the stage cleanly, the worker
-  keeps it and reports `disk_error`. An rsync write error also reports
-  `disk_error`. Other check failures (including lock errors, warning-only
-  exits, and stops) keep the stage.
+  keeps it and reports `disk_error`. The same pending stage waits before
+  retrying rsync and Borg check until a readable local Borg success stamp is
+  newer than the one saved at rsync start (or newer than the sweep itself
+  if that baseline was unavailable). Restarting the worker does not bypass
+  the wait. A successful stage or a rejection clears it, and it does not apply
+  to another generation. An rsync write error also reports `disk_error`.
+  Other check failures (including lock errors, warning-only exits, and stops)
+  keep the stage.
   Before deleting, the worker saves the rejected generation and count in
   `stage_rejected` as `discarding`. Cleanup stays within the verified backup
   mount, never follows symlinks or crosses nested or bind mounts, and refuses

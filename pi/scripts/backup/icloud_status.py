@@ -303,6 +303,8 @@ def reason(state):
         return 'Waiting for a verified, permitted internet route.'
     if 'borg backup is missing or stale' in value:
         return 'Waiting for a fresh local Borg backup.'
+    if 'staged copy check waits' in value:
+        return 'The backup disk returned an I/O error; the staged copy is checked again after the next local Borg backup.'
     if 'discarded staged copy waits' in value:
         return 'A damaged staged copy was discarded; a new copy starts after the next local Borg backup.'
     if 'headroom' in value:

@@ -15,6 +15,8 @@ from icloud_status import BackupFailure, generation as valid_generation, number
 # From the second consecutive rejection, copy again only after a newer Borg stamp.
 IMMEDIATE_RESTAGES = 1
 WAIT_MESSAGE = 'a discarded staged copy waits for the next local Borg backup before copying again'
+CHECK_WAIT_MESSAGE = 'a staged copy check waits for the next local Borg backup after a disk I/O error'
+CHECK_RETRY = 'stage_check_retry'
 DISCARDING = 'discarding'
 DISCARDED = 'discarded'
 
@@ -70,8 +72,10 @@ def rejection(exc):
 def confirm_read_error(exc, repository, check):
     # Borg can report a bare EIO from a segment fd or a named EIO from a write
     # (e.g. save_config's temp file). Neither proves a staged read failed.
-    if borg_check_failure(exc) and disk_io_error(exc):
-        file_manifest(repository, check, hash_files=False)
+    if not borg_check_failure(exc) or not disk_io_error(exc):
+        return False
+    file_manifest(repository, check, hash_files=False)
+    return True
 
 
 def stage_read_error(repository, exc):
@@ -249,6 +253,42 @@ def discard(mount, generation, verify):
             os.fsync(root)
 
 
+def record_clean_sweep(state, save, now=None):
+    """The stage was readable; keep it, but do not repeat an expensive check at the same stamp."""
+    state[CHECK_RETRY] = {
+        'generation': state['pending'],
+        'borg_stamp_mtime': state.get('pending_borg_stamp_mtime'),
+        'checked_at': time.time() if now is None else now,
+    }
+    save(state)
+
+
+def check_retry(state):
+    record = state.get(CHECK_RETRY)
+    if isinstance(record, dict) and state.get('pending') and record.get('generation') == state['pending']:
+        return record
+    return None
+
+
+def clear_stale_check_retry(state):
+    if check_retry(state) is None:
+        clear_check_retry(state)
+
+
+def clear_check_retry(state):
+    state.pop(CHECK_RETRY, None)
+
+
+def check_must_wait(state, read_borg_stamp):
+    record = check_retry(state)
+    if record is None:
+        return False
+    stamp = number(record.get('borg_stamp_mtime'))
+    if stamp is None:
+        stamp = number(record.get('checked_at'))
+    return stamp_not_advanced(stamp, read_borg_stamp)
+
+
 def rejected_stage(state):
     record = state.get('stage_rejected')
     return record if isinstance(record, dict) else {}
@@ -256,6 +296,7 @@ def rejected_stage(state):
 
 def record(state, generation, failure_code, now=None):
     """Journal the rejection before any deletion; use the stamp at the start of rsync."""
+    clear_check_retry(state)
     count = rejected_stage(state).get('count')
     state['stage_rejected'] = {
         'state': DISCARDING, 'generation': generation, 'failure_code': failure_code,
@@ -308,10 +349,15 @@ def must_wait(state, read_borg_stamp):
         stamp = number(record.get('rejected_at'))
     elif count <= IMMEDIATE_RESTAGES:
         return False
+    return stamp_not_advanced(stamp, read_borg_stamp)
+
+
+def stamp_not_advanced(stamp, read_borg_stamp):
     current = number(read_borg_stamp())
     return stamp is None or current is None or current <= stamp
 
 
 def clear(state):
+    clear_check_retry(state)
     state.pop('stage_rejected', None)
     state.pop('pending_borg_stamp_mtime', None)

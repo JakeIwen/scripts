@@ -493,7 +493,8 @@ def make_snapshot(cfg, root, repo, name, state=None):
         rejected = icloud_stage.rejection(exc)
         if rejected is not None:
             raise rejected from exc
-        icloud_stage.confirm_read_error(exc, dest, check)
+        if icloud_stage.confirm_read_error(exc, dest, check) and state is not None:
+            icloud_stage.record_clean_sweep(state, save_stage_state)
         raise
     files = file_manifest(dest, check)
     if 'config' not in files or not any(k.startswith('data/') for k in files):
@@ -893,6 +894,7 @@ def orphan_audit(cfg, state):
 
 
 def weekly(cfg, state):
+    icloud_stage.clear_stale_check_retry(state)
     if not cloud_backup_requests.due(cfg, state, STATE_DIR):
         resume_retention(cfg, state)
         orphan_audit(cfg, state)
@@ -922,6 +924,8 @@ def weekly(cfg, state):
         if not fresh:
             icloud_stage.carry_priority(state, pending, lambda: save_stage_state(state))
         if fresh or not (generation / 'payload' / 'manifest.json').is_file():
+            if icloud_stage.check_must_wait(state, borg_stamp_mtime):
+                raise Deferred(icloud_stage.CHECK_WAIT_MESSAGE)
             if fresh and icloud_stage.must_wait(state, borg_stamp_mtime):
                 raise Deferred(icloud_stage.WAIT_MESSAGE)
             require_fresh_borg(cfg)
@@ -940,6 +944,7 @@ def weekly(cfg, state):
             except icloud_stage.StageRejected as exc:
                 discard_stage(state, mount, generation, exc)
                 return 'error'
+        icloud_stage.clear_check_retry(state)
         payload = generation / 'payload'
         destination = cfg['remote'] + '/' + pending
         record_progress(state, 'uploading', command_bytes=0)

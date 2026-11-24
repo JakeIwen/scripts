@@ -1263,6 +1263,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   of unpublished Pi Borg stages. Only Borg integrity evidence or a staged read,
   listing, or metadata EIO condemns a copy. Borg EIO triggers an independent
   read sweep; if it reads cleanly, report `disk_error` and keep the stage.
+  Durable `stage_check_retry` defers the same pending stage's next rsync/check
+  until a readable Borg success stamp advances past the copy-start baseline,
+  or past the sweep time if that baseline was unreadable.
   Journaled `discarding` records resume deletion, not rsync, on the pinned mount
   without crossing mount boundaries or following links, and replay the failure
   report before clearing `pending`. From the second rejection a

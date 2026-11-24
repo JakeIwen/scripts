@@ -277,6 +277,20 @@ class RestageGateTests(unittest.TestCase):
             self.assertTrue(icloud_stage.must_wait(state, lambda: stamp))
         self.assertFalse(icloud_stage.must_wait(state, lambda: 100.1))
 
+    def test_unknown_sweep_baseline_requires_a_stamp_newer_than_the_sweep(self):
+        state = {'pending': NAME}
+        save = mock.Mock()
+        icloud_stage.record_clean_sweep(state, save, now=100)
+        save.assert_called_once_with(state)
+        for stamp in (None, 99, 100):
+            self.assertTrue(icloud_stage.check_must_wait(state, lambda: stamp))
+        self.assertFalse(icloud_stage.check_must_wait(state, lambda: 101))
+        for pending in (None, 'vanpi-20261122T104047Z-e5bb42a0'):
+            other = {**state, 'pending': pending}
+            self.assertFalse(icloud_stage.check_must_wait(other, lambda: self.fail('not the pending stage')))
+            icloud_stage.clear_stale_check_retry(other)
+            self.assertNotIn('stage_check_retry', other)
+
     def test_dashboard_reasons(self):
         for code in (BackupFailure.STAGE_UNREADABLE, BackupFailure.STAGE_CHECK_FAILED, BackupFailure.DISK_ERROR):
             self.assertEqual(reason({'phase': 'error', 'failure_code': code.value}), FAILURE_MESSAGES[code])
@@ -298,7 +312,8 @@ class StuckStageTests(WorkerFixture):
         self.damaged.parent.mkdir(parents=True)
         self.damaged.write_bytes(b'bad sector')
         self.copies = []
-        self.snapshot = self.enterContext(mock.patch.object(backup, 'make_snapshot', side_effect=self.reject_snapshot))
+        self.snapshot = self.enterContext(mock.patch.object(backup, 'make_snapshot', side_effect=self.reject_snapshot,
+                                                             wraps=backup.make_snapshot))
 
     def reject_snapshot(self, cfg, root, repo, name, state):
         self.copies.append(name)
@@ -310,10 +325,65 @@ class StuckStageTests(WorkerFixture):
             state = self.run_worker(code)
         return state, log.getvalue()
 
+    def test_clean_sweep_gates_rechecks_across_restarts_until_borg_stamp_advances(self):
+        staged_repo = self.damaged.parents[2]
+        (staged_repo / 'config').write_text('fixture config')
+        self.snapshot.side_effect = None  # Use make_snapshot, not the injected StageReadError.
+        commands = []
+        clean_check = False
+
+        def run(args, cfg, **kwargs):
+            if args[0] != '/usr/bin/borg':
+                raise backup.Deferred('test stops before upload')
+            commands.append(args[1])
+            if args[1] == 'check' and not clean_check:
+                raise backup.command_failure(args[0], 'check', 2, eio(staged_repo / 'config.tmp'))
+
+        with mock.patch.object(backup, 'run', side_effect=run), mock.patch.object(backup.backup_locks, 'held'), \
+                mock.patch.object(icloud_stage, 'file_manifest', wraps=icloud_stage.file_manifest) as sweep, \
+                mock.patch.object(backup, 'capture', return_value='borg fixture'):
+            state, _ = self.run_quietly(1)
+            self.assertEqual((state['pending'], state['failure_code']), (NAME, 'disk_error'))
+            self.assertEqual(state['stage_check_retry']['generation'], NAME)
+            self.assertEqual(state['stage_check_retry']['borg_stamp_mtime'], 1000)
+            self.assertEqual(commands, ['with-lock', 'check'])
+            self.assertEqual(sweep.call_count, 1)
+            for stamp_readable in (True, False):
+                if not stamp_readable:
+                    self.stamp.unlink()
+                state, _ = self.run_quietly(0)
+                self.assertEqual((state['pending'], state['phase'], state['last_error']),
+                                 (NAME, 'deferred', icloud_stage.CHECK_WAIT_MESSAGE))
+                self.assertEqual(reason(state), 'The backup disk returned an I/O error; '
+                                               'the staged copy is checked again after the next local Borg backup.')
+            self.assertEqual(commands, ['with-lock', 'check'])
+            self.assertEqual(sweep.call_count, 1)
+
+            self.stamp.touch()
+            os.utime(self.stamp, (2000, 2000))
+            state, _ = self.run_quietly(1)
+            self.assertEqual(state['pending'], NAME)
+            self.assertEqual(state['stage_check_retry']['borg_stamp_mtime'], 2000)
+            self.assertEqual(commands, ['with-lock', 'check'] * 2)
+            self.assertEqual(sweep.call_count, 2)
+
+            clean_check = True
+            os.utime(self.stamp, (3000, 3000))
+            state, _ = self.run_quietly(0)
+            self.assertEqual(commands, ['with-lock', 'check'] * 3)
+            self.assertEqual(sweep.call_count, 2)
+            self.assertNotIn('stage_check_retry', state)
+            self.assertEqual(state['pending'], NAME)
+            self.assertTrue((staged_repo.parent / 'manifest.json').is_file())
+
     def test_unreadable_stage_is_discarded_reported_and_copied_afresh(self):
+        state = backup.read_json(self.state_dir / 'state.json')
+        state['pending_borg_stamp_mtime'] = 999
+        icloud_stage.record_clean_sweep(state, backup.save_stage_state)
         state, log = self.run_quietly(1)
         self.assertEqual(self.copies, [NAME])
         self.assertNotIn(NAME, self.local_names())
+        self.assertNotIn('stage_check_retry', state)
         self.assertIsNone(state['pending'])
         self.assertEqual((state['phase'], state['failure_code']), ('error', BackupFailure.STAGE_UNREADABLE.value))
         self.assertEqual(state['stage_rejected']['generation'], NAME)
