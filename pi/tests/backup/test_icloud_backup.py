@@ -736,11 +736,13 @@ class PiPauseTests(unittest.TestCase):
         self.assertEqual(state['pending'], name)
 
 
-class RetentionResumeTests(unittest.TestCase):
-    """Retention interrupted after a generation was recorded verified must finish on the next not-due run."""
+class WorkerFixture(unittest.TestCase):
+    """A due or not-due --run against fake rclone, a temporary stage and four local generations."""
     OLD, PRIOR, LAST = ('vanpi-20260901T010203Z-aaaaaaa1', 'vanpi-20260908T010203Z-aaaaaaa2',
                         'vanpi-20260915T010203Z-aaaaaaa3')
+
     PARTIAL = 'vanpi-20260801T010203Z-aaaaaaa0'
+
     NEWER = 'vanpi-20260922T010203Z-aaaaaaa4'
 
     def setUp(self):
@@ -850,6 +852,23 @@ class RetentionResumeTests(unittest.TestCase):
 
     def assert_read_only(self):
         self.assertTrue({operation for operation, target in self.calls} <= {'lsjson', 'cat'}, self.calls)
+
+    def start_due_copy(self):
+        """A copy is due and nothing is pending; the copy stops once its staging is claimed."""
+        self.write_state(last_success_at=time.time() - 8 * 86400)
+        repo = self.root / 'borg'; repo.mkdir(exist_ok=True)
+        (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
+        self.enterContext(mock.patch.dict(os.environ, {'BORG_REPO': str(repo)}))
+        self.enterContext(mock.patch.object(backup, 'require_fresh_borg'))
+        # The overdue generation holds the space: headroom exists only once it is gone.
+        self.enterContext(mock.patch.object(backup.shutil, 'disk_usage', side_effect=lambda path: mock.Mock(
+            free=1 if (self.stage / self.OLD).exists() else 10**15)))
+        self.snapshot = self.enterContext(mock.patch.object(
+            backup, 'make_snapshot', side_effect=backup.Deferred('test stops once staging is claimed')))
+
+
+class RetentionResumeTests(WorkerFixture):
+    """Retention interrupted after a generation was recorded verified must finish on the next not-due run."""
 
     def test_audit_records_stray_generations_and_stays_quiet_below_the_threshold(self):
         self.audit_state()
@@ -997,19 +1016,6 @@ class RetentionResumeTests(unittest.TestCase):
         self.assertEqual((state['phase'], state['pending']), ('deferred', newer))
         self.assertNotIn('retention_done_for', state)
         self.assertEqual(self.local_names(), {self.OLD, self.PRIOR, self.LAST, self.PARTIAL, newer})
-
-    def start_due_copy(self):
-        """A copy is due and nothing is pending; the copy stops once its staging is claimed."""
-        self.write_state(last_success_at=time.time() - 8 * 86400)
-        repo = self.root / 'borg'; repo.mkdir(exist_ok=True)
-        (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
-        self.enterContext(mock.patch.dict(os.environ, {'BORG_REPO': str(repo)}))
-        self.enterContext(mock.patch.object(backup, 'require_fresh_borg'))
-        # The overdue generation holds the space: headroom exists only once it is gone.
-        self.enterContext(mock.patch.object(backup.shutil, 'disk_usage', side_effect=lambda path: mock.Mock(
-            free=1 if (self.stage / self.OLD).exists() else 10**15)))
-        self.snapshot = self.enterContext(mock.patch.object(
-            backup, 'make_snapshot', side_effect=backup.Deferred('test stops once staging is claimed')))
 
     def test_overdue_cleanup_runs_before_a_due_copy_so_it_cannot_starve_for_headroom(self):
         self.start_due_copy()
