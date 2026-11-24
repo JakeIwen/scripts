@@ -22,6 +22,12 @@ PRIMARY = '/Volumes/Backups of Test Mac'
 
 
 class RemoteTests(unittest.TestCase):
+    def setUp(self):
+        self.path = '/Users/test.name/.ssh/cm-tmoffsite-' + 'a' * 40
+        self.resolver = mock.patch.object(coordinator, 'resolve_control_path', return_value=self.path)
+        self.resolver.start()
+        self.addCleanup(self.resolver.stop)
+
     @staticmethod
     def result(code=0, stdout=b'{"ok": true}', stderr=b''):
         return subprocess.CompletedProcess('ssh', code, stdout, stderr)
@@ -32,12 +38,12 @@ class RemoteTests(unittest.TestCase):
         args = run.call_args.args[0]
         self.assertEqual(args[:5], ['/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/ssh'])
         for option in ('BatchMode=yes', 'ConnectTimeout=8', 'StrictHostKeyChecking=yes',
-                       'ControlMaster=auto', 'ControlPath=~/.ssh/cm-tmoffsite-%C',
+                       'ControlMaster=auto', 'ControlPath=' + self.path,
                        'ControlPersist=300', 'ServerAliveInterval=10', 'ServerAliveCountMax=3'):
             self.assertIn(option, args)
         self.assertIn('pi@vanpi.lan', args)
         run.assert_called_once()
-        self.assertEqual(run.call_args.kwargs['timeout'], 30)
+        self.assertEqual(run.call_args.kwargs['timeout'], 15)
 
     def test_helper_failure_has_no_teardown_or_private_exception_text(self):
         with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(
@@ -61,10 +67,13 @@ class RemoteTests(unittest.TestCase):
                                           stderr=b'private-stderr')
         with mock.patch.object(coordinator.subprocess, 'run', side_effect=[error, self.result()]) as run:
             with self.assertRaises(subprocess.TimeoutExpired) as caught:
-                coordinator.remote('test', '--capture-request')
+                coordinator.remote('test', '--capture-ready')
         self.assertIs(caught.exception, error)
         self.assertNotIn('private-', str(caught.exception))
         self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args_list[0].kwargs['timeout'], 30)
+        self.assertIn('ControlPath=' + self.path, run.call_args_list[0].args[0])
+        self.assertEqual(run.call_args_list[1].args[0][-3:], ['-O', 'exit', 'pi@vanpi.lan'])
 
     def test_hello_failure_tears_down_but_collision_alone_does_not(self):
         for code in (0, 1):
@@ -87,14 +96,13 @@ class RemoteTests(unittest.TestCase):
         path = '/Users/test.name/.ssh/cm-tmoffsite-' + digest
         timeout = subprocess.TimeoutExpired('ssh', 5)
         with mock.patch.object(coordinator.subprocess, 'run', side_effect=[
-                self.result(255), timeout, self.result(stdout=('controlpath ' + path + '\n').encode()),
-                self.result()]) as run, mock.patch.object(coordinator.os, 'kill') as kill:
+                self.result(255), timeout, self.result()]) as run, \
+                mock.patch.object(coordinator.os, 'kill') as kill:
             with self.assertRaises(subprocess.CalledProcessError):
                 coordinator.remote('test', '--capture-ready')
-        self.assertEqual(run.call_args_list[2].args[0], [
-            '/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/ssh', '-G', '-o',
-            'ControlPath=~/.ssh/cm-tmoffsite-%C', 'pi@vanpi.lan'])
-        command = run.call_args_list[3].args[0]
+        self.assertIn('ControlPath=' + path, run.call_args_list[0].args[0])
+        self.assertIn('ControlPath=' + path, run.call_args_list[1].args[0])
+        command = run.call_args_list[2].args[0]
         pattern = r'^ssh: /Users/test\.name/\.ssh/cm-tmoffsite-' + digest + r' \[mux\]$'
         self.assertEqual(command, ['/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/pkill',
                                    '-KILL', '-x', '-f', pattern])
@@ -103,11 +111,13 @@ class RemoteTests(unittest.TestCase):
         kill.assert_not_called()
 
     def test_unresolved_path_does_not_kill(self):
+        self.resolver.stop()
         with mock.patch.object(coordinator.subprocess, 'run', side_effect=[
-                self.result(255), self.result(1), self.result(stdout=b'hostname vanpi.lan\n')]) as run:
-            with self.assertRaises(subprocess.CalledProcessError):
-                coordinator.remote('test', '--capture-ready')
-        self.assertEqual(run.call_count, 3)
+                self.result(stdout=b'hostname vanpi.lan\n'), self.result()]) as run:
+            self.assertEqual(coordinator.remote('test', '--capture-ready'), {'ok': True})
+        self.assertEqual(run.call_count, 2)
+        self.assertIn('ControlMaster=no', run.call_args.args[0])
+        self.assertIn('ControlPath=none', run.call_args.args[0])
 
     def test_safe_operation_retries_with_remaining_deadline(self):
         for flag in ('--capture-request', '--mac-present-v2'):
@@ -117,6 +127,10 @@ class RemoteTests(unittest.TestCase):
                 self.assertEqual(coordinator.remote('test', flag), {'ok': True})
                 self.assertEqual(run.call_count, 3)
                 self.assertEqual(run.call_args.kwargs['timeout'], 21)
+                self.assertIn('ControlPath=' + self.path, run.call_args_list[0].args[0])
+                self.assertIn('ControlMaster=no', run.call_args.args[0])
+                self.assertIn('ControlPath=none', run.call_args.args[0])
+                self.assertFalse(any(arg.startswith('ControlPersist=') for arg in run.call_args.args[0]))
 
     def test_bypassed_success_is_kept_and_only_a_failed_call_retries(self):
         # rc 0 after a hello failure: the direct dial worked; tear down, keep the result.
@@ -140,6 +154,32 @@ class RemoteTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 coordinator.remote('test', '--capture-request')
         self.assertEqual(run.call_count, 2)
+
+    def test_pinned_path_resolved_once_for_request_and_teardown(self):
+        self.resolver.stop()
+        with mock.patch.object(coordinator.subprocess, 'run', side_effect=[
+                self.result(stdout=('controlpath ' + self.path + '\n').encode()),
+                self.result(255), self.result()]) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                coordinator.remote('test', '--capture-ready')
+        self.assertEqual(run.call_count, 3)
+        self.assertIn('-G', run.call_args_list[0].args[0])
+        for call in run.call_args_list[1:]:
+            self.assertIn('ControlPath=' + self.path, call.args[0])
+
+    def test_safe_timeout_retries_direct_even_if_teardown_fails(self):
+        timeout = subprocess.TimeoutExpired('private-command', 15)
+        with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 115]), \
+                mock.patch.object(coordinator, 'teardown', side_effect=OSError('private')), \
+                mock.patch.object(coordinator.subprocess, 'run', side_effect=[timeout, self.result()]) as run:
+            self.assertEqual(coordinator.remote('test', '--capture-request'), {'ok': True})
+        first, second = run.call_args_list
+        self.assertEqual(first.kwargs['timeout'], 15)
+        self.assertIn('ControlPath=' + self.path, first.args[0])
+        self.assertEqual(second.kwargs['timeout'], 15)
+        self.assertIn('ControlMaster=no', second.args[0])
+        self.assertIn('ControlPath=none', second.args[0])
+        self.assertFalse(any(arg.startswith('ControlPersist=') for arg in second.args[0]))
 
     def test_teardown_error_does_not_mask_original(self):
         with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(255)), \

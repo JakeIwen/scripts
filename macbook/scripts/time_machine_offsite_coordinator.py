@@ -28,6 +28,8 @@ CONTROL_PATH = '~/.ssh/cm-tmoffsite-%C'
 # Must outlive the 120 s StartInterval so the next run reuses it.
 CONTROL_PERSIST = 300
 REQUEST_TIMEOUT = 30
+# Leaves half the 30 s REQUEST_TIMEOUT for a fresh direct login.
+FIRST_ATTEMPT_TIMEOUT = 15
 # The keepalive window must not cut short the REQUEST_TIMEOUT request deadline.
 ALIVE_INTERVAL = 10
 ALIVE_COUNT_MAX = 3
@@ -89,78 +91,85 @@ def command(args, timeout=30):
     return subprocess.run(args, capture_output=True, timeout=timeout, check=True).stdout
 
 
-def ssh_prefix(user):
+def ssh_prefix(user, path):
+    options = (['-o', 'ControlMaster=auto', '-o', 'ControlPath=' + path,
+                '-o', 'ControlPersist=' + str(CONTROL_PERSIST)] if path else
+               ['-o', 'ControlMaster=no', '-o', 'ControlPath=none'])
     return ['/usr/bin/sudo', '-H', '-u', user, '/usr/bin/ssh',
             '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=yes',
-            '-o', 'ControlMaster=auto', '-o', 'ControlPath=' + CONTROL_PATH,
-            '-o', 'ControlPersist=' + str(CONTROL_PERSIST),
-            '-o', 'ServerAliveInterval=' + str(ALIVE_INTERVAL),
+            *options, '-o', 'ServerAliveInterval=' + str(ALIVE_INTERVAL),
             '-o', 'ServerAliveCountMax=' + str(ALIVE_COUNT_MAX)]
 
 
-def kill_master(user):
-    sudo = ['/usr/bin/sudo', '-H', '-u', user]
-    result = subprocess.run([*sudo, '/usr/bin/ssh', '-G', '-o',
-                             'ControlPath=' + CONTROL_PATH, PI_SSH_HOST],
-                            capture_output=True, timeout=TEARDOWN_TIMEOUT)
-    if result.returncode:
-        return
-    for line in result.stdout.decode('utf-8', errors='strict').splitlines():
-        key, sep, path = line.partition(' ')
-        if key == 'controlpath' and sep and path and path != 'none':
-            title = 'ssh: ' + path + ' [mux]'
-            pattern = '^' + ''.join('\\' + c if c in '.[]()*+?{}|^$\\' else c
-                                    for c in title) + '$'
-            subprocess.run([*sudo, '/usr/bin/pkill', '-KILL', '-x', '-f', pattern],
-                           capture_output=True, timeout=TEARDOWN_TIMEOUT)
-            return
-
-
-def teardown(user):
+def resolve_control_path(user):
     try:
-        result = subprocess.run([*ssh_prefix(user), '-O', 'exit', PI_SSH_HOST],
+        result = subprocess.run(['/usr/bin/sudo', '-H', '-u', user, '/usr/bin/ssh', '-G',
+                                 '-o', 'ControlPath=' + CONTROL_PATH, PI_SSH_HOST],
+                                capture_output=True, timeout=TEARDOWN_TIMEOUT)
+        if result.returncode:
+            return None
+        for line in result.stdout.decode('utf-8', errors='strict').splitlines():
+            key, sep, path = line.partition(' ')
+            if key == 'controlpath' and sep and path.startswith('/'):
+                return path
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        pass
+    return None
+
+
+def kill_master(user, path):
+    title = 'ssh: ' + path + ' [mux]'
+    pattern = '^' + ''.join('\\' + c if c in '.[]()*+?{}|^$\\' else c
+                            for c in title) + '$'
+    subprocess.run(['/usr/bin/sudo', '-H', '-u', user, '/usr/bin/pkill',
+                    '-KILL', '-x', '-f', pattern],
+                   capture_output=True, timeout=TEARDOWN_TIMEOUT)
+
+
+def teardown(user, path):
+    try:
+        result = subprocess.run([*ssh_prefix(user, path), '-O', 'exit', PI_SSH_HOST],
                                 capture_output=True, timeout=TEARDOWN_TIMEOUT)
         if result.returncode == 0:
             return
     except Exception:
         pass
     try:
-        kill_master(user)
+        kill_master(user, path)
     except Exception:
         pass
 
 
 def remote(user, *args):
     # Fixed host/helper and strictly validated generation arguments, no shell payload.
-    argv = [*ssh_prefix(user), PI_SSH_HOST, 'sudo', '-n', '/usr/bin/python3', REMOTE, *args]
+    path = resolve_control_path(user)
+    safe = bool(args and args[0] in REPLAY_SAFE)
     deadline = time.monotonic() + REQUEST_TIMEOUT
-    timeout = REQUEST_TIMEOUT
+    timeout = FIRST_ATTEMPT_TIMEOUT if safe and path else REQUEST_TIMEOUT
     for attempt in range(2):
+        argv = [*ssh_prefix(user, path), PI_SSH_HOST, 'sudo', '-n',
+                '/usr/bin/python3', REMOTE, *args]
         try:
             result = subprocess.run(argv, capture_output=True, timeout=timeout)
+            failure = (subprocess.CalledProcessError(result.returncode, 'ssh',
+                       output=result.stdout, stderr=result.stderr) if result.returncode else None)
+            failed_master = (result.returncode == SSH_TRANSPORT_FAILURE or
+                             MUX_HELLO_FAILED in result.stderr)
         except subprocess.TimeoutExpired as exc:
-            try:
-                teardown(user)
-            except Exception:
-                pass
             exc.cmd = 'ssh'
-            raise
-        failed_master = (result.returncode == SSH_TRANSPORT_FAILURE or
-                         MUX_HELLO_FAILED in result.stderr)
-        if failed_master:
+            failure = exc
+            failed_master = True
+        if path and failed_master:
             try:
-                teardown(user)
+                teardown(user, path)
             except Exception:
                 pass
             timeout = deadline - time.monotonic()
-            # A bypassed frozen master can still return rc 0 from its direct
-            # dial; keep that result and retry only a failed call.
-            if (attempt == 0 and result.returncode and args and args[0] in REPLAY_SAFE
-                    and timeout >= 10):
+            if failure and safe and attempt == 0 and timeout >= 10:
+                path = None  # The fallback must not reuse the failed master.
                 continue
-        if result.returncode:
-            raise subprocess.CalledProcessError(result.returncode, 'ssh',
-                                                output=result.stdout, stderr=result.stderr)
+        if failure:
+            raise failure
         return json.loads(result.stdout)
 
 
