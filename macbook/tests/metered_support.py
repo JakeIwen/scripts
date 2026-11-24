@@ -58,6 +58,8 @@ class MacFixture:
             code = 1 if self.fail_sudo else 0
             if not code:
                 self.flag = argv[-1] == 'constrained'
+        elif argv[0] == '/usr/bin/ssh' and ('-G' in argv or '-O' in argv):
+            text = 'hostname 192.168.6.103\ncontrolpath ' + str(self.paths.directory / 'no-such-socket') + '\n'
         elif argv[0] == '/usr/bin/ssh':
             if not self.online:
                 code = 255
@@ -90,4 +92,4 @@ class MacFixture:
         return [argv for argv, kwargs in self.calls if argv[0] == '/usr/bin/sudo']
 
     def ssh_calls(self):
-        return [argv for argv, kwargs in self.calls if argv[0] == '/usr/bin/ssh']
+        return [argv for argv, kwargs in self.calls if argv[0] == '/usr/bin/ssh' and '-G' not in argv and '-O' not in argv]

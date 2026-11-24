@@ -8,9 +8,12 @@ from shared.metered.config import first_run_config
 from shared.metered.records import AddSSID, Host, HostState, SharedConfig, SharedOperation, SyncRequest, SyncResponse
 from shared.metered.store import MAX_RECORD_BYTES, RecordStore, RevisionConflict
 from shared.sh.peer_copy import SSH_OPTIONS
-from .config import REMOTE_CLI, REMOTE_INTERVAL, SSH_TIMEOUT
+from .config import PI_HOST, REMOTE_CLI, REMOTE_INTERVAL, SSH_TIMEOUT
 from .network import command
 from .records import Pending, SyncStatus, empty_state
+from .ssh_master import MUX_BYPASSED, SSH, mux_options, resolve_route, tear_down_master
+
+SSH_TRANSPORT_FAILURE = 255
 
 
 class PiTransport:
@@ -18,11 +21,20 @@ class PiTransport:
         self.run = run
 
     def request(self, verb, payload):
+        route = resolve_route(self.run)
+        options = mux_options(route) if route else []
         try:
-            result = self.run(['/usr/bin/ssh', *SSH_OPTIONS, 'vanpi', REMOTE_CLI, verb],
+            result = self.run([SSH, *SSH_OPTIONS, *options, PI_HOST, REMOTE_CLI, verb],
                               input=json.dumps(payload), timeout=SSH_TIMEOUT)
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except subprocess.TimeoutExpired as error:
+            if route:
+                tear_down_master(self.run, route)
             raise RuntimeError('Pi sync unavailable: ' + type(error).__name__) from error
+        except OSError as error:
+            raise RuntimeError('Pi sync unavailable: ' + type(error).__name__) from error
+        if route and (result.returncode == SSH_TRANSPORT_FAILURE
+                      or MUX_BYPASSED in (result.stderr or '')):
+            tear_down_master(self.run, route)
         if result.returncode == 75:
             raise RevisionConflict('Pi configuration changed; reload and retry')
         if result.returncode != 0:
