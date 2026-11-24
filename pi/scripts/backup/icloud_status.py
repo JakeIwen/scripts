@@ -48,6 +48,10 @@ class BackupFailure(str, Enum):
     PREREQUISITE = 'prerequisite'
     TRANSFER_STALLED = 'transfer_stalled'
     TRANSFER_INTERRUPTED = 'transfer_interrupted'
+    # The Pi worker's codes: a disk read error, and a staged copy it discarded.
+    DISK_READ = 'disk_read'
+    STAGE_UNREADABLE = 'stage_unreadable'
+    STAGE_CHECK_FAILED = 'stage_check_failed'
 
 
 FAILURE_MESSAGES = {
@@ -60,6 +64,10 @@ FAILURE_MESSAGES = {
     BackupFailure.PREREQUISITE: 'A backup disk or prerequisite check failed; it will retry safely.',
     BackupFailure.TRANSFER_STALLED: 'The transfer stopped making progress; saved work will be reused on retry.',
     BackupFailure.TRANSFER_INTERRUPTED: 'The internet connection dropped during the transfer; saved work will be reused on retry.',
+    BackupFailure.DISK_READ: 'The backup disk returned a read error; check its SMART health. The copy will retry.',
+    BackupFailure.STAGE_UNREADABLE: ('The backup disk could not read part of the staged copy (a disk read error); '
+                                     'it was discarded and will be copied again. Check the disk\'s SMART health.'),
+    BackupFailure.STAGE_CHECK_FAILED: 'The staged copy failed its Borg check and was discarded; it will be copied again.',
 }
 RETRYABLE_FAILURES = frozenset(FAILURE_MESSAGES) - {BackupFailure.PERMISSION, BackupFailure.DISK_FULL}
 # A quick retry reuses checkpoints after a transient stop instead of waiting
@@ -295,6 +303,8 @@ def reason(state):
         return 'Waiting for a verified, permitted internet route.'
     if 'borg backup is missing or stale' in value:
         return 'Waiting for a fresh local Borg backup.'
+    if 'discarded staged copy waits' in value:
+        return 'A damaged staged copy was discarded; a new copy starts after the next local Borg backup.'
     if 'headroom' in value:
         return 'Not enough free staging space.'
     if 'unsafe staging object' in value:

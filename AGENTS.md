@@ -1259,6 +1259,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   actual worker entry boundary and inherited client descriptors.
 - `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
   and size-based upload estimates, re-exported by the shared cloud worker.
+- `pi/scripts/backup/icloud_stage.py` owns rejecting the Pi worker's pending
+  stage: a staged copy whose `borg check` fails or that reads EIO while hashing
+  is discarded (only before `payload/manifest.json` exists) and copied again,
+  since rsync's size/mtime resume never recopies a file on a bad sector. From
+  the second rejection in a row a new copy waits for a newer Borg success stamp.
+  A disk read error is reported as `disk_read` or `stage_unreadable`.
 - `pi/scripts/backup/time_machine_pipeline.py` supervises a single verifier
   alongside the Mac uploader, preserving the inherited backup lock. Completed
   upload events admit new chunks; the initial remote inventory seeds catch-up.

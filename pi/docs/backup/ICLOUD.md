@@ -73,6 +73,19 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   sends no "verified" alert. It does not recover a local directory left after its
   remote purge finished, or a generation whose `_COMPLETE.json` was removed
   mid-purge: retention no longer lists either one.
+- Damaged stage: a pending copy is resumed with rsync, which trusts size and
+  mtime, so a staged file on an unreadable sector would fail every later check.
+  When the staged copy's `borg check --verify-data` fails, or hashing a staged
+  file returns EIO, the worker deletes that unpublished generation (never one
+  with `payload/manifest.json` or `_COMPLETE.json`, so nothing uploaded is
+  touched), clears `pending`, records `stage_rejected` in state and fails the
+  run with `failure_code` `stage_unreadable` (a disk read error: ntfy "vanpi
+  backup disk read error") or `stage_check_failed`. The next due run copies into
+  a new generation at once; from the second rejection in a row it waits for a
+  newer local Borg success stamp, so a bad live repository or disk is not reread
+  hourly. A verified generation clears the record. A read error outside the
+  stage (rsync reading the live repository) keeps the stage and reports
+  `disk_read`. Stops, watchdog kills and a missing disk never discard a stage.
 - Leftover-generation audit: once a week, on a not-due run with nothing pending
   and `retention_done_for` current, the worker lists the remote read-only
   (`lsjson`/`cat` only; no mount, no delete) and treats every directory that is

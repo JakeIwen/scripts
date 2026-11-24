@@ -30,8 +30,9 @@ import icloud_uplink_hold as uplink_hold
 from icloud_uplink_hold import GRACE_KEY, RESTART_EXITS, UplinkHold, UplinkLost, apply_grace
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
-from icloud_status import (ICLOUD_LOGIN_MESSAGE, begin_attempt, command_failure_detail,
-                           failure_detail, save_attempt)
+from icloud_status import (FAILURE_MESSAGES, ICLOUD_LOGIN_MESSAGE, BackupFailure, begin_attempt,
+                           command_failure_detail, failure_detail, save_attempt)
+import icloud_stage
 from cloud_backup_control import admit_worker
 import backup_priority as priority
 import cloud_backup_requests
@@ -101,6 +102,9 @@ def command_failure(program, operation, returncode, stderr):
             'with-lock'} else 'command'
         failure = RuntimeError(f'{base} {safe_operation} failed (exit {returncode})')
     failure.detail = command_failure_detail(stderr)
+    # Which command failed, and whether it hit a disk read error, for icloud_stage.rejection.
+    failure.command = (base, operation)
+    failure.disk_io = 'input/output error' in text or '[errno 5]' in text
     return failure
 
 
@@ -484,7 +488,6 @@ def make_snapshot(cfg, root, repo, name, state=None):
                  str(dest) + '/'], cfg, progress=report, repository_fd=repository_fd)
     except backup_locks.LockBusy:
         raise Deferred('Borg repository is busy with a local backup; retrying later') from None
-    run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg, progress=report)
     last_check = [0.0]
     def check():
         if time.monotonic() - last_check[0] >= cfg['guard_interval_seconds']:
@@ -492,7 +495,14 @@ def make_snapshot(cfg, root, repo, name, state=None):
             if report:
                 report({})
             last_check[0] = time.monotonic()
-    files = file_manifest(dest, check)
+    try:
+        run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg, progress=report)
+        files = file_manifest(dest, check)
+    except (OSError, RuntimeError) as exc:
+        rejected = icloud_stage.rejection(exc)
+        if rejected is None:
+            raise
+        raise rejected from exc
     if 'config' not in files or not any(k.startswith('data/') for k in files):
         raise RuntimeError('copied repository is incomplete')
     manifest = {'owner': OWNER, 'generation': name, 'created_at': time.time(),
@@ -912,6 +922,8 @@ def weekly(cfg, state):
         generation = safe_generation(root, pending)
         if fresh or not (generation / 'payload' / 'manifest.json').is_file():
             require_fresh_borg(cfg)
+            if fresh and icloud_stage.must_wait(state, borg_stamp_mtime):
+                raise Deferred(icloud_stage.WAIT_MESSAGE)
             size = sum((Path(directory)/name).stat().st_size for directory, dirs, files in os.walk(repo) for name in files)
             if shutil.disk_usage(root).free < size + cfg['minimum_free_gib'] * 1024**3:
                 raise Deferred('insufficient staging disk headroom')
@@ -922,7 +934,11 @@ def weekly(cfg, state):
                 state['progress'] = {}
                 atomic_json(STATE_DIR / 'state.json', state)
             record_progress(state, 'preparing')
-            make_snapshot(cfg, root, repo, pending, state)
+            try:
+                make_snapshot(cfg, root, repo, pending, state)
+            except icloud_stage.StageRejected as exc:
+                discard_stage(cfg, state, mount, generation, exc)
+                raise
         payload = generation / 'payload'
         destination = cfg['remote'] + '/' + pending
         record_progress(state, 'uploading', command_bytes=0)
@@ -944,12 +960,37 @@ def weekly(cfg, state):
         if remote_marker != read_json(marker):
             raise RuntimeError('completion marker verification failed')
         state.update(last_success_at=time.time(), last_generation=pending, pending=None, phase='complete')
+        icloud_stage.clear(state)
         state['attempt_verified_at'] = state['last_success_at']
         atomic_json(STATE_DIR / 'state.json', state)
         save_attempt(STATE_DIR, state)
         run_retention(cfg, state, root, pending)
         notify(state, 'vanpi iCloud backup verified', 'Weekly encrypted recovery copy uploaded and download-compared: ' + pending)
         return 'complete'
+
+
+def discard_stage(cfg, state, mount, generation, exc):
+    """Delete a pending stage that failed its check or a read, so the next copy starts empty.
+
+    A failed deletion keeps the pending name: the next run resumes what is left,
+    rsync recopies the deleted files, and the check runs again.
+    """
+    exact_mount(mount, os.environ['VANPI_ICLOUD_BACKUP_LABEL'])
+    if state.get('pending') != generation.name:
+        raise RuntimeError('pending generation changed before its staged copy could be discarded')
+    print(f'Discarding staged copy {generation.name}: {exc}' + failure_detail(exc), file=sys.stderr, flush=True)
+    icloud_stage.discard(generation)
+    icloud_stage.record(state, generation.name, exc.failure_code, borg_stamp_mtime())
+    state.update(pending=None, progress={})
+    atomic_json(STATE_DIR / 'state.json', state)
+
+
+def borg_stamp_mtime():
+    """The local Borg success stamp's mtime, or None when it cannot be read."""
+    try:
+        return Path(os.environ['VANPI_ICLOUD_BORG_STAMP']).stat().st_mtime
+    except OSError:
+        return None
 
 
 def require_fresh_borg(cfg):
@@ -1047,7 +1088,8 @@ def _main(mode):
             begin_attempt(STATE_DIR, state)
         else:
             state.pop('attempt_id', None)
-        state.update(last_attempt_at=time.time(), last_error=None, phase='checking', worker_pid=os.getpid())
+        state.update(last_attempt_at=time.time(), last_error=None, failure_code=None, phase='checking',
+                     worker_pid=os.getpid())
         state.pop('uplink_hold', None)
         uplink_hold.start_run(uplink_hold.state_reporter(state, lambda: atomic_json(STATE_DIR / 'state.json', state)))
         atomic_json(STATE_DIR / 'state.json', state)
@@ -1071,15 +1113,32 @@ def _main(mode):
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
-        state.update(phase='error', last_attempt_at=time.time(), last_error=message)
+        code = failure_code(exc)
+        state.update(phase='error', last_attempt_at=time.time(), last_error=message, failure_code=code)
         print('Failed: ' + message + failure_detail(exc), file=sys.stderr, flush=True)
-        notify(state, 'vanpi iCloud backup needs attention', 'The weekly copy did not complete. Check service status; an expired Apple login may need renewal.')
+        if code is None:
+            notify(state, 'vanpi iCloud backup needs attention', 'The weekly copy did not complete. Check service status; an expired Apple login may need renewal.')
+        else:
+            notify(state, 'vanpi backup disk read error' if code in DISK_READ_FAILURES else
+                   'vanpi iCloud staged copy discarded', FAILURE_MESSAGES[code])
         return 1
     finally:
         if mode == '--run':
             atomic_json(STATE_DIR / 'state.json', state)
             save_attempt(STATE_DIR, state, finished=True)
             priority.complete_job(priority.PriorityMode.PI, state)
+
+
+DISK_READ_FAILURES = frozenset({BackupFailure.DISK_READ, BackupFailure.STAGE_UNREADABLE})
+
+
+def failure_code(exc):
+    """The dashboard code for a failed run: a discarded stage's, a disk read error, or None."""
+    if isinstance(exc, icloud_stage.StageRejected):
+        return exc.failure_code
+    if icloud_stage.disk_read_error(exc):
+        return BackupFailure.DISK_READ
+    return None
 
 
 def main():
