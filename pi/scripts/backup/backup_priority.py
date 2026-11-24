@@ -134,6 +134,28 @@ def complete_job(kind, state, directory=None):
             atomic_json(directory / 'priority.json', {**record, 'completed_at': verified})
 
 
+def replace_rejected_pi_generation(rejected, replacement):
+    """Retarget only an active override that still pins the rejected generation."""
+    if rejected == replacement:
+        return
+
+    def matches(record):
+        return (record and record['mode'] == PriorityMode.PI and record.get('completed_at') is None
+                and record['generation'] in (rejected, replacement))
+
+    if not matches(read_record(DIRECTORY)):
+        return
+    # Import locally: the clone module already ships in both cloud profiles.
+    from hotspare_rotation import sync_directory
+    with locked(DIRECTORY):
+        record = read_record(DIRECTORY)
+        if not matches(record):
+            return
+        if record['generation'] == rejected:
+            atomic_json(DIRECTORY / 'priority.json', {**record, 'generation': replacement})
+        sync_directory(DIRECTORY)
+
+
 def allows(kind, directory=None, jobs=None):
     accepted = ('disk', 'borg', 'exfat', 'clone', 'pi-cloud', 'time-machine',
                 'pi', 'local-borg', 'local-exfat')

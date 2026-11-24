@@ -48,8 +48,8 @@ class BackupFailure(str, Enum):
     PREREQUISITE = 'prerequisite'
     TRANSFER_STALLED = 'transfer_stalled'
     TRANSFER_INTERRUPTED = 'transfer_interrupted'
-    # The Pi worker's codes: a disk read error, and a staged copy it discarded.
-    DISK_READ = 'disk_read'
+    # The Pi worker distinguishes generic disk I/O from a rejected staged copy.
+    DISK_ERROR = 'disk_error'
     STAGE_UNREADABLE = 'stage_unreadable'
     STAGE_CHECK_FAILED = 'stage_check_failed'
 
@@ -64,7 +64,7 @@ FAILURE_MESSAGES = {
     BackupFailure.PREREQUISITE: 'A backup disk or prerequisite check failed; it will retry safely.',
     BackupFailure.TRANSFER_STALLED: 'The transfer stopped making progress; saved work will be reused on retry.',
     BackupFailure.TRANSFER_INTERRUPTED: 'The internet connection dropped during the transfer; saved work will be reused on retry.',
-    BackupFailure.DISK_READ: 'The backup disk returned a read error; check its SMART health. The copy will retry.',
+    BackupFailure.DISK_ERROR: 'The backup disk returned an I/O error; check its SMART health. The copy will retry.',
     BackupFailure.STAGE_UNREADABLE: ('The backup disk could not read part of the staged copy (a disk read error); '
                                      'it was discarded and will be copied again. Check the disk\'s SMART health.'),
     BackupFailure.STAGE_CHECK_FAILED: 'The staged copy failed its Borg check and was discarded; it will be copied again.',
@@ -356,11 +356,15 @@ def progress(state):
     return {key: number(raw.get(key)) for key in COUNTERS}
 
 
+def attempt_generation(state):
+    return generation(state.get('attempt_generation') or state.get('pending') or state.get('last_generation'))
+
+
 def attempt_row(state, ended_at=None):
     return {'id': state['attempt_id'], 'started_at': state['attempt_started_at'],
             'ended_at': ended_at, 'phase': phase(state.get('phase')),
             'work_phase': phase(state.get('work_phase', 'checking')),
-            'generation': generation(state.get('pending') or state.get('last_generation')),
+            'generation': attempt_generation(state),
             'message': reason(state), 'progress': progress(state),
             'verified_at': number(state.get('attempt_verified_at'))}
 
@@ -460,7 +464,7 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
         message = 'Paused: checking the uplink (since ' + time.strftime('%H:%M', time.localtime(hold['since'])) + ').'
     return {'available': True, 'running': live, 'phase': current_phase, 'stalled': stalled,
             'message': message, 'last_work_phase': phase(state.get('last_work_phase', 'checking')),
-            'generation': generation(state.get('pending') or state.get('last_generation')),
+            'generation': attempt_generation(state),
             'last_success_at': last_success, 'next_check_at': next_check_at,
             'next_due_at': last_success + interval * 86400 if last_success else None,
             'updated_at': updated, 'progress_stale': bool(live and hold is None and (not matching or updated is None or now - updated > 60)),
