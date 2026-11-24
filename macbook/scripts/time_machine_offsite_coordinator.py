@@ -14,7 +14,6 @@ import plistlib
 import pwd
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -28,10 +27,16 @@ REMOTE = '/home/pi/scripts/backup/time_machine_icloud.py'
 CONTROL_PATH = '~/.ssh/cm-tmoffsite-%C'
 # Must outlive the 120 s StartInterval so the next run reuses it.
 CONTROL_PERSIST = 300
-ALIVE_INTERVAL = 5
-ALIVE_COUNT_MAX = 2
+REQUEST_TIMEOUT = 30
+# The keepalive window must not cut short the REQUEST_TIMEOUT request deadline.
+ALIVE_INTERVAL = 10
+ALIVE_COUNT_MAX = 3
 TEARDOWN_TIMEOUT = 5
-MUX_BYPASSED = b'disabling multiplexing'
+# A frozen master reports "master hello exchange failed" followed by "disabling
+# multiplexing"; the latter alone also occurs in a harmless socket-creation race.
+MUX_HELLO_FAILED = b'master hello exchange failed'
+# Only these calls can be safely replayed after an ambiguous SSH failure.
+REPLAY_SAFE = frozenset({'--mac-present-v2', '--capture-request'})
 SSH_TRANSPORT_FAILURE = 255
 PI_SSH_HOST = 'pi@vanpi.lan'  # LAN-only by design.
 GENERATION = re.compile(r'tm-\d{8}T\d{6}Z-[0-9a-f]{8}\Z')
@@ -94,19 +99,21 @@ def ssh_prefix(user):
 
 
 def kill_master(user):
-    account = pwd.getpwnam(user)
-    title = re.compile(r'ssh: ' + re.escape(account.pw_dir + '/.ssh/cm-tmoffsite-') +
-                       r'[0-9a-f]{40} \[mux\]\Z')
-    result = subprocess.run(['/bin/ps', '-axo', 'pid=,uid=,args='],
-                            capture_output=True, timeout=TEARDOWN_TIMEOUT, check=True)
-    for line in result.stdout.decode('utf-8', errors='replace').splitlines():
-        fields = line.strip().split(None, 2)
-        if (len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit()
-                and int(fields[1]) == account.pw_uid and title.fullmatch(fields[2])):
-            try:
-                os.kill(int(fields[0]), signal.SIGKILL)
-            except OSError:
-                pass
+    sudo = ['/usr/bin/sudo', '-H', '-u', user]
+    result = subprocess.run([*sudo, '/usr/bin/ssh', '-G', '-o',
+                             'ControlPath=' + CONTROL_PATH, PI_SSH_HOST],
+                            capture_output=True, timeout=TEARDOWN_TIMEOUT)
+    if result.returncode:
+        return
+    for line in result.stdout.decode('utf-8', errors='strict').splitlines():
+        key, sep, path = line.partition(' ')
+        if key == 'controlpath' and sep and path and path != 'none':
+            title = 'ssh: ' + path + ' [mux]'
+            pattern = '^' + ''.join('\\' + c if c in '.[]()*+?{}|^$\\' else c
+                                    for c in title) + '$'
+            subprocess.run([*sudo, '/usr/bin/pkill', '-KILL', '-x', '-f', pattern],
+                           capture_output=True, timeout=TEARDOWN_TIMEOUT)
+            return
 
 
 def teardown(user):
@@ -126,27 +133,32 @@ def teardown(user):
 def remote(user, *args):
     # Fixed host/helper and strictly validated generation arguments, no shell payload.
     argv = [*ssh_prefix(user), PI_SSH_HOST, 'sudo', '-n', '/usr/bin/python3', REMOTE, *args]
-    try:
-        result = subprocess.run(argv, capture_output=True, timeout=30)
-    except subprocess.TimeoutExpired as exc:
+    deadline = time.monotonic() + REQUEST_TIMEOUT
+    timeout = REQUEST_TIMEOUT
+    for attempt in range(2):
         try:
-            teardown(user)
-        except Exception:
-            pass
-        exc.cmd = 'ssh'
-        raise
-    if result.returncode == SSH_TRANSPORT_FAILURE or MUX_BYPASSED in result.stderr:
-        try:
-            teardown(user)
-        except Exception:
-            pass
-    if result.returncode:
-        raise subprocess.CalledProcessError(result.returncode, 'ssh',
-                                            output=result.stdout, stderr=result.stderr)
-    try:
+            result = subprocess.run(argv, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            try:
+                teardown(user)
+            except Exception:
+                pass
+            exc.cmd = 'ssh'
+            raise
+        failed_master = (result.returncode == SSH_TRANSPORT_FAILURE or
+                         MUX_HELLO_FAILED in result.stderr)
+        if failed_master:
+            try:
+                teardown(user)
+            except Exception:
+                pass
+            timeout = deadline - time.monotonic()
+            if attempt == 0 and args and args[0] in REPLAY_SAFE and timeout >= 10:
+                continue
+        if result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, 'ssh',
+                                                output=result.stdout, stderr=result.stderr)
         return json.loads(result.stdout)
-    except ValueError:
-        raise ValueError('Invalid remote JSON') from None
 
 
 def matching_images(data, bundle):

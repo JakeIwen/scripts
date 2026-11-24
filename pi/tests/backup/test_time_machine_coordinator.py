@@ -33,7 +33,7 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(args[:5], ['/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/ssh'])
         for option in ('BatchMode=yes', 'ConnectTimeout=8', 'StrictHostKeyChecking=yes',
                        'ControlMaster=auto', 'ControlPath=~/.ssh/cm-tmoffsite-%C',
-                       'ControlPersist=300', 'ServerAliveInterval=5', 'ServerAliveCountMax=2'):
+                       'ControlPersist=300', 'ServerAliveInterval=10', 'ServerAliveCountMax=3'):
             self.assertIn(option, args)
         self.assertIn('pi@vanpi.lan', args)
         run.assert_called_once()
@@ -51,7 +51,7 @@ class RemoteTests(unittest.TestCase):
         with mock.patch.object(coordinator.subprocess, 'run',
                                side_effect=[self.result(255), self.result()]) as run:
             with self.assertRaises(subprocess.CalledProcessError):
-                coordinator.remote('test', '--capture-request')
+                coordinator.remote('test', '--capture-ready')
         self.assertEqual(run.call_count, 2)
         self.assertEqual(run.call_args.args[0][-3:], ['-O', 'exit', 'pi@vanpi.lan'])
         self.assertEqual(run.call_args.kwargs['timeout'], 5)
@@ -66,33 +66,70 @@ class RemoteTests(unittest.TestCase):
         self.assertNotIn('private-', str(caught.exception))
         self.assertEqual(run.call_count, 2)
 
-    def test_bypass_tears_down_on_success_and_failure(self):
+    def test_hello_failure_tears_down_but_collision_alone_does_not(self):
         for code in (0, 1):
             with self.subTest(code=code), mock.patch.object(coordinator.subprocess, 'run',
-                    side_effect=[self.result(code, stderr=b'disabling multiplexing'), self.result()]) as run:
+                    side_effect=[self.result(code, stderr=b'master hello exchange failed\n'
+                                             b'ControlSocket exists, disabling multiplexing'), self.result()]) as run:
                 if code:
                     with self.assertRaises(subprocess.CalledProcessError):
                         coordinator.remote('test')
                 else:
                     self.assertEqual(coordinator.remote('test'), {'ok': True})
                 self.assertEqual(run.call_count, 2)
+        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(
+                stderr=b'ControlSocket exists, disabling multiplexing')) as run:
+            self.assertEqual(coordinator.remote('test'), {'ok': True})
+        run.assert_called_once()
 
-    def test_frozen_master_kills_only_matching_user_and_title(self):
+    def test_frozen_master_kill_uses_exact_resolved_path_as_user(self):
         digest = 'a' * 40
-        ps = ('10 501 ssh: /Users/test/.ssh/cm-tmoffsite-' + digest + ' [mux]\n'
-              '11 502 ssh: /Users/test/.ssh/cm-tmoffsite-' + digest + ' [mux]\n'
-              '12 501 ssh: /other/.ssh/cm-tmoffsite-' + digest + ' [mux]\n'
-              '13 501 ssh: /Users/test/.ssh/cm-metered-' + digest + ' [mux]\n'
-              '14 501 ssh: /Users/test/.ssh/cm-tmoffsite-' + digest + ' [other]\n')
-        account = mock.Mock(pw_dir='/Users/test', pw_uid=501)
+        path = '/Users/test.name/.ssh/cm-tmoffsite-' + digest
         timeout = subprocess.TimeoutExpired('ssh', 5)
         with mock.patch.object(coordinator.subprocess, 'run', side_effect=[
-                self.result(255), timeout, self.result(stdout=ps.encode())]), \
-                mock.patch.object(coordinator.pwd, 'getpwnam', return_value=account), \
-                mock.patch.object(coordinator.os, 'kill') as kill:
+                self.result(255), timeout, self.result(stdout=('controlpath ' + path + '\n').encode()),
+                self.result()]) as run, mock.patch.object(coordinator.os, 'kill') as kill:
             with self.assertRaises(subprocess.CalledProcessError):
-                coordinator.remote('test')
-        kill.assert_called_once_with(10, coordinator.signal.SIGKILL)
+                coordinator.remote('test', '--capture-ready')
+        self.assertEqual(run.call_args_list[2].args[0], [
+            '/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/ssh', '-G', '-o',
+            'ControlPath=~/.ssh/cm-tmoffsite-%C', 'pi@vanpi.lan'])
+        command = run.call_args_list[3].args[0]
+        pattern = r'^ssh: /Users/test\.name/\.ssh/cm-tmoffsite-' + digest + r' \[mux\]$'
+        self.assertEqual(command, ['/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/pkill',
+                                   '-KILL', '-x', '-f', pattern])
+        import re
+        self.assertIsNone(re.fullmatch(pattern, 'ssh: ' + path[:-1] + 'b [mux]'))
+        kill.assert_not_called()
+
+    def test_unresolved_path_does_not_kill(self):
+        with mock.patch.object(coordinator.subprocess, 'run', side_effect=[
+                self.result(255), self.result(1), self.result(stdout=b'hostname vanpi.lan\n')]) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                coordinator.remote('test', '--capture-ready')
+        self.assertEqual(run.call_count, 3)
+
+    def test_safe_operation_retries_with_remaining_deadline(self):
+        for flag in ('--capture-request', '--mac-present-v2'):
+            with self.subTest(flag=flag), mock.patch.object(coordinator.time, 'monotonic',
+                    side_effect=[100, 109]), mock.patch.object(coordinator.subprocess, 'run',
+                    side_effect=[self.result(255), self.result(), self.result()]) as run:
+                self.assertEqual(coordinator.remote('test', flag), {'ok': True})
+                self.assertEqual(run.call_count, 3)
+                self.assertEqual(run.call_args.kwargs['timeout'], 21)
+
+    def test_safe_hello_failure_retries_but_not_below_ten_seconds(self):
+        with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 121]), \
+                mock.patch.object(coordinator.subprocess, 'run', side_effect=[
+                    self.result(stdout=b'{"first": true}', stderr=b'master hello exchange failed'),
+                    self.result()]) as run:
+            self.assertEqual(coordinator.remote('test', '--capture-request'), {'first': True})
+        self.assertEqual(run.call_count, 2)
+        with mock.patch.object(coordinator.time, 'monotonic', side_effect=[100, 110]), \
+                mock.patch.object(coordinator.subprocess, 'run', side_effect=[
+                    self.result(stderr=b'master hello exchange failed'), self.result(), self.result()]) as run:
+            self.assertEqual(coordinator.remote('test', '--capture-request'), {'ok': True})
+        self.assertEqual(run.call_args.kwargs['timeout'], 20)
 
     def test_teardown_error_does_not_mask_original(self):
         with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(255)), \
@@ -102,9 +139,11 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(caught.exception.returncode, 255)
 
     def test_invalid_json_does_not_leak_output(self):
-        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(stdout=b'\xffprivate')):
-            with self.assertRaises(ValueError) as caught:
-                coordinator.remote('test')
+        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(stdout=b'private invalid')):
+            with self.assertRaises(coordinator.StepFailure) as caught:
+                with coordinator.step('capture-request'):
+                    coordinator.remote('test')
+        self.assertIsInstance(caught.exception.cause, json.JSONDecodeError)
         self.assertNotIn('private', str(caught.exception))
 
 
