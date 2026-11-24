@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Close only the configured, idle Time Machine image for Pi offsite capture.
 
-Installed as a root LaunchDaemon; SSH still runs as the installing Mac user.
+Installed as a root LaunchDaemon; one persistent per-user SSH master avoids repeated logins.
 Stops a backup only for an explicit, expiring capture request. Never force-ejects,
 changes Time Machine scheduling/preferences or reads encryption keys.
 """
@@ -14,6 +14,7 @@ import plistlib
 import pwd
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -24,6 +25,15 @@ CONFIG = BASE / 'config.json'
 LABEL = 'com.jacobr.time-machine-offsite'
 PLIST = Path('/Library/LaunchDaemons') / (LABEL + '.plist')
 REMOTE = '/home/pi/scripts/backup/time_machine_icloud.py'
+CONTROL_PATH = '~/.ssh/cm-tmoffsite-%C'
+# Must outlive the 120 s StartInterval so the next run reuses it.
+CONTROL_PERSIST = 300
+ALIVE_INTERVAL = 5
+ALIVE_COUNT_MAX = 2
+TEARDOWN_TIMEOUT = 5
+MUX_BYPASSED = b'disabling multiplexing'
+SSH_TRANSPORT_FAILURE = 255
+PI_SSH_HOST = 'pi@vanpi.lan'  # LAN-only by design.
 GENERATION = re.compile(r'tm-\d{8}T\d{6}Z-[0-9a-f]{8}\Z')
 PI_HOSTS = ('vanpi._smb._tcp.local.', 'vanpi.lan', 'vanpi.local', '192.168.6.103')
 TMUTIL = '/usr/bin/tmutil'
@@ -74,11 +84,69 @@ def command(args, timeout=30):
     return subprocess.run(args, capture_output=True, timeout=timeout, check=True).stdout
 
 
+def ssh_prefix(user):
+    return ['/usr/bin/sudo', '-H', '-u', user, '/usr/bin/ssh',
+            '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=yes',
+            '-o', 'ControlMaster=auto', '-o', 'ControlPath=' + CONTROL_PATH,
+            '-o', 'ControlPersist=' + str(CONTROL_PERSIST),
+            '-o', 'ServerAliveInterval=' + str(ALIVE_INTERVAL),
+            '-o', 'ServerAliveCountMax=' + str(ALIVE_COUNT_MAX)]
+
+
+def kill_master(user):
+    account = pwd.getpwnam(user)
+    title = re.compile(r'ssh: ' + re.escape(account.pw_dir + '/.ssh/cm-tmoffsite-') +
+                       r'[0-9a-f]{40} \[mux\]\Z')
+    result = subprocess.run(['/bin/ps', '-axo', 'pid=,uid=,args='],
+                            capture_output=True, timeout=TEARDOWN_TIMEOUT, check=True)
+    for line in result.stdout.decode('utf-8', errors='replace').splitlines():
+        fields = line.strip().split(None, 2)
+        if (len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit()
+                and int(fields[1]) == account.pw_uid and title.fullmatch(fields[2])):
+            try:
+                os.kill(int(fields[0]), signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def teardown(user):
+    try:
+        result = subprocess.run([*ssh_prefix(user), '-O', 'exit', PI_SSH_HOST],
+                                capture_output=True, timeout=TEARDOWN_TIMEOUT)
+        if result.returncode == 0:
+            return
+    except Exception:
+        pass
+    try:
+        kill_master(user)
+    except Exception:
+        pass
+
+
 def remote(user, *args):
     # Fixed host/helper and strictly validated generation arguments, no shell payload.
-    return json.loads(command(['/usr/bin/sudo', '-H', '-u', user, '/usr/bin/ssh',
-        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=yes',
-        'pi@vanpi.lan', 'sudo', '-n', '/usr/bin/python3', REMOTE, *args]))
+    argv = [*ssh_prefix(user), PI_SSH_HOST, 'sudo', '-n', '/usr/bin/python3', REMOTE, *args]
+    try:
+        result = subprocess.run(argv, capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            teardown(user)
+        except Exception:
+            pass
+        exc.cmd = 'ssh'
+        raise
+    if result.returncode == SSH_TRANSPORT_FAILURE or MUX_BYPASSED in result.stderr:
+        try:
+            teardown(user)
+        except Exception:
+            pass
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, 'ssh',
+                                            output=result.stdout, stderr=result.stderr)
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        raise ValueError('Invalid remote JSON') from None
 
 
 def matching_images(data, bundle):

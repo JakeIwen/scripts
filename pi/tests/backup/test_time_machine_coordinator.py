@@ -21,6 +21,93 @@ SNAPSHOT = '/Volumes/.timemachine/destination/2026-09-21-035400.backup/2026-09-2
 PRIMARY = '/Volumes/Backups of Test Mac'
 
 
+class RemoteTests(unittest.TestCase):
+    @staticmethod
+    def result(code=0, stdout=b'{"ok": true}', stderr=b''):
+        return subprocess.CompletedProcess('ssh', code, stdout, stderr)
+
+    def test_success_uses_private_master(self):
+        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result()) as run:
+            self.assertEqual(coordinator.remote('test', '--capture-request'), {'ok': True})
+        args = run.call_args.args[0]
+        self.assertEqual(args[:5], ['/usr/bin/sudo', '-H', '-u', 'test', '/usr/bin/ssh'])
+        for option in ('BatchMode=yes', 'ConnectTimeout=8', 'StrictHostKeyChecking=yes',
+                       'ControlMaster=auto', 'ControlPath=~/.ssh/cm-tmoffsite-%C',
+                       'ControlPersist=300', 'ServerAliveInterval=5', 'ServerAliveCountMax=2'):
+            self.assertIn(option, args)
+        self.assertIn('pi@vanpi.lan', args)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs['timeout'], 30)
+
+    def test_helper_failure_has_no_teardown_or_private_exception_text(self):
+        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(
+                1, b'private-output', b'private-stderr')) as run:
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                coordinator.remote('private-user', 'private-command')
+        run.assert_called_once()
+        self.assertNotIn('private-', str(caught.exception))
+
+    def test_transport_failure_tears_down(self):
+        with mock.patch.object(coordinator.subprocess, 'run',
+                               side_effect=[self.result(255), self.result()]) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                coordinator.remote('test', '--capture-request')
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.args[0][-3:], ['-O', 'exit', 'pi@vanpi.lan'])
+        self.assertEqual(run.call_args.kwargs['timeout'], 5)
+
+    def test_timeout_tears_down_and_sanitizes_exception(self):
+        error = subprocess.TimeoutExpired(['private-command'], 30, output=b'private-output',
+                                          stderr=b'private-stderr')
+        with mock.patch.object(coordinator.subprocess, 'run', side_effect=[error, self.result()]) as run:
+            with self.assertRaises(subprocess.TimeoutExpired) as caught:
+                coordinator.remote('test', '--capture-request')
+        self.assertIs(caught.exception, error)
+        self.assertNotIn('private-', str(caught.exception))
+        self.assertEqual(run.call_count, 2)
+
+    def test_bypass_tears_down_on_success_and_failure(self):
+        for code in (0, 1):
+            with self.subTest(code=code), mock.patch.object(coordinator.subprocess, 'run',
+                    side_effect=[self.result(code, stderr=b'disabling multiplexing'), self.result()]) as run:
+                if code:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        coordinator.remote('test')
+                else:
+                    self.assertEqual(coordinator.remote('test'), {'ok': True})
+                self.assertEqual(run.call_count, 2)
+
+    def test_frozen_master_kills_only_matching_user_and_title(self):
+        digest = 'a' * 40
+        ps = ('10 501 ssh: /Users/test/.ssh/cm-tmoffsite-' + digest + ' [mux]\n'
+              '11 502 ssh: /Users/test/.ssh/cm-tmoffsite-' + digest + ' [mux]\n'
+              '12 501 ssh: /other/.ssh/cm-tmoffsite-' + digest + ' [mux]\n'
+              '13 501 ssh: /Users/test/.ssh/cm-metered-' + digest + ' [mux]\n'
+              '14 501 ssh: /Users/test/.ssh/cm-tmoffsite-' + digest + ' [other]\n')
+        account = mock.Mock(pw_dir='/Users/test', pw_uid=501)
+        timeout = subprocess.TimeoutExpired('ssh', 5)
+        with mock.patch.object(coordinator.subprocess, 'run', side_effect=[
+                self.result(255), timeout, self.result(stdout=ps.encode())]), \
+                mock.patch.object(coordinator.pwd, 'getpwnam', return_value=account), \
+                mock.patch.object(coordinator.os, 'kill') as kill:
+            with self.assertRaises(subprocess.CalledProcessError):
+                coordinator.remote('test')
+        kill.assert_called_once_with(10, coordinator.signal.SIGKILL)
+
+    def test_teardown_error_does_not_mask_original(self):
+        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(255)), \
+                mock.patch.object(coordinator, 'teardown', side_effect=RuntimeError('private')):
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                coordinator.remote('test')
+        self.assertEqual(caught.exception.returncode, 255)
+
+    def test_invalid_json_does_not_leak_output(self):
+        with mock.patch.object(coordinator.subprocess, 'run', return_value=self.result(stdout=b'\xffprivate')):
+            with self.assertRaises(ValueError) as caught:
+                coordinator.remote('test')
+        self.assertNotIn('private', str(caught.exception))
+
+
 class CoordinatorTests(unittest.TestCase):
     def setUp(self):
         self.request = {
